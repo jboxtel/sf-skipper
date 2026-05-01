@@ -13,6 +13,7 @@
   var scopedObject = null;
   var objectPickerFilter = '';
   var flowPickerFilter = '';
+  var soqlInFlight = false;
 
   function injectPalette() {
     if (document.getElementById('sfnav-overlay')) return;
@@ -169,6 +170,7 @@
   }
 
   async function runSoqlGeneration() {
+    if (soqlInFlight) return;
     var input = document.getElementById('sfnav-input');
     var prompt = input.value.trim();
     if (!prompt) return;
@@ -187,6 +189,8 @@
       return;
     }
 
+    soqlInFlight = true;
+    input.disabled = true;
     statusEl.textContent = 'Generating…';
     statusEl.className = 'sfnav-soql-status-loading';
     outputEl.textContent = '';
@@ -204,6 +208,10 @@
       statusEl.className = 'sfnav-soql-status-error';
       actionsEl.style.display = 'none';
       console.warn('sfnav: SOQL generation failed —', err);
+    } finally {
+      soqlInFlight = false;
+      input.disabled = false;
+      input.focus();
     }
   }
 
@@ -355,58 +363,7 @@
     setSelection(next);
   }
 
-  function showImportPanel() {
-    document.getElementById('sfnav-input').style.display = 'none';
-    document.getElementById('sfnav-hint').style.display = 'none';
-    document.getElementById('sfnav-results').style.display = 'none';
-    document.getElementById('sfnav-breadcrumb').style.display = 'none';
-    document.getElementById('sfnav-import').style.display = 'block';
-    document.getElementById('sfnav-paste-area').value = '';
-    document.getElementById('sfnav-paste-area').focus();
-
-    document.getElementById('sfnav-copy-apex').onclick = function () {
-      navigator.clipboard.writeText(APEX_SNIPPET).then(function () {
-        document.getElementById('sfnav-copy-apex').textContent = 'Copied!';
-        setTimeout(function () {
-          document.getElementById('sfnav-copy-apex').textContent = 'Copy Apex';
-        }, 1500);
-      });
-    };
-
-    document.getElementById('sfnav-import-cancel').onclick = hideImportPanel;
-
-    document.getElementById('sfnav-import-btn').onclick = function () {
-      var text = document.getElementById('sfnav-paste-area').value;
-      var statusEl = document.getElementById('sfnav-import-btn');
-      try {
-        var count = importObjectsFromJson(text);
-        hideImportPanel();
-        var input = document.getElementById('sfnav-input');
-        input.value = '';
-        renderResults(resolveInput(''));
-        document.getElementById('sfnav-hint').textContent = '✓ Imported ' + count + ' objects — type to search them';
-      } catch (err) {
-        statusEl.textContent = 'Error — check console';
-        console.warn('sfnav import error:', err.message);
-        setTimeout(function () { statusEl.textContent = 'Import'; }, 2000);
-      }
-    };
-  }
-
-  function hideImportPanel() {
-    document.getElementById('sfnav-import').style.display = 'none';
-    document.getElementById('sfnav-input').style.display = '';
-    document.getElementById('sfnav-hint').style.display = '';
-    document.getElementById('sfnav-results').style.display = '';
-    document.getElementById('sfnav-input').focus();
-  }
-
   function navigateTo(url, result) {
-    if (result && result.type === 'action' && result.action === 'load-objects') {
-      showImportPanel();
-      return;
-    }
-
     if (result && result.type === 'action' && result.action === 'soql-generator') {
       enterSoqlMode();
       return;

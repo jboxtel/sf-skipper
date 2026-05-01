@@ -50,19 +50,9 @@ async function fetchDescribe(apiName) {
     return cached.fields;
   }
 
-  var apiBase = getApiBase();
-  var apiHost = apiBase.replace(/^https?:\/\//, '');
-  var sid = await getSessionFromBackground(apiHost);
-  var headers = { 'Accept': 'application/json' };
-  if (sid) headers['Authorization'] = 'Bearer ' + sid;
+  var pre = await sfRestPreamble();
 
-  var versionsResp = await fetch(apiBase + '/services/data/', { headers: headers });
-  if (!versionsResp.ok) throw new Error('Version probe failed: ' + versionsResp.status);
-  var versions = await versionsResp.json();
-  var latest = versions[versions.length - 1];
-  var basePath = (latest && latest.url) ? latest.url.replace(/\/$/, '') : '/services/data/v' + (latest && latest.version);
-
-  var resp = await fetch(apiBase + basePath + '/sobjects/' + encodeURIComponent(apiName) + '/describe', { headers: headers });
+  var resp = await fetch(pre.apiBase + pre.basePath + '/sobjects/' + encodeURIComponent(apiName) + '/describe', { headers: pre.headers });
   if (!resp.ok) throw new Error('describe failed: ' + resp.status);
   var data = await resp.json();
 

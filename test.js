@@ -34,8 +34,9 @@ async function injectExtension(page) {
   // Inject CSS
   await page.addStyleTag({ path: path.join(EXT, 'content.css') });
 
-  // Inject scripts as script tags so const/let declarations are shared across all of them
-  for (const file of ['objects.js', 'salesforce-urls.js', 'commands.js']) {
+  // Inject scripts as script tags so const/let declarations are shared across all of them.
+  // Order matters: salesforce-urls (getApiBase) → shared (sfRestPreamble) → objects/commands.
+  for (const file of ['salesforce-urls.js', 'shared.js', 'objects.js', 'commands.js']) {
     await page.addScriptTag({ path: path.join(EXT, file) });
   }
 
@@ -47,6 +48,17 @@ async function injectExtension(page) {
         runtime: {},
         storage: { local: { get: (_k, cb) => cb({}), set: () => {} } }
       };
+      // flows.js / soql.js aren't injected — stub the functions content.js calls
+      window.initFlows = () => {};
+      window.getAllFlows = () => [];
+      window.getFlowsState = () => 'idle';
+      window.getFlowsError = () => '';
+      window.resolveFlowPicker = () => ({ mode: 'flow-picker', results: [], hint: '' });
+      window.hasSoqlApiKey = () => Promise.resolve(false);
+      window.openSoqlSettings = () => {};
+      window.generateSoql = () => Promise.reject(new Error('not stubbed'));
+      window.getSoqlHistory = () => Promise.resolve([]);
+      window.addToSoqlHistory = () => Promise.resolve();
       // Mock fetch so @load returns 2 test custom objects
       window.fetch = (url) => {
         if (url === '/services/data/') {

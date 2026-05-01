@@ -74,40 +74,12 @@ function persistCache() {
   }
 }
 
-// Ask background.js for the `sid` cookie of the API host. Returns null in
-// non-extension contexts (tests).
-function getSessionFromBackground(sfHost) {
-  return new Promise(function (resolve) {
-    if (typeof chrome === 'undefined' || !chrome.runtime || !chrome.runtime.sendMessage) {
-      resolve(null);
-      return;
-    }
-    try {
-      chrome.runtime.sendMessage({ type: 'getSession', sfHost: sfHost }, function (resp) {
-        if (chrome.runtime.lastError) { resolve(null); return; }
-        resolve(resp && resp.sid ? resp.sid : null);
-      });
-    } catch (_) { resolve(null); }
-  });
-}
-
 // Pull every sObject (standard + custom) from the org's REST API and merge
 // into the cache. No copy/paste required.
 async function loadObjectsFromPage() {
-  var apiBase = getApiBase();
-  var apiHost = apiBase.replace(/^https?:\/\//, '');
-  var sid = await getSessionFromBackground(apiHost);
-  var headers = { 'Accept': 'application/json' };
-  if (sid) headers['Authorization'] = 'Bearer ' + sid;
+  var pre = await sfRestPreamble();
 
-  var versionsResp = await fetch(apiBase + '/services/data/', { headers: headers });
-  if (!versionsResp.ok) throw new Error('Version probe failed: ' + versionsResp.status);
-  var versions = await versionsResp.json();
-  var latest = versions[versions.length - 1];
-  // The .url field is canonical (e.g. "/services/data/v60.0"), .version is just "60.0".
-  var basePath = (latest && latest.url) ? latest.url.replace(/\/$/, '') : '/services/data/v' + (latest && latest.version);
-
-  var sobjResp = await fetch(apiBase + basePath + '/sobjects/', { headers: headers });
+  var sobjResp = await fetch(pre.apiBase + pre.basePath + '/sobjects/', { headers: pre.headers });
   if (!sobjResp.ok) throw new Error('describeGlobal failed: ' + sobjResp.status);
   var data = await sobjResp.json();
 

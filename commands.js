@@ -160,15 +160,6 @@ function resolveInput(rawInput) {
     };
   }
 
-  // "@load" — scrape & cache custom objects from the current page
-  if (input.toLowerCase() === 'load') {
-    return {
-      mode: 'action',
-      results: [LOAD_ACTION],
-      hint: 'Press Enter while on the Object Manager page to load all objects',
-    };
-  }
-
   // "@flows" — hint to press Enter
   if (input.toLowerCase() === 'flows' || input.toLowerCase() === 'flow') {
     return {
