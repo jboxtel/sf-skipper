@@ -3,6 +3,8 @@
 // identify what went wrong and how to fix it.
 
 var FLOW_DEBUG_MAX_COMPACT = 8000; // compact metadata is truncated past this size
+var _flowMetadataCache = {}; // flowId → { record, ts }
+var FLOW_METADATA_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 function isFlowBuilderPage() {
   return window.location.pathname.indexOf('/builder_platform_interaction/flowBuilder.app') !== -1
@@ -19,6 +21,10 @@ function getFlowIdFromUrl() {
 }
 
 async function fetchFlowMetadata(flowId) {
+  var cached = _flowMetadataCache[flowId];
+  if (cached && (Date.now() - cached.ts) < FLOW_METADATA_TTL_MS) {
+    return cached.record;
+  }
   var pre = await sfRestPreamble();
   var soql = "SELECT Id, DefinitionId, MasterLabel, Metadata FROM Flow WHERE Id = '" + flowId.replace(/'/g, "\\'") + "'";
   var url = pre.apiBase + pre.basePath + '/tooling/query/?q=' + encodeURIComponent(soql);
@@ -34,6 +40,7 @@ async function fetchFlowMetadata(flowId) {
   if (!data.records || !data.records.length) {
     throw new Error('Flow not found for id ' + flowId);
   }
+  _flowMetadataCache[flowId] = { record: data.records[0], ts: Date.now() };
   return data.records[0];
 }
 

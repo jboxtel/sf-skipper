@@ -43,7 +43,7 @@
           '<textarea id="sfnav-flowdebug-debug" placeholder="Paste the Debug panel output here…" spellcheck="false"></textarea>' +
           '<input id="sfnav-flowdebug-expectation" type="text" placeholder="Optional: what did you expect to happen?" autocomplete="off" />' +
           '<div id="sfnav-flowdebug-actions">' +
-            '<button id="sfnav-flowdebug-run" class="sfnav-soql-btn-primary">Analyze</button>' +
+            '<button id="sfnav-flowdebug-run" class="sfnav-soql-btn-primary">Analyze <span class="sfnav-kbd">⌘↵</span></button>' +
             '<button id="sfnav-flowdebug-settings" class="sfnav-soql-btn-secondary">Settings</button>' +
             '<span class="sfnav-flowdebug-privacy">Flow + debug output sent to Anthropic</span>' +
           '</div>' +
@@ -55,7 +55,7 @@
             '<div class="sfnav-flowdebug-section sfnav-flowdebug-path"><span class="sfnav-flowdebug-label">Execution path</span><ol class="sfnav-flowdebug-body"></ol></div>' +
           '</div>' +
         '</div>' +
-        '<div id="sfnav-footer"><span id="sfnav-brand">⌘ Salesforce Commander</span><span>↑↓ navigate &nbsp; ↵ Tab select &nbsp; ⌫ back &nbsp; Esc close</span></div>' +
+        '<div id="sfnav-footer"><span id="sfnav-brand">⌘ Salesforce Commander</span><span id="sfnav-footer-hints"></span></div>' +
       '</div>';
 
     document.body.appendChild(overlay);
@@ -159,6 +159,7 @@
 
   function enterSoqlMode() {
     searchMode = 'soql';
+    setFooterHints('soql');
     var input = document.getElementById('sfnav-input');
     input.value = '';
     input.placeholder = 'Describe what to query — e.g. all open cases assigned to me';
@@ -285,11 +286,12 @@
 
   function enterFlowDebugMode() {
     searchMode = 'flow-debug';
+    setFooterHints('flow-debug');
     var input = document.getElementById('sfnav-input');
     var flowId = (typeof getFlowIdFromUrl === 'function') ? getFlowIdFromUrl() : null;
 
     input.value = '';
-    input.placeholder = flowId ? 'Press Enter (in the textarea) to analyze' : 'Open a flow first to use this';
+    input.placeholder = flowId ? 'Paste the Debug panel output below, then press ⌘↵' : 'Open a flow first to use this';
     document.getElementById('sfnav-results').style.display = 'none';
     document.getElementById('sfnav-hint').textContent = '';
     document.getElementById('sfnav-breadcrumb').innerHTML =
@@ -306,16 +308,35 @@
     if (!flowId) {
       metaEl.innerHTML = '<em class="sfnav-flowdebug-warn">No flow detected on this page. Open a flow in the Flow Builder, then try again.</em>';
     } else {
-      metaEl.textContent = 'Flow id: ' + flowId;
+      metaEl.textContent = 'Loading flow…';
+      fetchFlowMetadata(flowId)
+        .then(function (record) {
+          // Only update if user is still in flow-debug mode for this flow
+          if (searchMode !== 'flow-debug') return;
+          metaEl.textContent = 'Flow: ' + (record.MasterLabel || flowId);
+        })
+        .catch(function (err) {
+          if (searchMode !== 'flow-debug') return;
+          metaEl.innerHTML = '<em class="sfnav-flowdebug-warn">Could not load flow: ' + esc(err.message) + '</em>';
+        });
     }
 
     document.getElementById('sfnav-flowdebug-run').onclick = runFlowDebugAnalysis;
     document.getElementById('sfnav-flowdebug-settings').onclick = function () { openSoqlSettings(); };
 
-    // Submit on Cmd/Ctrl+Enter from inside the textarea
+    // Submit on Cmd/Ctrl+Enter from inside the textarea (plain Enter keeps newline)
     var debugEl = document.getElementById('sfnav-flowdebug-debug');
     debugEl.addEventListener('keydown', function (e) {
       if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+        e.preventDefault();
+        runFlowDebugAnalysis();
+      }
+    });
+
+    // Plain Enter from the expectation field submits (it's a single-line input)
+    var expEl = document.getElementById('sfnav-flowdebug-expectation');
+    expEl.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') {
         e.preventDefault();
         runFlowDebugAnalysis();
       }
@@ -383,22 +404,43 @@
 
   function renderFlowDebugResult(result) {
     var outputEl = document.getElementById('sfnav-flowdebug-output');
-    var summaryBody = outputEl.querySelector('.sfnav-flowdebug-summary .sfnav-flowdebug-body');
-    var causeBody   = outputEl.querySelector('.sfnav-flowdebug-cause .sfnav-flowdebug-body');
-    var fixBody     = outputEl.querySelector('.sfnav-flowdebug-fix .sfnav-flowdebug-body');
-    var pathBody    = outputEl.querySelector('.sfnav-flowdebug-path .sfnav-flowdebug-body');
-    var copyBtn     = outputEl.querySelector('.sfnav-flowdebug-copy');
+    var summarySec = outputEl.querySelector('.sfnav-flowdebug-summary');
+    var causeSec   = outputEl.querySelector('.sfnav-flowdebug-cause');
+    var fixSec     = outputEl.querySelector('.sfnav-flowdebug-fix');
+    var pathSec    = outputEl.querySelector('.sfnav-flowdebug-path');
+    var summaryBody = summarySec.querySelector('.sfnav-flowdebug-body');
+    var causeBody   = causeSec.querySelector('.sfnav-flowdebug-body');
+    var fixBody     = fixSec.querySelector('.sfnav-flowdebug-body');
+    var pathBody    = pathSec.querySelector('.sfnav-flowdebug-body');
+    var copyBtn     = fixSec.querySelector('.sfnav-flowdebug-copy');
 
-    summaryBody.textContent = result.summary || '';
-    causeBody.textContent   = result.rootCause || '';
-    fixBody.textContent     = result.fix || '';
+    function setSection(sec, body, value) {
+      var v = (value || '').trim();
+      if (v) {
+        body.textContent = v;
+        sec.style.display = '';
+      } else {
+        body.textContent = '';
+        sec.style.display = 'none';
+      }
+    }
+
+    setSection(summarySec, summaryBody, result.summary);
+    setSection(causeSec,   causeBody,   result.rootCause);
+    setSection(fixSec,     fixBody,     result.fix);
 
     pathBody.innerHTML = '';
-    (result.path || []).forEach(function (step) {
-      var li = document.createElement('li');
-      li.textContent = step;
-      pathBody.appendChild(li);
-    });
+    var path = Array.isArray(result.path) ? result.path : [];
+    if (path.length) {
+      path.forEach(function (step) {
+        var li = document.createElement('li');
+        li.textContent = step;
+        pathBody.appendChild(li);
+      });
+      pathSec.style.display = '';
+    } else {
+      pathSec.style.display = 'none';
+    }
 
     copyBtn.onclick = function () {
       navigator.clipboard.writeText(result.fix || '').then(function () {
@@ -425,6 +467,7 @@
     input.placeholder = 'Type @ to start — e.g. @account';
     hideSoqlPanel();
     renderResults(resolveInput(''));
+    setFooterHints('root');
     input.focus();
   }
 
@@ -543,6 +586,23 @@
   function navigateToSelected() {
     if (selectedIndex < 0 || selectedIndex >= currentResults.length) return;
     navigateTo(currentResults[selectedIndex].url, currentResults[selectedIndex]);
+  }
+
+  function setFooterHints(mode) {
+    var el = document.getElementById('sfnav-footer-hints');
+    if (!el) return;
+    var hints;
+    switch (mode) {
+      case 'soql':
+        hints = '↵ generate   Esc close';
+        break;
+      case 'flow-debug':
+        hints = '⌘↵ analyze   Esc close';
+        break;
+      default:
+        hints = '↑↓ navigate   ↵ select   ⌫ back   Esc close';
+    }
+    el.innerHTML = hints;
   }
 
   function esc(s) {

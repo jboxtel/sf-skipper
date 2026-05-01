@@ -443,3 +443,14 @@ ol.sfnav-flowdebug-body li {
   background: #2e844a;
   color: #fff;
 }
+
+.sfnav-kbd {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 5px;
+  font-size: 10px;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.22);
+  border-radius: 3px;
+  letter-spacing: 0.5px;
+}
