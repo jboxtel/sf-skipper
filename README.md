@@ -8,7 +8,7 @@ A keyboard-first command palette for Salesforce. Press `⌘⇧K` (Mac) or `Ctrl+
 
 Salesforce Setup is powerful but slow to navigate. Finding a specific validation rule on a custom object can take five clicks and three page loads. Salesforce Commander turns that into two keystrokes:
 
-- `⌘⇧K`, type `claim val`, Enter → you're on **Validation Rules** for `Claim__c`.
+- `⌘⇧K`, type `account val`, Enter → you're on **Validation Rules** for **Account**.
 - `⌘⇧K`, type `permission set`, Enter → you're on the Permission Sets list.
 - `⌘⇧K`, type `soql`, Enter, "all open cases assigned to me this week" → you have a working SOQL query in the clipboard.
 
