@@ -230,10 +230,8 @@ function buildFlowDebugSystemPrompt() {
     '"1. Open the \'<Element Name>\' Decision element. 2. Click \'+ New Outcome\'. 3. Label it \'<name>\'. 4. Set Resource = {!$Record.Industry}, Operator = Is Null, Value = {!$GlobalConstant.False}. 5. Connect this Outcome to \'<Next Element Name>\'."',
     'Reference real element names from the flow structure provided — do not invent names.',
     '',
-    'PATH — list the actual element names traversed during the debug run (from Start to the failure or end), as they appear in the flow structure.',
-    '',
     'Reply with ONLY a JSON object on a single line, no prose, no code fences:',
-    '{"summary":"one short sentence","rootCause":"the specific Flow Builder element and condition that caused the issue","fix":"numbered Flow Builder steps","path":["element1","element2","..."]}'
+    '{"summary":"one short sentence describing what happened","rootCause":"the specific Flow Builder element and condition that caused the issue","fix":"numbered Flow Builder steps"}'
   ].join('\n');
 }
 
@@ -279,8 +277,7 @@ function parseFlowDebugResponse(text) {
   var json = cleaned.slice(start, end + 1);
   try {
     var obj = JSON.parse(json);
-    if (!obj.summary && !obj.rootCause) throw new Error('Response missing required fields');
-    if (!Array.isArray(obj.path)) obj.path = [];
+    if (!obj.summary && !obj.rootCause && !obj.fix) throw new Error('Response missing required fields');
     return obj;
   } catch (e) {
     throw new Error('Invalid JSON in response: ' + e.message);

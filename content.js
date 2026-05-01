@@ -52,7 +52,6 @@
             '<div class="sfnav-flowdebug-section sfnav-flowdebug-summary"><span class="sfnav-flowdebug-label">Summary</span><div class="sfnav-flowdebug-body"></div></div>' +
             '<div class="sfnav-flowdebug-section sfnav-flowdebug-cause"><span class="sfnav-flowdebug-label">Root cause</span><div class="sfnav-flowdebug-body"></div></div>' +
             '<div class="sfnav-flowdebug-section sfnav-flowdebug-fix"><span class="sfnav-flowdebug-label">Suggested fix</span><div class="sfnav-flowdebug-body"></div><button class="sfnav-flowdebug-copy">Copy fix</button></div>' +
-            '<div class="sfnav-flowdebug-section sfnav-flowdebug-path"><span class="sfnav-flowdebug-label">Execution path</span><ol class="sfnav-flowdebug-body"></ol></div>' +
           '</div>' +
         '</div>' +
         '<div id="sfnav-footer"><span id="sfnav-brand">⌘ Salesforce Commander</span><span id="sfnav-footer-hints"></span></div>' +
@@ -407,11 +406,9 @@
     var summarySec = outputEl.querySelector('.sfnav-flowdebug-summary');
     var causeSec   = outputEl.querySelector('.sfnav-flowdebug-cause');
     var fixSec     = outputEl.querySelector('.sfnav-flowdebug-fix');
-    var pathSec    = outputEl.querySelector('.sfnav-flowdebug-path');
     var summaryBody = summarySec.querySelector('.sfnav-flowdebug-body');
     var causeBody   = causeSec.querySelector('.sfnav-flowdebug-body');
     var fixBody     = fixSec.querySelector('.sfnav-flowdebug-body');
-    var pathBody    = pathSec.querySelector('.sfnav-flowdebug-body');
     var copyBtn     = fixSec.querySelector('.sfnav-flowdebug-copy');
 
     function setSection(sec, body, value) {
@@ -428,19 +425,6 @@
     setSection(summarySec, summaryBody, result.summary);
     setSection(causeSec,   causeBody,   result.rootCause);
     setSection(fixSec,     fixBody,     result.fix);
-
-    pathBody.innerHTML = '';
-    var path = Array.isArray(result.path) ? result.path : [];
-    if (path.length) {
-      path.forEach(function (step) {
-        var li = document.createElement('li');
-        li.textContent = step;
-        pathBody.appendChild(li);
-      });
-      pathSec.style.display = '';
-    } else {
-      pathSec.style.display = 'none';
-    }
 
     copyBtn.onclick = function () {
       navigator.clipboard.writeText(result.fix || '').then(function () {

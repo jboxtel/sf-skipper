@@ -395,7 +395,6 @@
 .sfnav-flowdebug-summary { border-left-color: #9faab5; }
 .sfnav-flowdebug-cause   { border-left-color: #c23934; background: #fdf3f2; }
 .sfnav-flowdebug-fix     { border-left-color: #2e844a; background: #f1f9f3; }
-.sfnav-flowdebug-path    { border-left-color: #0070d2; }
 
 .sfnav-flowdebug-label {
   display: block;
@@ -412,17 +411,6 @@
   color: #16325c;
   line-height: 1.45;
   white-space: pre-wrap;
-}
-
-ol.sfnav-flowdebug-body {
-  margin: 0;
-  padding-left: 18px;
-  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
-  font-size: 11px;
-}
-
-ol.sfnav-flowdebug-body li {
-  margin: 2px 0;
 }
 
 .sfnav-flowdebug-copy {
