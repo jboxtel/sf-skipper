@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Salesforce Commander — Settings</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Salesforce Commander</h1>
+      <p class="subtitle">Settings</p>
+
+      <section>
+        <h2>SOQL Generator</h2>
+        <p class="desc">
+          Generates SOQL from natural language using the Anthropic Claude API.
+          Your key is stored locally in this browser only.
+        </p>
+
+        <label for="apiKey">Anthropic API Key</label>
+        <input id="apiKey" type="password" placeholder="sk-ant-..." autocomplete="off" spellcheck="false" />
+
+        <label for="model">Model</label>
+        <select id="model">
+          <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5 (fast, recommended)</option>
+          <option value="claude-sonnet-4-6">Claude Sonnet 4.6 (more accurate)</option>
+          <option value="claude-opus-4-7">Claude Opus 4.7 (most accurate)</option>
+        </select>
+      </section>
+
+      <div class="actions">
+        <button id="save" class="primary">Save</button>
+        <button id="test" class="secondary">Test connection</button>
+        <span id="status"></span>
+      </div>
+    </main>
+    <script src="options.js"></script>
+  </body>
+</html>
