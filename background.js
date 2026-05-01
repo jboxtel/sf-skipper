@@ -129,7 +129,7 @@ chrome.commands.onCommand.addListener(async (command, tab) => {
     await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       world: 'ISOLATED',
-      files: ['salesforce-urls.js', 'shared.js', 'objects.js', 'flows.js', 'commands.js', 'soql.js', 'content.js'],
+      files: ['salesforce-urls.js', 'shared.js', 'objects.js', 'flows.js', 'flow-debug.js', 'commands.js', 'soql.js', 'content.js'],
     });
     await new Promise(r => setTimeout(r, 80));
     await chrome.scripting.executeScript({

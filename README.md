@@ -21,6 +21,7 @@ No backend. No subscriptions. Your Salesforce session and (optionally) your Anth
 - **Flow picker** — Browse every active and inactive flow with one keystroke.
 - **SOQL Generator** — Describe what you want; get a `SELECT` query that uses real field names from the object's describe (no hallucinated fields). The query is copied to your clipboard — execution stays in your hands.
 - **Recent SOQL history** — Your last 10 generated queries are saved locally for quick re-use.
+- **Flow Debug Assistant** — Open a flow in the Flow Builder, run a debug session, paste the Debug-panel output into Commander, and Claude tells you which path the flow took, what went wrong, and how to fix it.
 - **Works in production and sandboxes** — `*.lightning.force.com`, `*.my.salesforce.com`, `*.salesforce-setup.com`, and `*.force.com`.
 
 ## Install (developer mode)
@@ -40,6 +41,7 @@ No backend. No subscriptions. Your Salesforce session and (optionally) your Anth
 | Browse all objects | Type `object` → Enter |
 | Browse all flows | Type `flow` → Enter |
 | Open SOQL Generator | Type `soql` → Enter |
+| Debug a flow | Open a flow → press `⌘⇧K` → "Debug this flow" (or type `debug` → Enter) |
 | Search Setup quick-links | Type freely — e.g. `profiles`, `permission set`, `audit trail` |
 | Drill into an object | Select an object → Enter, then pick a section |
 | Back / cancel | Backspace on empty input / Escape |
@@ -55,6 +57,17 @@ The SOQL Generator turns natural language into a Salesforce SOQL query:
 5. The query is shown in the palette — copy it and run it in Developer Console, Workbench, or wherever you usually run SOQL.
 
 **The extension never executes the query for you.** You always copy and run it yourself.
+
+## Flow Debug Assistant
+
+When something in a flow doesn't behave as expected:
+
+1. Open the flow in Flow Builder and run a Debug session as you normally would.
+2. Copy the **Debug Details** panel output (the right-hand panel that shows the path the flow took).
+3. Press `⌘⇧K` and select **"Debug this flow"** (it appears at the top of the menu when a flow is open).
+4. Paste the debug output, optionally add a sentence about what you expected, and click **Analyze**.
+
+Commander fetches the flow's metadata from the Tooling API, sends it together with your debug output to Claude, and returns a **summary**, **root cause**, **suggested fix**, and the **execution path**. Like the SOQL Generator, it's read-only — no changes are made to the flow.
 
 ### Privacy and credentials
 
@@ -83,6 +96,7 @@ content.css            Palette styles
 commands.js            Search resolution + fuzzy matching
 objects.js             Object cache (REST describeGlobal + storage)
 flows.js               Flow cache (FlowDefinitionView SOQL)
+flow-debug.js          Flow Debug Assistant: Tooling API fetch, prompt, parser
 salesforce-urls.js     URL builders + Setup quick-links registry
 soql.js                SOQL generator: schema fetch, prompt, history
 options.{html,js,css}  Settings page (API key, model)

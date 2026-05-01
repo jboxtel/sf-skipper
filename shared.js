@@ -46,3 +46,19 @@ async function sfRestPreamble() {
   var basePath = await getApiBasePath(apiBase, headers);
   return { apiBase: apiBase, headers: headers, basePath: basePath };
 }
+
+// Send a system+user prompt to the background, which proxies to Anthropic.
+// Returns the raw text from the model.
+function callClaude(systemPrompt, userMessage) {
+  return new Promise(function (resolve, reject) {
+    chrome.runtime.sendMessage(
+      { type: 'soql.generate', system: systemPrompt, user: userMessage },
+      function (resp) {
+        if (chrome.runtime.lastError) { reject(new Error(chrome.runtime.lastError.message)); return; }
+        if (!resp) { reject(new Error('No response from background')); return; }
+        if (!resp.ok) { reject(new Error(resp.error || 'Unknown error')); return; }
+        resolve(resp.text);
+      }
+    );
+  });
+}

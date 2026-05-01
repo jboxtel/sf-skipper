@@ -305,3 +305,141 @@
   font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
   flex-shrink: 0;
 }
+
+#sfnav-flowdebug {
+  padding: 8px 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+#sfnav-flowdebug-meta {
+  font-size: 11px;
+  color: #9faab5;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+}
+
+.sfnav-flowdebug-warn {
+  color: #c23934;
+  font-style: normal;
+}
+
+#sfnav-flowdebug-debug {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 11px;
+  color: #16325c;
+  background: #fff;
+  border: 1px solid #d8dde6;
+  border-radius: 4px;
+  padding: 8px;
+  resize: vertical;
+  min-height: 90px;
+  width: 100%;
+  box-sizing: border-box;
+  outline: none;
+}
+
+#sfnav-flowdebug-debug:focus,
+#sfnav-flowdebug-expectation:focus {
+  border-color: #0070d2;
+}
+
+#sfnav-flowdebug-expectation {
+  font-size: 12px;
+  padding: 6px 8px;
+  border: 1px solid #d8dde6;
+  border-radius: 4px;
+  outline: none;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+#sfnav-flowdebug-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sfnav-flowdebug-privacy {
+  margin-left: auto;
+  font-size: 10px;
+  color: #9faab5;
+}
+
+#sfnav-flowdebug-status {
+  font-size: 11px;
+  min-height: 14px;
+}
+
+.sfnav-flowdebug-status-loading { color: #0070d2; font-weight: 600; }
+.sfnav-flowdebug-status-ok      { color: #2e844a; font-weight: 600; }
+.sfnav-flowdebug-status-error   { color: #c23934; font-weight: 600; }
+
+#sfnav-flowdebug-output {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.sfnav-flowdebug-section {
+  border-left: 3px solid #d8dde6;
+  padding: 6px 10px;
+  background: #f9fbfe;
+  border-radius: 2px;
+  position: relative;
+}
+
+.sfnav-flowdebug-summary { border-left-color: #9faab5; }
+.sfnav-flowdebug-cause   { border-left-color: #c23934; background: #fdf3f2; }
+.sfnav-flowdebug-fix     { border-left-color: #2e844a; background: #f1f9f3; }
+.sfnav-flowdebug-path    { border-left-color: #0070d2; }
+
+.sfnav-flowdebug-label {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: #54698d;
+  margin-bottom: 4px;
+}
+
+.sfnav-flowdebug-body {
+  font-size: 12px;
+  color: #16325c;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+ol.sfnav-flowdebug-body {
+  margin: 0;
+  padding-left: 18px;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 11px;
+}
+
+ol.sfnav-flowdebug-body li {
+  margin: 2px 0;
+}
+
+.sfnav-flowdebug-copy {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  background: #fff;
+  color: #2e844a;
+  border: 1px solid #2e844a;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.sfnav-flowdebug-copy:hover {
+  background: #2e844a;
+  color: #fff;
+}

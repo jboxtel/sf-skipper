@@ -114,20 +114,6 @@ function buildObjectListMessage(prompt) {
   return lines.join('\n');
 }
 
-function callClaude(systemPrompt, userMessage) {
-  return new Promise(function (resolve, reject) {
-    chrome.runtime.sendMessage(
-      { type: 'soql.generate', system: systemPrompt, user: userMessage },
-      function (resp) {
-        if (chrome.runtime.lastError) { reject(new Error(chrome.runtime.lastError.message)); return; }
-        if (!resp) { reject(new Error('No response from background')); return; }
-        if (!resp.ok) { reject(new Error(resp.error || 'Unknown error')); return; }
-        resolve(resp.text);
-      }
-    );
-  });
-}
-
 function parseSoqlResponse(text) {
   if (!text) throw new Error('Empty response');
   // Strip code fences if present

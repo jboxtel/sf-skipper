@@ -24,7 +24,7 @@
         "https://*.salesforce-setup.com/*",
         "https://*.force.com/*"
       ],
-      "js": ["salesforce-urls.js", "shared.js", "objects.js", "flows.js", "commands.js", "soql.js", "content.js"],
+      "js": ["salesforce-urls.js", "shared.js", "objects.js", "flows.js", "flow-debug.js", "commands.js", "soql.js", "content.js"],
       "css": ["content.css"],
       "run_at": "document_idle"
     }

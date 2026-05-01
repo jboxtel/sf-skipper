@@ -59,6 +59,10 @@ async function injectExtension(page) {
       window.generateSoql = () => Promise.reject(new Error('not stubbed'));
       window.getSoqlHistory = () => Promise.resolve([]);
       window.addToSoqlHistory = () => Promise.resolve();
+      // flow-debug.js isn't injected either — stub the symbols content.js / commands.js touch
+      window.isFlowBuilderPage = () => false;
+      window.getFlowIdFromUrl = () => null;
+      window.analyzeFlowDebug = () => Promise.reject(new Error('not stubbed'));
       // Mock fetch so @load returns 2 test custom objects
       window.fetch = (url) => {
         if (url === '/services/data/') {

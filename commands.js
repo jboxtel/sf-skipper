@@ -89,8 +89,21 @@ var SOQL_ACTION = {
   action: 'soql-generator',
 };
 
+var FLOW_DEBUG_ACTION = {
+  label: 'Debug this flow',
+  sublabel: 'Analyze the flow + your debug output with Claude',
+  url: '#',
+  icon: ICON_MAP.flow,
+  type: 'action',
+  action: 'flow-debug',
+};
+
 function getRootResults() {
-  return [SOQL_ACTION].concat(SETUP_QUICK_LINKS.slice(0, 10).map(toQuickLinkResult));
+  var actions = [SOQL_ACTION];
+  if (typeof isFlowBuilderPage === 'function' && isFlowBuilderPage()) {
+    actions.unshift(FLOW_DEBUG_ACTION);
+  }
+  return actions.concat(SETUP_QUICK_LINKS.slice(0, 10).map(toQuickLinkResult));
 }
 
 function isOnObjectManagerPage() {
@@ -184,6 +197,17 @@ function resolveInput(rawInput) {
       mode: 'soql-hint',
       results: [SOQL_ACTION],
       hint: 'Press Enter to open the SOQL generator',
+    };
+  }
+
+  // "@debug" or "@flow-debug" — hint to press Enter
+  var lower = input.toLowerCase();
+  if (lower === 'debug' || lower === 'flow-debug') {
+    var onFlow = typeof isFlowBuilderPage === 'function' && isFlowBuilderPage();
+    return {
+      mode: 'flow-debug-hint',
+      results: [FLOW_DEBUG_ACTION],
+      hint: onFlow ? 'Press Enter to debug this flow' : 'Open a flow first — then press Enter to debug it',
     };
   }
 

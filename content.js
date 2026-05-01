@@ -9,11 +9,12 @@
   var paletteVisible = false;
   var selectedIndex = -1;
   var currentResults = [];
-  var searchMode = 'root'; // 'root' | 'object-picker' | 'object-scoped' | 'flow-picker' | 'soql'
+  var searchMode = 'root'; // 'root' | 'object-picker' | 'object-scoped' | 'flow-picker' | 'soql' | 'flow-debug'
   var scopedObject = null;
   var objectPickerFilter = '';
   var flowPickerFilter = '';
   var soqlInFlight = false;
+  var flowDebugInFlight = false;
 
   function injectPalette() {
     if (document.getElementById('sfnav-overlay')) return;
@@ -36,6 +37,23 @@
           '</div>' +
           '<div id="sfnav-soql-history-label" class="sfnav-section-header">Recent</div>' +
           '<ul id="sfnav-soql-history"></ul>' +
+        '</div>' +
+        '<div id="sfnav-flowdebug" style="display:none">' +
+          '<div id="sfnav-flowdebug-meta"></div>' +
+          '<textarea id="sfnav-flowdebug-debug" placeholder="Paste the Debug panel output here…" spellcheck="false"></textarea>' +
+          '<input id="sfnav-flowdebug-expectation" type="text" placeholder="Optional: what did you expect to happen?" autocomplete="off" />' +
+          '<div id="sfnav-flowdebug-actions">' +
+            '<button id="sfnav-flowdebug-run" class="sfnav-soql-btn-primary">Analyze</button>' +
+            '<button id="sfnav-flowdebug-settings" class="sfnav-soql-btn-secondary">Settings</button>' +
+            '<span class="sfnav-flowdebug-privacy">Flow + debug output sent to Anthropic</span>' +
+          '</div>' +
+          '<div id="sfnav-flowdebug-status"></div>' +
+          '<div id="sfnav-flowdebug-output" style="display:none">' +
+            '<div class="sfnav-flowdebug-section sfnav-flowdebug-summary"><span class="sfnav-flowdebug-label">Summary</span><div class="sfnav-flowdebug-body"></div></div>' +
+            '<div class="sfnav-flowdebug-section sfnav-flowdebug-cause"><span class="sfnav-flowdebug-label">Root cause</span><div class="sfnav-flowdebug-body"></div></div>' +
+            '<div class="sfnav-flowdebug-section sfnav-flowdebug-fix"><span class="sfnav-flowdebug-label">Suggested fix</span><div class="sfnav-flowdebug-body"></div><button class="sfnav-flowdebug-copy">Copy fix</button></div>' +
+            '<div class="sfnav-flowdebug-section sfnav-flowdebug-path"><span class="sfnav-flowdebug-label">Execution path</span><ol class="sfnav-flowdebug-body"></ol></div>' +
+          '</div>' +
         '</div>' +
         '<div id="sfnav-footer"><span id="sfnav-brand">⌘ Salesforce Commander</span><span>↑↓ navigate &nbsp; ↵ Tab select &nbsp; ⌫ back &nbsp; Esc close</span></div>' +
       '</div>';
@@ -88,9 +106,18 @@
         enterSoqlMode();
         return;
       }
+      if (keyword === 'flow-debug' || keyword === 'debug') {
+        enterFlowDebugMode();
+        return;
+      }
     }
     if (searchMode === 'soql') {
       runSoqlGeneration();
+      return;
+    }
+    if (searchMode === 'flow-debug') {
+      // Enter inside the flow-debug panel = run the analyzer
+      runFlowDebugAnalysis();
       return;
     }
     navigateToSelected();
@@ -99,7 +126,7 @@
   function handleBack() {
     if (searchMode === 'object-scoped') {
       enterObjectPickerMode(objectPickerFilter);
-    } else if (searchMode === 'object-picker' || searchMode === 'flow-picker' || searchMode === 'soql') {
+    } else if (searchMode === 'object-picker' || searchMode === 'flow-picker' || searchMode === 'soql' || searchMode === 'flow-debug') {
       hidePalette();
     }
   }
@@ -256,6 +283,134 @@
     input.focus();
   }
 
+  function enterFlowDebugMode() {
+    searchMode = 'flow-debug';
+    var input = document.getElementById('sfnav-input');
+    var flowId = (typeof getFlowIdFromUrl === 'function') ? getFlowIdFromUrl() : null;
+
+    input.value = '';
+    input.placeholder = flowId ? 'Press Enter (in the textarea) to analyze' : 'Open a flow first to use this';
+    document.getElementById('sfnav-results').style.display = 'none';
+    document.getElementById('sfnav-hint').textContent = '';
+    document.getElementById('sfnav-breadcrumb').innerHTML =
+      '<span class="sfnav-bc-seg">@flow-debug</span> <span class="sfnav-bc-arrow">›</span>';
+    document.getElementById('sfnav-breadcrumb').style.display = 'flex';
+    document.getElementById('sfnav-flowdebug').style.display = 'flex';
+    document.getElementById('sfnav-flowdebug-status').textContent = '';
+    document.getElementById('sfnav-flowdebug-status').className = '';
+    document.getElementById('sfnav-flowdebug-output').style.display = 'none';
+    document.getElementById('sfnav-flowdebug-debug').value = '';
+    document.getElementById('sfnav-flowdebug-expectation').value = '';
+
+    var metaEl = document.getElementById('sfnav-flowdebug-meta');
+    if (!flowId) {
+      metaEl.innerHTML = '<em class="sfnav-flowdebug-warn">No flow detected on this page. Open a flow in the Flow Builder, then try again.</em>';
+    } else {
+      metaEl.textContent = 'Flow id: ' + flowId;
+    }
+
+    document.getElementById('sfnav-flowdebug-run').onclick = runFlowDebugAnalysis;
+    document.getElementById('sfnav-flowdebug-settings').onclick = function () { openSoqlSettings(); };
+
+    // Submit on Cmd/Ctrl+Enter from inside the textarea
+    var debugEl = document.getElementById('sfnav-flowdebug-debug');
+    debugEl.addEventListener('keydown', function (e) {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+        e.preventDefault();
+        runFlowDebugAnalysis();
+      }
+    });
+
+    debugEl.focus();
+  }
+
+  async function runFlowDebugAnalysis() {
+    if (flowDebugInFlight) return;
+    var debugEl = document.getElementById('sfnav-flowdebug-debug');
+    var expEl = document.getElementById('sfnav-flowdebug-expectation');
+    var statusEl = document.getElementById('sfnav-flowdebug-status');
+    var outputEl = document.getElementById('sfnav-flowdebug-output');
+    var runBtn = document.getElementById('sfnav-flowdebug-run');
+
+    var flowId = (typeof getFlowIdFromUrl === 'function') ? getFlowIdFromUrl() : null;
+    if (!flowId) {
+      statusEl.textContent = 'No flow detected on this page.';
+      statusEl.className = 'sfnav-flowdebug-status-error';
+      return;
+    }
+    if (!debugEl.value.trim()) {
+      statusEl.textContent = 'Paste the Debug panel output first.';
+      statusEl.className = 'sfnav-flowdebug-status-error';
+      return;
+    }
+
+    var hasKey = await hasSoqlApiKey();
+    if (!hasKey) {
+      statusEl.innerHTML = 'No API key configured. <a href="#" id="sfnav-flowdebug-open-settings">Open settings</a>.';
+      statusEl.className = 'sfnav-flowdebug-status-error';
+      var link = document.getElementById('sfnav-flowdebug-open-settings');
+      if (link) link.onclick = function (e) { e.preventDefault(); openSoqlSettings(); };
+      return;
+    }
+
+    flowDebugInFlight = true;
+    runBtn.disabled = true;
+    debugEl.disabled = true;
+    expEl.disabled = true;
+    statusEl.textContent = 'Fetching flow + analyzing…';
+    statusEl.className = 'sfnav-flowdebug-status-loading';
+    outputEl.style.display = 'none';
+
+    try {
+      var result = await analyzeFlowDebug(flowId, debugEl.value, expEl.value);
+      renderFlowDebugResult(result);
+      statusEl.textContent = result.flowLabel
+        ? 'Analyzed: ' + result.flowLabel + (result.truncated ? ' (flow truncated)' : '')
+        : 'Done';
+      statusEl.className = 'sfnav-flowdebug-status-ok';
+    } catch (err) {
+      statusEl.textContent = 'Error: ' + err.message;
+      statusEl.className = 'sfnav-flowdebug-status-error';
+      outputEl.style.display = 'none';
+      console.warn('sfnav: flow-debug analysis failed —', err);
+    } finally {
+      flowDebugInFlight = false;
+      runBtn.disabled = false;
+      debugEl.disabled = false;
+      expEl.disabled = false;
+    }
+  }
+
+  function renderFlowDebugResult(result) {
+    var outputEl = document.getElementById('sfnav-flowdebug-output');
+    var summaryBody = outputEl.querySelector('.sfnav-flowdebug-summary .sfnav-flowdebug-body');
+    var causeBody   = outputEl.querySelector('.sfnav-flowdebug-cause .sfnav-flowdebug-body');
+    var fixBody     = outputEl.querySelector('.sfnav-flowdebug-fix .sfnav-flowdebug-body');
+    var pathBody    = outputEl.querySelector('.sfnav-flowdebug-path .sfnav-flowdebug-body');
+    var copyBtn     = outputEl.querySelector('.sfnav-flowdebug-copy');
+
+    summaryBody.textContent = result.summary || '';
+    causeBody.textContent   = result.rootCause || '';
+    fixBody.textContent     = result.fix || '';
+
+    pathBody.innerHTML = '';
+    (result.path || []).forEach(function (step) {
+      var li = document.createElement('li');
+      li.textContent = step;
+      pathBody.appendChild(li);
+    });
+
+    copyBtn.onclick = function () {
+      navigator.clipboard.writeText(result.fix || '').then(function () {
+        var prev = copyBtn.textContent;
+        copyBtn.textContent = 'Copied!';
+        setTimeout(function () { copyBtn.textContent = prev; }, 1500);
+      });
+    };
+
+    outputEl.style.display = 'block';
+  }
+
   function showPalette() {
     injectPalette();
     searchMode = 'root';
@@ -276,6 +431,8 @@
   function hideSoqlPanel() {
     var soqlEl = document.getElementById('sfnav-soql');
     if (soqlEl) soqlEl.style.display = 'none';
+    var fdEl = document.getElementById('sfnav-flowdebug');
+    if (fdEl) fdEl.style.display = 'none';
     var resultsEl = document.getElementById('sfnav-results');
     if (resultsEl) resultsEl.style.display = '';
   }
@@ -366,6 +523,11 @@
   function navigateTo(url, result) {
     if (result && result.type === 'action' && result.action === 'soql-generator') {
       enterSoqlMode();
+      return;
+    }
+
+    if (result && result.type === 'action' && result.action === 'flow-debug') {
+      enterFlowDebugMode();
       return;
     }
 
