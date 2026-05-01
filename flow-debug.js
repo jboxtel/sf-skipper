@@ -226,12 +226,14 @@ function buildFlowDebugSystemPrompt() {
     '- Use Flow Builder operator names: "Equals", "Does Not Equal", "Greater Than", "Less Than", "Is Null", "Is Changed", "Contains", "Starts With", "In" — not "==", "!=", "&&", "||".',
     '- Never write Apex, JavaScript, or pseudocode. The only exception is if the fix is to edit a Formula resource — then write the formula in Salesforce formula syntax (ISBLANK, AND, OR, IF, TEXT, etc.).',
     '',
-    'FIX FORMAT — write the fix as numbered Flow Builder steps a consultant can follow:',
-    '"1. Open the \'<Element Name>\' Decision element. 2. Click \'+ New Outcome\'. 3. Label it \'<name>\'. 4. Set Resource = {!$Record.Industry}, Operator = Is Null, Value = {!$GlobalConstant.False}. 5. Connect this Outcome to \'<Next Element Name>\'."',
-    'Reference real element names from the flow structure provided — do not invent names.',
+    'FIX FORMAT — return the fix as an ARRAY of short steps. Each step is one Flow Builder action, written so a consultant can perform it without further interpretation.',
+    'Use backticks around any of: resource references (e.g. `{!$Record.Industry}`), Flow Builder operator names (e.g. `Is Null`, `Equals`), Flow Builder field labels (e.g. `Resource`, `Operator`, `Value`), and quoted element names (e.g. `\'Set Segment\'`).',
+    'Example fix array:',
+    '["Open the `\'Set Segment\'` Decision element.", "Click `+ New Outcome` and label it `Has Industry`.", "Set `Resource` = `{!$Record.Industry}`, `Operator` = `Is Null`, `Value` = `{!$GlobalConstant.False}`.", "Drag this Outcome above the existing `Tier1` outcome.", "Connect this Outcome to the `\'Assign Tier1\'` Assignment element."]',
+    'Reference real element names from the flow structure provided — do not invent names. Do NOT include numbering inside the strings; the UI numbers them.',
     '',
     'Reply with ONLY a JSON object on a single line, no prose, no code fences:',
-    '{"summary":"one short sentence describing what happened","rootCause":"the specific Flow Builder element and condition that caused the issue","fix":"numbered Flow Builder steps"}'
+    '{"summary":"one short sentence describing what happened","rootCause":"the specific Flow Builder element and condition that caused the issue","fix":["step1","step2","..."]}'
   ].join('\n');
 }
 
@@ -278,6 +280,20 @@ function parseFlowDebugResponse(text) {
   try {
     var obj = JSON.parse(json);
     if (!obj.summary && !obj.rootCause && !obj.fix) throw new Error('Response missing required fields');
+    // Normalize fix → array of strings. Older / fallback responses may return a single string.
+    if (typeof obj.fix === 'string') {
+      var s = obj.fix.trim();
+      if (s) {
+        // Split on patterns like "1. ", "2. " at the start or after whitespace.
+        var parts = s.split(/\s*(?:\n|^)\s*\d+\.\s+/).filter(Boolean);
+        if (parts.length <= 1) parts = s.split(/(?:^|\s)\d+\.\s+/).filter(Boolean);
+        obj.fix = parts.length ? parts.map(function (p) { return p.trim(); }) : [s];
+      } else {
+        obj.fix = [];
+      }
+    } else if (!Array.isArray(obj.fix)) {
+      obj.fix = [];
+    }
     return obj;
   } catch (e) {
     throw new Error('Invalid JSON in response: ' + e.message);

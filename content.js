@@ -51,7 +51,7 @@
           '<div id="sfnav-flowdebug-output" style="display:none">' +
             '<div class="sfnav-flowdebug-section sfnav-flowdebug-summary"><span class="sfnav-flowdebug-label">Summary</span><div class="sfnav-flowdebug-body"></div></div>' +
             '<div class="sfnav-flowdebug-section sfnav-flowdebug-cause"><span class="sfnav-flowdebug-label">Root cause</span><div class="sfnav-flowdebug-body"></div></div>' +
-            '<div class="sfnav-flowdebug-section sfnav-flowdebug-fix"><span class="sfnav-flowdebug-label">Suggested fix</span><div class="sfnav-flowdebug-body"></div><button class="sfnav-flowdebug-copy">Copy fix</button></div>' +
+            '<div class="sfnav-flowdebug-section sfnav-flowdebug-fix"><span class="sfnav-flowdebug-label">Suggested fix</span><ol class="sfnav-flowdebug-body sfnav-flowdebug-steps"></ol><button class="sfnav-flowdebug-copy">Copy fix</button></div>' +
           '</div>' +
         '</div>' +
         '<div id="sfnav-footer"><span id="sfnav-brand">⌘ Salesforce Commander</span><span id="sfnav-footer-hints"></span></div>' +
@@ -446,10 +446,10 @@
     var fixSec     = outputEl.querySelector('.sfnav-flowdebug-fix');
     var summaryBody = summarySec.querySelector('.sfnav-flowdebug-body');
     var causeBody   = causeSec.querySelector('.sfnav-flowdebug-body');
-    var fixBody     = fixSec.querySelector('.sfnav-flowdebug-body');
+    var fixList     = fixSec.querySelector('.sfnav-flowdebug-steps');
     var copyBtn     = fixSec.querySelector('.sfnav-flowdebug-copy');
 
-    function setSection(sec, body, value) {
+    function setTextSection(sec, body, value) {
       var v = (value || '').trim();
       if (v) {
         body.textContent = v;
@@ -460,12 +460,25 @@
       }
     }
 
-    setSection(summarySec, summaryBody, result.summary);
-    setSection(causeSec,   causeBody,   result.rootCause);
-    setSection(fixSec,     fixBody,     result.fix);
+    setTextSection(summarySec, summaryBody, result.summary);
+    setTextSection(causeSec,   causeBody,   result.rootCause);
+
+    var steps = Array.isArray(result.fix) ? result.fix.filter(function (s) { return s && s.trim(); }) : [];
+    fixList.innerHTML = '';
+    if (steps.length) {
+      steps.forEach(function (step) {
+        var li = document.createElement('li');
+        li.innerHTML = renderInlineCode(step);
+        fixList.appendChild(li);
+      });
+      fixSec.style.display = '';
+    } else {
+      fixSec.style.display = 'none';
+    }
 
     copyBtn.onclick = function () {
-      navigator.clipboard.writeText(result.fix || '').then(function () {
+      var text = steps.map(function (s, i) { return (i + 1) + '. ' + s.replace(/`/g, ''); }).join('\n');
+      navigator.clipboard.writeText(text).then(function () {
         var prev = copyBtn.textContent;
         copyBtn.textContent = 'Copied!';
         setTimeout(function () { copyBtn.textContent = prev; }, 1500);
@@ -473,6 +486,30 @@
     };
 
     outputEl.style.display = 'block';
+  }
+
+  // Render `…` as <code>…</code>, escaping HTML in everything else.
+  function renderInlineCode(s) {
+    var out = '';
+    var inCode = false;
+    var buf = '';
+    for (var i = 0; i < s.length; i++) {
+      var ch = s[i];
+      if (ch === '`') {
+        if (inCode) {
+          out += '<code class="sfnav-flowdebug-code">' + esc(buf) + '</code>';
+        } else {
+          out += esc(buf);
+        }
+        buf = '';
+        inCode = !inCode;
+      } else {
+        buf += ch;
+      }
+    }
+    // Unclosed backtick — flush remainder as plain text
+    out += esc(buf);
+    return out;
   }
 
   function showPalette() {
