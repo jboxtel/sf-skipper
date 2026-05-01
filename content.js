@@ -84,7 +84,7 @@
       if (e.key === 'ArrowDown')       { e.preventDefault(); moveSelection(1); }
       else if (e.key === 'ArrowUp')    { e.preventDefault(); moveSelection(-1); }
       else if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); handleEnter(); }
-      else if (e.key === 'Escape')     { hidePalette(); }
+      else if (e.key === 'Escape')     { e.preventDefault(); handleBack(); }
       else if (e.key === 'Backspace' && input.value === '') { e.preventDefault(); handleBack(); }
     });
   }
@@ -123,10 +123,40 @@
   }
 
   function handleBack() {
-    if (searchMode === 'object-scoped') {
-      enterObjectPickerMode(objectPickerFilter);
-    } else if (searchMode === 'object-picker' || searchMode === 'flow-picker' || searchMode === 'soql' || searchMode === 'flow-debug') {
-      hidePalette();
+    switch (searchMode) {
+      case 'object-scoped':
+        enterObjectPickerMode(objectPickerFilter);
+        return;
+      case 'object-picker':
+      case 'flow-picker':
+      case 'soql':
+      case 'flow-debug':
+        goToRoot();
+        return;
+      default:
+        hidePalette();
+    }
+  }
+
+  function goToRoot() {
+    searchMode = 'root';
+    scopedObject = null;
+    objectPickerFilter = '';
+    flowPickerFilter = '';
+    hideSoqlPanel();
+    setFooterHints('root');
+    var breadcrumbEl = document.getElementById('sfnav-breadcrumb');
+    if (breadcrumbEl) {
+      breadcrumbEl.textContent = '';
+      breadcrumbEl.style.display = 'none';
+    }
+    var input = document.getElementById('sfnav-input');
+    if (input) {
+      input.value = '';
+      input.placeholder = 'Type @ to start — e.g. @account';
+      input.disabled = false;
+      renderResults(resolveInput(''));
+      input.focus();
     }
   }
 
@@ -323,21 +353,29 @@
     document.getElementById('sfnav-flowdebug-run').onclick = runFlowDebugAnalysis;
     document.getElementById('sfnav-flowdebug-settings').onclick = function () { openSoqlSettings(); };
 
-    // Submit on Cmd/Ctrl+Enter from inside the textarea (plain Enter keeps newline)
+    // Submit on Cmd/Ctrl+Enter from inside the textarea (plain Enter keeps newline);
+    // Escape steps back to root.
     var debugEl = document.getElementById('sfnav-flowdebug-debug');
     debugEl.addEventListener('keydown', function (e) {
       if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
         e.preventDefault();
         runFlowDebugAnalysis();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        handleBack();
       }
     });
 
-    // Plain Enter from the expectation field submits (it's a single-line input)
+    // Plain Enter from the expectation field submits (it's a single-line input);
+    // Escape steps back.
     var expEl = document.getElementById('sfnav-flowdebug-expectation');
     expEl.addEventListener('keydown', function (e) {
       if (e.key === 'Enter') {
         e.preventDefault();
         runFlowDebugAnalysis();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        handleBack();
       }
     });
 
@@ -578,13 +616,13 @@
     var hints;
     switch (mode) {
       case 'soql':
-        hints = '↵ generate   Esc close';
+        hints = '↵ generate   Esc back';
         break;
       case 'flow-debug':
-        hints = '⌘↵ analyze   Esc close';
+        hints = '⌘↵ analyze   Esc back';
         break;
       default:
-        hints = '↑↓ navigate   ↵ select   ⌫ back   Esc close';
+        hints = '↑↓ navigate   ↵ select   ⌫ back   Esc back';
     }
     el.innerHTML = hints;
   }
