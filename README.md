@@ -14,6 +14,17 @@ Salesforce Setup is powerful but slow to navigate. Finding a specific validation
 
 No backend. No subscriptions. Your Salesforce session and (optionally) your Anthropic API key live in your browser only.
 
+## Screenshots
+
+| | |
+|---|---|
+| ![Command palette](screenshots/command-palette.jpg) | ![Flow browser](screenshots/flow-browser.jpg) |
+| Search objects, flows, setup pages, or pick a category | Browse and filter all flows in your org |
+| ![SOQL Generator](screenshots/soql-generator.jpg) | ![Custom metadata drill-down](screenshots/custom-metadata-drill.jpg) |
+| Generate SOQL from natural language | Drill into custom metadata types |
+| ![Flow Debug — paste input](screenshots/flow-debug-input.jpg) | ![Flow Debug — suggested fix](screenshots/flow-debug-suggested-fix.jpg) |
+| Paste debug output from Flow Builder | Get a root-cause analysis and suggested fix |
+
 ## Features
 
 - **Universal search** — Fuzzy-match across every standard object, every custom object in your org, every Setup quick-link, and every Flow.
