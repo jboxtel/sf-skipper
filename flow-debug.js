@@ -36,9 +36,14 @@ async function fetchFlowMetadata(flowId) {
     soql = "SELECT Id, DefinitionId, MasterLabel, Metadata FROM Flow WHERE Id = '" + safe + "'";
   } else {
     // The URL slug is typically "Namespace__DeveloperName-versionNumber".
-    // Strip the trailing version suffix to get the definition's DeveloperName.
-    var devName = flowId.replace(/-\d+$/, '').replace(/'/g, "\\'");
-    soql = "SELECT Id, DefinitionId, MasterLabel, Metadata FROM Flow WHERE Definition.DeveloperName = '" + devName + "' AND Status = 'Active' ORDER BY VersionNumber DESC LIMIT 1";
+    // Strip the trailing version suffix, then split namespace from name.
+    var slug = flowId.replace(/-\d+$/, '');
+    var nsParts = slug.match(/^(.+?)__(.+)$/);
+    var devName = (nsParts ? nsParts[2] : slug).replace(/'/g, "\\'");
+    var nsFilter = nsParts
+      ? " AND Definition.NamespacePrefix = '" + nsParts[1].replace(/'/g, "\\'") + "'"
+      : "";
+    soql = "SELECT Id, DefinitionId, MasterLabel, Metadata FROM Flow WHERE Definition.DeveloperName = '" + devName + "'" + nsFilter + " AND Status = 'Active' ORDER BY VersionNumber DESC LIMIT 1";
   }
   var url = pre.apiBase + pre.basePath + '/tooling/query/?q=' + encodeURIComponent(soql);
   var resp = await fetch(url, { headers: pre.headers });
