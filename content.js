@@ -690,7 +690,6 @@
       // Objects in picker mode get a ›  indicator to show they expand
       var shortcutLabel = (result.type === 'object' || result.type === 'cmdt') ? '›' : '↵';
       li.innerHTML =
-        '<span class="sfnav-icon">'    + esc(result.icon || '⚙') + '</span>' +
         '<span class="sfnav-label">'   + esc(result.label)             + '</span>' +
         '<span class="sfnav-sublabel">'+ esc(result.sublabel || '')    + '</span>' +
         '<span class="sfnav-shortcut">' + shortcutLabel + '</span>';
