@@ -99,9 +99,15 @@ function getRootResults() {
   // ── AI Tools ──
   results.push(makeHeader('AI Tools'));
   results.push(SOQL_ACTION);
-  if (typeof isFlowBuilderPage === 'function' && isFlowBuilderPage()) {
-    results.push(FLOW_DEBUG_ACTION);
-  }
+  var onFlowPage = typeof isFlowBuilderPage === 'function' && isFlowBuilderPage();
+  results.push({
+    label: FLOW_DEBUG_ACTION.label,
+    sublabel: onFlowPage ? FLOW_DEBUG_ACTION.sublabel : 'Open a flow first',
+    url: FLOW_DEBUG_ACTION.url,
+    type: FLOW_DEBUG_ACTION.type,
+    action: FLOW_DEBUG_ACTION.action,
+    disabled: !onFlowPage,
+  });
 
   // ── Setup ──
   results.push(makeHeader('Setup'));

@@ -169,6 +169,12 @@
   background: var(--sf-accent-light);
 }
 
+.sfnav-item.sfnav-disabled {
+  opacity: 0.35;
+  cursor: default;
+  pointer-events: none;
+}
+
 .sfnav-label {
   flex: 1;
   font-size: 13px;

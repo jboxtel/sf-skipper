@@ -648,8 +648,8 @@
     var hintEl = document.getElementById('sfnav-hint');
     var breadcrumbEl = document.getElementById('sfnav-breadcrumb');
 
-    // Filter out headers for navigation — only selectable items
-    currentResults = resolution.results.filter(function (r) { return r.type !== 'header'; });
+    // Filter out headers and disabled items for navigation
+    currentResults = resolution.results.filter(function (r) { return r.type !== 'header' && !r.disabled; });
     selectedIndex = currentResults.length > 0 ? 0 : -1;
 
     if (resolution.mode === 'object-picker') {
@@ -694,6 +694,16 @@
       }
 
       var li = document.createElement('li');
+
+      if (result.disabled) {
+        li.className = 'sfnav-item sfnav-disabled';
+        li.innerHTML =
+          '<span class="sfnav-label">'   + esc(result.label)             + '</span>' +
+          '<span class="sfnav-sublabel">'+ esc(result.sublabel || '')    + '</span>';
+        listEl.appendChild(li);
+        return;
+      }
+
       var isSelected = selectableIndex === selectedIndex;
       li.className = 'sfnav-item' + (isSelected ? ' selected' : '');
       li.dataset.url = result.url;
