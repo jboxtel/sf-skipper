@@ -67,16 +67,16 @@ function toSubPageResult(page, object) {
 }
 
 var SOQL_ACTION = {
-  label: 'Ask a data question',
-  sublabel: 'Natural language → SOQL',
+  label: '@soql',
+  sublabel: 'Ask a data question',
   url: '#',
   type: 'action',
   action: 'soql-generator',
 };
 
 var FLOW_DEBUG_ACTION = {
-  label: 'Debug this flow',
-  sublabel: 'Analyze with Claude',
+  label: '@debug',
+  sublabel: 'Analyze a flow with Claude',
   url: '#',
   type: 'action',
   action: 'flow-debug',
@@ -91,10 +91,10 @@ function getRootResults() {
 
   // ── Browse ──
   results.push(makeHeader('Browse'));
-  results.push({ label: 'Objects',                sublabel: 'All standard & custom', url: '#', type: 'shortcut', keyword: 'object' });
-  results.push({ label: 'Flows',                  sublabel: 'All org flows',         url: '#', type: 'shortcut', keyword: 'flow' });
-  results.push({ label: 'Lightning Apps',          sublabel: 'All installed apps',    url: '#', type: 'shortcut', keyword: 'app' });
-  results.push({ label: 'Custom Metadata Types',   sublabel: 'All CMDTs',             url: '#', type: 'shortcut', keyword: 'cmd' });
+  results.push({ label: '@object',   sublabel: 'All standard & custom objects', url: '#', type: 'shortcut', keyword: 'object' });
+  results.push({ label: '@flow',     sublabel: 'All org flows',                 url: '#', type: 'shortcut', keyword: 'flow' });
+  results.push({ label: '@app',      sublabel: 'All installed Lightning apps',  url: '#', type: 'shortcut', keyword: 'app' });
+  results.push({ label: '@cmd',      sublabel: 'Custom metadata types',         url: '#', type: 'shortcut', keyword: 'cmd' });
 
   // ── AI Tools ──
   results.push(makeHeader('AI Tools'));
@@ -122,17 +122,17 @@ function getShortcutResults() {
   var results = [];
 
   results.push(makeHeader('Browse'));
-  results.push({ label: 'Objects',                sublabel: '@object',  url: '#', type: 'shortcut', keyword: 'object' });
-  results.push({ label: 'Flows',                  sublabel: '@flow',    url: '#', type: 'shortcut', keyword: 'flow' });
-  results.push({ label: 'Lightning Apps',          sublabel: '@app',     url: '#', type: 'shortcut', keyword: 'app' });
-  results.push({ label: 'Custom Metadata Types',   sublabel: '@cmd',     url: '#', type: 'shortcut', keyword: 'cmd' });
+  results.push({ label: '@object',   sublabel: 'All standard & custom objects', url: '#', type: 'shortcut', keyword: 'object' });
+  results.push({ label: '@flow',     sublabel: 'All org flows',                 url: '#', type: 'shortcut', keyword: 'flow' });
+  results.push({ label: '@app',      sublabel: 'All installed Lightning apps',  url: '#', type: 'shortcut', keyword: 'app' });
+  results.push({ label: '@cmd',      sublabel: 'Custom metadata types',         url: '#', type: 'shortcut', keyword: 'cmd' });
 
   results.push(makeHeader('AI Tools'));
-  results.push({ label: 'Ask a data question',    sublabel: '@soql',    url: '#', type: 'shortcut', keyword: 'soql' });
-  results.push({ label: 'Debug this flow',        sublabel: '@debug',   url: '#', type: 'shortcut', keyword: 'flow-debug' });
+  results.push({ label: '@soql',     sublabel: 'Ask a data question',           url: '#', type: 'shortcut', keyword: 'soql' });
+  results.push({ label: '@debug',    sublabel: 'Analyze a flow with Claude',    url: '#', type: 'shortcut', keyword: 'flow-debug' });
 
   results.push(makeHeader('Maintenance'));
-  results.push({ label: 'Refresh metadata cache', sublabel: '@refresh', url: '#', type: 'shortcut', keyword: 'refresh' });
+  results.push({ label: '@refresh',  sublabel: 'Reload cached metadata',        url: '#', type: 'shortcut', keyword: 'refresh' });
 
   return results;
 }
