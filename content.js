@@ -32,12 +32,12 @@
         '<div id="sfnav-hint"></div>' +
         '<ul id="sfnav-results"></ul>' +
         '<div id="sfnav-soql" style="display:none">' +
+          '<span id="sfnav-soql-apistat" class="sfnav-apistat"></span>' +
           '<div id="sfnav-soql-status"></div>' +
           '<pre id="sfnav-soql-output"></pre>' +
           '<div id="sfnav-soql-actions">' +
             '<button id="sfnav-soql-copy" class="sfnav-soql-btn-primary">Copy</button>' +
             '<button id="sfnav-soql-clear" class="sfnav-soql-btn-secondary">Clear</button>' +
-            '<button id="sfnav-soql-settings" class="sfnav-soql-btn-secondary">Settings</button>' +
           '</div>' +
           '<div id="sfnav-soql-history-label" class="sfnav-section-header">Recent</div>' +
           '<ul id="sfnav-soql-history"></ul>' +
@@ -48,8 +48,7 @@
           '<input id="sfnav-flowdebug-expectation" type="text" placeholder="Optional: what did you expect to happen?" autocomplete="off" />' +
           '<div id="sfnav-flowdebug-actions">' +
             '<button id="sfnav-flowdebug-run" class="sfnav-soql-btn-primary">Analyze <span class="sfnav-kbd">⌘↵</span></button>' +
-            '<button id="sfnav-flowdebug-settings" class="sfnav-soql-btn-secondary">Settings</button>' +
-            '<span class="sfnav-flowdebug-privacy">Flow + debug output sent to Anthropic</span>' +
+            '<span id="sfnav-flowdebug-apistat" class="sfnav-apistat"></span>' +
           '</div>' +
           '<div id="sfnav-flowdebug-status"></div>' +
           '<div id="sfnav-flowdebug-output" style="display:none">' +
@@ -265,9 +264,21 @@
       document.getElementById('sfnav-soql-actions').style.display = 'none';
       document.getElementById('sfnav-input').focus();
     };
-    document.getElementById('sfnav-soql-settings').onclick = function () {
-      openSoqlSettings();
-    };
+
+    hasSoqlApiKey().then(function (ok) {
+      var el = document.getElementById('sfnav-soql-apistat');
+      if (!el) return;
+      if (ok) {
+        el.textContent = 'API key connected';
+        el.className = 'sfnav-apistat sfnav-apistat-ok';
+      } else {
+        el.innerHTML = 'No API key — <a href="#" id="sfnav-soql-open-settings">configure in settings</a>';
+        el.className = 'sfnav-apistat sfnav-apistat-missing';
+        var link = document.getElementById('sfnav-soql-open-settings');
+        if (link) link.onclick = function (e) { e.preventDefault(); openSoqlSettings(); };
+      }
+    });
+
     input.focus();
   }
 
@@ -430,8 +441,21 @@
         });
     }
 
+    hasSoqlApiKey().then(function (ok) {
+      var el = document.getElementById('sfnav-flowdebug-apistat');
+      if (!el) return;
+      if (ok) {
+        el.textContent = 'API key connected';
+        el.className = 'sfnav-apistat sfnav-apistat-ok';
+      } else {
+        el.innerHTML = 'No API key — <a href="#" id="sfnav-flowdebug-open-settings">configure in settings</a>';
+        el.className = 'sfnav-apistat sfnav-apistat-missing';
+        var link = document.getElementById('sfnav-flowdebug-open-settings');
+        if (link) link.onclick = function (e) { e.preventDefault(); openSoqlSettings(); };
+      }
+    });
+
     document.getElementById('sfnav-flowdebug-run').onclick = runFlowDebugAnalysis;
-    document.getElementById('sfnav-flowdebug-settings').onclick = function () { openSoqlSettings(); };
 
     // Submit on Cmd/Ctrl+Enter from inside the textarea (plain Enter keeps newline);
     // Escape steps back to root.
