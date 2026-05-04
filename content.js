@@ -58,7 +58,7 @@
             '<div class="sfnav-flowdebug-section sfnav-flowdebug-fix"><span class="sfnav-flowdebug-label">Suggested fix</span><ol class="sfnav-flowdebug-body sfnav-flowdebug-steps"></ol><button class="sfnav-flowdebug-copy">Copy fix</button></div>' +
           '</div>' +
         '</div>' +
-        '<div id="sfnav-footer"><span id="sfnav-brand">⌘ Salesforce Commander</span><span id="sfnav-footer-hints"></span></div>' +
+        '<div id="sfnav-footer"><span id="sfnav-brand">Salesforce Commander</span><span id="sfnav-footer-hints"></span></div>' +
       '</div>';
 
     document.body.appendChild(overlay);
