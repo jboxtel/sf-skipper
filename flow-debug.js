@@ -20,6 +20,14 @@ function getFlowIdFromUrl() {
   return m ? decodeURIComponent(m[1]) : null;
 }
 
+function isManagedFlowId(flowId) {
+  if (!flowId) return false;
+  var isSfId = /^[a-zA-Z0-9]{15}([a-zA-Z0-9]{3})?$/.test(flowId);
+  if (isSfId) return false;
+  var slug = flowId.replace(/-\d+$/, '');
+  return /__/.test(slug);
+}
+
 async function fetchFlowMetadata(flowId) {
   var cached = _flowMetadataCache[flowId];
   if (cached && (Date.now() - cached.ts) < FLOW_METADATA_TTL_MS) {
@@ -275,15 +283,22 @@ async function analyzeFlowDebug(flowId, debugText, expectation) {
   if (!flowId) throw new Error('No flowId in URL');
   if (!debugText || !debugText.trim()) throw new Error('Paste the Debug panel output first');
 
-  var record = await fetchFlowMetadata(flowId);
-  var compact = compactFlowMetadata(record.Metadata);
+  var record = null;
+  var compact = { text: '', truncated: false };
+  try {
+    record = await fetchFlowMetadata(flowId);
+    compact = compactFlowMetadata(record.Metadata);
+  } catch (e) {
+    // Managed package flows often block metadata access — carry on with debug output only
+  }
 
+  var flowLabel = record ? record.MasterLabel : flowId.replace(/-\d+$/, '');
   var sysPrompt = buildFlowDebugSystemPrompt();
-  var userMsg = buildFlowDebugUserMessage(record.MasterLabel, compact.text, debugText, expectation);
+  var userMsg = buildFlowDebugUserMessage(flowLabel, compact.text || '(flow structure unavailable — analyze based on debug output only)', debugText, expectation);
 
   var raw = await callClaude(sysPrompt, userMsg);
   var parsed = parseFlowDebugResponse(raw);
-  parsed.flowLabel = record.MasterLabel;
+  parsed.flowLabel = flowLabel;
   parsed.truncated = compact.truncated;
   return parsed;
 }

@@ -415,11 +415,12 @@
     var metaEl = document.getElementById('sfnav-flowdebug-meta');
     if (!flowId) {
       metaEl.innerHTML = '<em class="sfnav-flowdebug-warn">No flow detected on this page. Open a flow in the Flow Builder, then try again.</em>';
+    } else if (typeof isManagedFlowId === 'function' && isManagedFlowId(flowId)) {
+      metaEl.textContent = 'Managed package flow — paste the debug output and we\u2019ll analyze based on that alone.';
     } else {
       metaEl.textContent = 'Loading flow…';
       fetchFlowMetadata(flowId)
         .then(function (record) {
-          // Only update if user is still in flow-debug mode for this flow
           if (searchMode !== 'flow-debug') return;
           metaEl.textContent = 'Flow: ' + (record.MasterLabel || flowId);
         })
