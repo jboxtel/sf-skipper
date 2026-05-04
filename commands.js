@@ -1,13 +1,3 @@
-var ICON_MAP = ICON_MAP || {
-  object: '◈',
-  field: '≡',
-  setup: '⚙',
-  user: '👤',
-  code: '</>',
-  flow: '⟳',
-  security: '🔒',
-};
-
 function fuzzyScore(query, target) {
   const q = query.toLowerCase();
   const t = target.toLowerCase();
@@ -30,21 +20,11 @@ function fuzzyFilter(query, items, getLabel) {
     .map(x => x.item);
 }
 
-function getIconForSetupLink(label) {
-  const l = label.toLowerCase();
-  if (l.includes('flow') || l.includes('process') || l.includes('workflow')) return ICON_MAP.flow;
-  if (l.includes('user') || l.includes('profile') || l.includes('role') || l.includes('permission')) return ICON_MAP.user;
-  if (l.includes('apex') || l.includes('static') || l.includes('class') || l.includes('trigger')) return ICON_MAP.code;
-  if (l.includes('security') || l.includes('sharing') || l.includes('health') || l.includes('login') || l.includes('audit')) return ICON_MAP.security;
-  return ICON_MAP.setup;
-}
-
 function toObjectResult(obj) {
   return {
     label: obj.label,
     sublabel: obj.isCustom ? obj.apiName : 'Standard Object',
     url: `${getObjectManagerBase()}/${obj.apiName}/view`,
-    icon: ICON_MAP.object,
     type: 'object',
     object: obj,
   };
@@ -55,7 +35,6 @@ function toQuickLinkResult(link) {
     label: link.label,
     sublabel: 'Setup',
     url: link.url(),
-    icon: getIconForSetupLink(link.label),
     type: 'setup',
   };
 }
@@ -65,7 +44,6 @@ function toAppResult(app) {
     label: app.label,
     sublabel: app.namespace ? app.namespace + '__' + app.durableId : 'Lightning App',
     url: getOrgBase() + '/lightning/app/' + app.durableId,
-    icon: ICON_MAP.setup,
     type: 'app',
   };
 }
@@ -75,7 +53,6 @@ function toFlowResult(flow) {
     label: flow.label,
     sublabel: flow.isActive ? 'Active Flow' : 'Inactive Flow',
     url: getOrgBase() + '/builder_platform_interaction/flowBuilder.app?flowId=' + (flow.versionId || flow.id),
-    icon: ICON_MAP.flow,
     type: 'flow',
   };
 }
@@ -85,7 +62,6 @@ function toSubPageResult(page, object) {
     label: page.label,
     sublabel: object.label,
     url: buildObjectSubPageUrl(object.apiName, page.segment),
-    icon: ICON_MAP.field,
     type: 'subpage',
   };
 }
@@ -213,7 +189,6 @@ function resolveCmdtPicker(filter) {
         label: o.label,
         sublabel: o.apiName,
         url: '#',
-        icon: ICON_MAP.object,
         type: 'cmdt',
         cmdt: o,
       };
@@ -244,7 +219,6 @@ function resolveCmdtScoped(filter, cmdt) {
         label: p.label,
         sublabel: cmdt.label,
         url: '#',
-        icon: ICON_MAP.field,
         type: 'cmdt-action',
         cmdt: cmdt,
         action: p.action,
