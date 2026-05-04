@@ -26,7 +26,20 @@ async function fetchFlowMetadata(flowId) {
     return cached.record;
   }
   var pre = await sfRestPreamble();
-  var soql = "SELECT Id, DefinitionId, MasterLabel, Metadata FROM Flow WHERE Id = '" + flowId.replace(/'/g, "\\'") + "'";
+  var safe = flowId.replace(/'/g, "\\'");
+  // Salesforce record IDs are 15 or 18 alphanumeric chars starting with a
+  // 3-char key prefix. Anything else (e.g. "MyFlow-1") is a version name/slug
+  // that comes from the URL and needs a different query strategy.
+  var isSfId = /^[a-zA-Z0-9]{15}([a-zA-Z0-9]{3})?$/.test(flowId);
+  var soql;
+  if (isSfId) {
+    soql = "SELECT Id, DefinitionId, MasterLabel, Metadata FROM Flow WHERE Id = '" + safe + "'";
+  } else {
+    // The URL slug is typically "Namespace__DeveloperName-versionNumber".
+    // Strip the trailing version suffix to get the definition's DeveloperName.
+    var devName = flowId.replace(/-\d+$/, '').replace(/'/g, "\\'");
+    soql = "SELECT Id, DefinitionId, MasterLabel, Metadata FROM Flow WHERE Definition.DeveloperName = '" + devName + "' AND Status = 'Active' ORDER BY VersionNumber DESC LIMIT 1";
+  }
   var url = pre.apiBase + pre.basePath + '/tooling/query/?q=' + encodeURIComponent(soql);
   var resp = await fetch(url, { headers: pre.headers });
   if (resp.status === 401 || resp.status === 403) {
