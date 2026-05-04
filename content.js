@@ -700,6 +700,7 @@
         li.innerHTML =
           '<span class="sfnav-label">'   + esc(result.label)             + '</span>' +
           '<span class="sfnav-sublabel">'+ esc(result.sublabel || '')    + '</span>';
+        li.addEventListener('click', function (e) { e.stopPropagation(); });
         listEl.appendChild(li);
         return;
       }

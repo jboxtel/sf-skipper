@@ -170,9 +170,9 @@
 }
 
 .sfnav-item.sfnav-disabled {
-  opacity: 0.35;
-  cursor: default;
-  pointer-events: none;
+  opacity: 0.35 !important;
+  cursor: default !important;
+  pointer-events: none !important;
 }
 
 .sfnav-label {
