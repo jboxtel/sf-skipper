@@ -874,7 +874,7 @@
     } else if (mode === 'flow-debug') {
       el.textContent = 'Cmd+Enter to analyze \u00b7 Esc to go back';
     } else {
-      el.textContent = 'Esc to close';
+      el.textContent = '\u2191\u2193 navigate \u00b7 Enter to select \u00b7 Esc to close';
     }
   }
 
