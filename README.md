@@ -4,6 +4,14 @@ A keyboard-first command palette for Salesforce. Press `⌘⇧K` (Mac) or `Ctrl+
 
 > Built for admins, developers, and consultants who live in Salesforce Setup all day and would like to spend less time clicking through menus.
 
+# Install (developer mode)
+Clone or download this repository.
+Open chrome://extensions and enable Developer mode (top-right).
+Click Load unpacked and select the project folder.
+(Optional, for the SOQL Generator) Right-click the extension icon → Options → paste your Anthropic API key.
+The extension is not yet published to the Chrome Web Store. Until then, "Load unpacked" is the supported install path.
+> 
+
 ## Why
 
 Salesforce Setup is powerful but slow to navigate. Finding a specific validation rule on a custom object can take five clicks and three page loads. Salesforce Commander turns that into two keystrokes:
@@ -20,18 +28,8 @@ No backend. No subscriptions. Your Salesforce session and (optionally) your Anth
 - **Object drill-down** — Pick an object and jump straight to Fields & Relationships, Validation Rules, Page Layouts, Triggers, Record Types, Sharing Rules, and more.
 - **Flow picker** — Browse every active and inactive flow with one keystroke.
 - **SOQL Generator** — Describe what you want; get a `SELECT` query that uses real field names from the object's describe (no hallucinated fields). The query is copied to your clipboard — execution stays in your hands.
-- **Recent SOQL history** — Your last 10 generated queries are saved locally for quick re-use.
 - **Flow Debug Assistant** — Open a flow in the Flow Builder, run a debug session, paste the Debug-panel output into Commander, and Claude tells you which path the flow took, what went wrong, and how to fix it.
 - **Works in production and sandboxes** — `*.lightning.force.com`, `*.my.salesforce.com`, `*.salesforce-setup.com`, and `*.force.com`.
-
-## Install (developer mode)
-
-1. Clone or download this repository.
-2. Open `chrome://extensions` and enable **Developer mode** (top-right).
-3. Click **Load unpacked** and select the project folder.
-4. (Optional, for the SOQL Generator) Right-click the extension icon → **Options** → paste your Anthropic API key.
-
-> The extension is not yet published to the Chrome Web Store. Until then, "Load unpacked" is the supported install path.
 
 ## Usage
 
