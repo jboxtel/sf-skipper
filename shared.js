@@ -1,6 +1,14 @@
 // Cross-file utilities: session lookup + cached Salesforce REST basePath.
 // Loaded as the first content script so flows.js / objects.js / soql.js can rely on it.
 
+// Per-org cache key. The flow/app/object lists are tenant-specific, so caches
+// must be scoped by hostname or switching tabs across orgs surfaces stale data
+// from the previously-loaded org for up to the cache TTL.
+function getOrgCacheKey(base) {
+  var host = (typeof window !== 'undefined' && window.location && window.location.hostname) || '';
+  return host ? base + ':' + host : base;
+}
+
 var _basePathCache = null; // { basePath, ts }
 var BASEPATH_TTL_MS = 60 * 60 * 1000; // 1 hour
 
