@@ -97,6 +97,11 @@ chrome.runtime.onMessage.addListener(function (req, sender, sendResponse) {
     handleSoqlGenerate(req, sendResponse);
     return true;
   }
+  if (req.type === 'openOptions') {
+    chrome.runtime.openOptionsPage();
+    sendResponse({ ok: true });
+    return false;
+  }
   sendResponse({ ok: false, error: 'Unknown message type: ' + req.type });
   return false;
 });
