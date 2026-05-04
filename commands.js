@@ -60,6 +60,16 @@ function toQuickLinkResult(link) {
   };
 }
 
+function toAppResult(app) {
+  return {
+    label: app.label,
+    sublabel: app.namespace ? app.namespace + '__' + app.durableId : 'Lightning App',
+    url: getOrgBase() + '/lightning/app/' + app.durableId,
+    icon: ICON_MAP.setup,
+    type: 'app',
+  };
+}
+
 function toFlowResult(flow) {
   return {
     label: flow.label,
@@ -110,9 +120,11 @@ function getRootResults() {
 var SHORTCUT_ACTIONS = [
   { label: 'Browse all objects',           sublabel: '@object', keyword: 'object',     icon: ICON_MAP.object },
   { label: 'Browse all flows',             sublabel: '@flow',   keyword: 'flow',       icon: ICON_MAP.flow },
+  { label: 'Browse Lightning apps',        sublabel: '@app',    keyword: 'app',        icon: ICON_MAP.setup },
   { label: 'Browse custom metadata types', sublabel: '@cmd',    keyword: 'cmd',        icon: ICON_MAP.object },
   { label: 'SOQL Generator',               sublabel: '@soql',   keyword: 'soql',       icon: ICON_MAP.code },
   { label: 'Debug this flow',              sublabel: '@debug',  keyword: 'flow-debug', icon: ICON_MAP.flow },
+  { label: 'Refresh metadata cache',       sublabel: '@refresh',keyword: 'refresh',    icon: ICON_MAP.setup },
 ];
 
 function getShortcutResults() {
@@ -149,6 +161,26 @@ function resolveFlowPicker(filter) {
         : filter
           ? (count === 0 ? 'No flows match' : `${count} matching flow${count === 1 ? '' : 's'}`)
           : `${allFlows.length} flow${allFlows.length === 1 ? '' : 's'} — type to filter`,
+  };
+}
+
+// App picker mode: filter across all Lightning apps
+function resolveAppPicker(filter) {
+  var allApps = getAllApps();
+  var filtered = filter
+    ? fuzzyFilter(filter, allApps, function (a) { return a.label + ' ' + a.durableId; })
+    : allApps;
+  var count = filtered.length;
+  return {
+    mode: 'app-picker',
+    results: filtered.slice(0, 30).map(toAppResult),
+    hint: getAppsState() === 'error'
+      ? 'Failed to load apps: ' + getAppsError()
+      : allApps.length === 0
+        ? 'Loading apps…'
+        : filter
+          ? (count === 0 ? 'No apps match' : count + ' matching app' + (count === 1 ? '' : 's'))
+          : allApps.length + ' app' + (allApps.length === 1 ? '' : 's') + ' — type to filter',
   };
 }
 
@@ -269,6 +301,15 @@ function resolveInput(rawInput) {
     };
   }
 
+  // "@app" / "@apps" — hint to press Enter to browse Lightning apps
+  if (input.toLowerCase() === 'app' || input.toLowerCase() === 'apps') {
+    return {
+      mode: 'app-hint',
+      results: [],
+      hint: 'Press Enter to browse Lightning apps',
+    };
+  }
+
   // "@object" or "@objects" — hint to press Enter
   if (input.toLowerCase() === 'object' || input.toLowerCase() === 'objects') {
     return {
@@ -294,6 +335,15 @@ function resolveInput(rawInput) {
       mode: 'soql-hint',
       results: [SOQL_ACTION],
       hint: 'Press Enter to open the SOQL generator',
+    };
+  }
+
+  // "@refresh" — hint to press Enter to refetch flow + object caches
+  if (lc === 'refresh' || lc === 'reload') {
+    return {
+      mode: 'refresh-hint',
+      results: [],
+      hint: 'Press Enter to refresh the flow + object caches',
     };
   }
 

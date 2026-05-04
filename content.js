@@ -5,15 +5,17 @@
 
   initCustomObjects(); // populate custom object cache from storage + URL + DOM
   initFlows();         // populate flow cache from storage + API
+  initApps();          // populate Lightning app cache from storage + API
 
   var paletteVisible = false;
   var selectedIndex = -1;
   var currentResults = [];
-  var searchMode = 'root'; // 'root' | 'object-picker' | 'object-scoped' | 'flow-picker' | 'soql' | 'flow-debug' | 'cmd-picker' | 'cmd-scoped'
+  var searchMode = 'root'; // 'root' | 'object-picker' | 'object-scoped' | 'flow-picker' | 'app-picker' | 'soql' | 'flow-debug' | 'cmd-picker' | 'cmd-scoped'
   var scopedObject = null;
   var scopedCmdt = null;
   var objectPickerFilter = '';
   var flowPickerFilter = '';
+  var appPickerFilter = '';
   var cmdtPickerFilter = '';
   var soqlInFlight = false;
   var flowDebugInFlight = false;
@@ -69,12 +71,29 @@
 
     input.addEventListener('input', function () {
       var val = input.value;
+      // From root, `@cmd foo` / `@flow foo` / `@object foo` jumps into the
+      // matching picker with `foo` as the live filter. Triggers on the first
+      // space after the keyword so users can keep typing without pressing Enter.
+      if (searchMode === 'root') {
+        var trimmed = val.replace(/^@/, '');
+        var m = trimmed.match(/^(cmd|cmdt|mdt|flow|flows|object|objects|app|apps)\s+(.*)$/i);
+        if (m) {
+          var kw = m[1].toLowerCase();
+          var rest = m[2];
+          if (kw === 'cmd' || kw === 'cmdt' || kw === 'mdt') { enterCmdPickerMode(rest); return; }
+          if (kw === 'flow' || kw === 'flows')               { enterFlowPickerMode(rest); return; }
+          if (kw === 'object' || kw === 'objects')           { enterObjectPickerMode(rest); return; }
+          if (kw === 'app' || kw === 'apps')                 { enterAppPickerMode(rest); return; }
+        }
+      }
       if (searchMode === 'object-picker') {
         renderResults(resolveObjectPicker(val));
       } else if (searchMode === 'object-scoped') {
         renderResults(resolveObjectScoped(val, scopedObject));
       } else if (searchMode === 'flow-picker') {
         renderResults(resolveFlowPicker(val));
+      } else if (searchMode === 'app-picker') {
+        renderResults(resolveAppPicker(val));
       } else if (searchMode === 'cmd-picker') {
         renderResults(resolveCmdtPicker(val));
       } else if (searchMode === 'cmd-scoped') {
@@ -107,6 +126,10 @@
         enterFlowPickerMode('');
         return;
       }
+      if (keyword === 'app' || keyword === 'apps') {
+        enterAppPickerMode('');
+        return;
+      }
       if (keyword === 'soql') {
         enterSoqlMode();
         return;
@@ -117,6 +140,10 @@
       }
       if (keyword === 'cmd' || keyword === 'cmdt' || keyword === 'mdt') {
         enterCmdPickerMode('');
+        return;
+      }
+      if (keyword === 'refresh' || keyword === 'reload') {
+        runRefresh();
         return;
       }
     }
@@ -142,6 +169,7 @@
         return;
       case 'object-picker':
       case 'flow-picker':
+      case 'app-picker':
       case 'cmd-picker':
       case 'soql':
       case 'flow-debug':
@@ -158,6 +186,7 @@
     scopedCmdt = null;
     objectPickerFilter = '';
     flowPickerFilter = '';
+    appPickerFilter = '';
     cmdtPickerFilter = '';
     hideSoqlPanel();
     setFooterHints('root');
@@ -326,6 +355,15 @@
     input.value = filterText || '';
     input.placeholder = 'Filter flows…';
     renderResults(resolveFlowPicker(filterText || ''));
+    input.focus();
+  }
+
+  function enterAppPickerMode(filterText) {
+    searchMode = 'app-picker';
+    var input = document.getElementById('sfnav-input');
+    input.value = filterText || '';
+    input.placeholder = 'Filter Lightning apps…';
+    renderResults(resolveAppPicker(filterText || ''));
     input.focus();
   }
 
@@ -560,6 +598,7 @@
     scopedCmdt = null;
     objectPickerFilter = '';
     flowPickerFilter = '';
+    appPickerFilter = '';
     cmdtPickerFilter = '';
     var overlay = document.getElementById('sfnav-overlay');
     var input = document.getElementById('sfnav-input');
@@ -592,6 +631,7 @@
     scopedCmdt = null;
     objectPickerFilter = '';
     flowPickerFilter = '';
+    appPickerFilter = '';
     cmdtPickerFilter = '';
   }
 
@@ -716,10 +756,34 @@
     switch (keyword) {
       case 'object':     enterObjectPickerMode(''); return;
       case 'flow':       enterFlowPickerMode(''); return;
+      case 'app':        enterAppPickerMode(''); return;
       case 'cmd':        enterCmdPickerMode(''); return;
       case 'soql':       enterSoqlMode(); return;
       case 'flow-debug': enterFlowDebugMode(); return;
+      case 'refresh':    runRefresh(); return;
     }
+  }
+
+  function runRefresh() {
+    var input = document.getElementById('sfnav-input');
+    var hintEl = document.getElementById('sfnav-hint');
+    if (input) input.value = '';
+    if (hintEl) hintEl.textContent = 'Refreshing flow + object caches…';
+
+    var tasks = [];
+    if (typeof loadFlows === 'function')           tasks.push(loadFlows());
+    if (typeof loadObjectsFromPage === 'function') tasks.push(loadObjectsFromPage());
+    if (typeof loadApps === 'function')            tasks.push(loadApps());
+
+    Promise.allSettled(tasks).then(function (results) {
+      var failed = results.filter(function (r) { return r.status === 'rejected'; });
+      if (hintEl) {
+        hintEl.textContent = failed.length
+          ? 'Refresh finished with errors — ' + failed[0].reason.message
+          : 'Caches refreshed — ' + getAllFlows().length + ' flows, ' + getAllApps().length + ' apps, ' + getAllObjects().length + ' objects';
+      }
+      if (searchMode === 'root') renderResults(resolveInput(input ? input.value : ''));
+    });
   }
 
   function handleCmdtAction(result) {
