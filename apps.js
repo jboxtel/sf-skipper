@@ -34,7 +34,10 @@ async function loadApps() {
   _appsLoadedAt = Date.now();
 
   if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-    chrome.storage.local.set({ sfnavApps: _apps, sfnavAppsLoadedAt: _appsLoadedAt });
+    var payload = {};
+    payload[getOrgCacheKey('sfnavApps')] = _apps;
+    payload[getOrgCacheKey('sfnavAppsLoadedAt')] = _appsLoadedAt;
+    chrome.storage.local.set(payload);
   }
 
   document.dispatchEvent(new CustomEvent('sfnav:apps-loaded'));
@@ -43,10 +46,12 @@ async function loadApps() {
 
 function initApps() {
   if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-    chrome.storage.local.get(['sfnavApps', 'sfnavAppsLoadedAt'], function (data) {
-      if (data.sfnavApps && data.sfnavApps.length) {
-        _apps = data.sfnavApps;
-        _appsLoadedAt = data.sfnavAppsLoadedAt || 0;
+    var appsKey = getOrgCacheKey('sfnavApps');
+    var loadedAtKey = getOrgCacheKey('sfnavAppsLoadedAt');
+    chrome.storage.local.get([appsKey, loadedAtKey], function (data) {
+      if (data[appsKey] && data[appsKey].length) {
+        _apps = data[appsKey];
+        _appsLoadedAt = data[loadedAtKey] || 0;
         _appsState = 'ready';
         document.dispatchEvent(new CustomEvent('sfnav:apps-loaded'));
       }

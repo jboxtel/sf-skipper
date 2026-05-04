@@ -70,7 +70,9 @@ function mergeIntoCache(incoming) {
 // Persist the current cache to chrome.storage.local
 function persistCache() {
   if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-    chrome.storage.local.set({ sfnavCustomObjects: _customObjects });
+    var payload = {};
+    payload[getOrgCacheKey('sfnavCustomObjects')] = _customObjects;
+    chrome.storage.local.set(payload);
   }
 }
 
@@ -99,9 +101,10 @@ async function loadObjectsFromPage() {
 function initCustomObjects() {
   // Source 1: stored cache (instant — gives the user something to search before the API call returns)
   if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-    chrome.storage.local.get('sfnavCustomObjects', function (data) {
-      if (data.sfnavCustomObjects && data.sfnavCustomObjects.length) {
-        mergeIntoCache(data.sfnavCustomObjects);
+    var key = getOrgCacheKey('sfnavCustomObjects');
+    chrome.storage.local.get(key, function (data) {
+      if (data[key] && data[key].length) {
+        mergeIntoCache(data[key]);
       }
     });
   }

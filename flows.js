@@ -35,7 +35,10 @@ async function loadFlows() {
   _flowsLoadedAt = Date.now();
 
   if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-    chrome.storage.local.set({ sfnavFlows: _flows, sfnavFlowsLoadedAt: _flowsLoadedAt });
+    var payload = {};
+    payload[getOrgCacheKey('sfnavFlows')] = _flows;
+    payload[getOrgCacheKey('sfnavFlowsLoadedAt')] = _flowsLoadedAt;
+    chrome.storage.local.set(payload);
   }
 
   document.dispatchEvent(new CustomEvent('sfnav:flows-loaded'));
@@ -44,10 +47,12 @@ async function loadFlows() {
 
 function initFlows() {
   if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-    chrome.storage.local.get(['sfnavFlows', 'sfnavFlowsLoadedAt'], function (data) {
-      if (data.sfnavFlows && data.sfnavFlows.length) {
-        _flows = data.sfnavFlows;
-        _flowsLoadedAt = data.sfnavFlowsLoadedAt || 0;
+    var flowsKey = getOrgCacheKey('sfnavFlows');
+    var loadedAtKey = getOrgCacheKey('sfnavFlowsLoadedAt');
+    chrome.storage.local.get([flowsKey, loadedAtKey], function (data) {
+      if (data[flowsKey] && data[flowsKey].length) {
+        _flows = data[flowsKey];
+        _flowsLoadedAt = data[loadedAtKey] || 0;
         _flowsState = 'ready';
         document.dispatchEvent(new CustomEvent('sfnav:flows-loaded'));
       }
