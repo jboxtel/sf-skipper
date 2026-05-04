@@ -141,6 +141,27 @@ function getAllCustomMetadataTypes() {
   return getAllObjects().filter(function (o) { return /__mdt$/i.test(o.apiName); });
 }
 
+// Resolve the CustomObject entity definition ID (01Ixx…) for a CMDT.
+// Used to build the Setup definition URL. Queries Tooling API and caches.
+async function getEntityIdForCmdt(apiName) {
+  var match = _customObjects.find(function (o) { return o.apiName === apiName; });
+  if (match && match.entityId) return match.entityId;
+
+  var pre = await sfRestPreamble();
+  var soql = "SELECT Id FROM CustomObject WHERE DeveloperName = '" + apiName.replace(/__mdt$/i, '').replace(/'/g, "\\'") + "' AND ManageableState != 'deleted'";
+  var resp = await fetch(pre.apiBase + pre.basePath + '/tooling/query/?q=' + encodeURIComponent(soql), { headers: pre.headers });
+  if (!resp.ok) throw new Error('Tooling query failed for ' + apiName + ': ' + resp.status);
+  var data = await resp.json();
+  if (!data.records || !data.records.length) throw new Error('Entity not found for ' + apiName);
+  var entityId = data.records[0].Id;
+
+  if (match) {
+    match.entityId = entityId;
+    persistCache();
+  }
+  return entityId;
+}
+
 // The CMDT "Manage Records" URL uses the type's key prefix (e.g. "m0u").
 // We get keyPrefix from describeGlobal during initial load, but fall back
 // to a per-object describe if it isn't in the cache (older cached entries).
