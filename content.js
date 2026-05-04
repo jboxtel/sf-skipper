@@ -28,7 +28,7 @@
     overlay.innerHTML =
       '<div id="sfnav-palette">' +
         '<div id="sfnav-breadcrumb"></div>' +
-        '<input id="sfnav-input" type="text" placeholder="Type @ to start — e.g. @account" autocomplete="off" spellcheck="false" />' +
+        '<input id="sfnav-input" type="text" placeholder="Search or pick a category below" autocomplete="off" spellcheck="false" />' +
         '<div id="sfnav-hint"></div>' +
         '<ul id="sfnav-results"></ul>' +
         '<div id="sfnav-soql" style="display:none">' +
@@ -198,7 +198,7 @@
     var input = document.getElementById('sfnav-input');
     if (input) {
       input.value = '';
-      input.placeholder = 'Type @ to start — e.g. @account';
+      input.placeholder = 'Search or pick a category below';
       input.disabled = false;
       renderResults(resolveInput(''));
       input.focus();
@@ -605,7 +605,7 @@
     overlay.style.display = 'flex';
     paletteVisible = true;
     input.value = '';
-    input.placeholder = 'Type @ to start — e.g. @account';
+    input.placeholder = 'Search or pick a category below';
     hideSoqlPanel();
     renderResults(resolveInput(''));
     setFooterHints('root');
@@ -648,8 +648,9 @@
     var hintEl = document.getElementById('sfnav-hint');
     var breadcrumbEl = document.getElementById('sfnav-breadcrumb');
 
-    currentResults = resolution.results;
-    selectedIndex = resolution.results.length > 0 ? 0 : -1;
+    // Filter out headers for navigation — only selectable items
+    currentResults = resolution.results.filter(function (r) { return r.type !== 'header'; });
+    selectedIndex = currentResults.length > 0 ? 0 : -1;
 
     if (resolution.mode === 'object-picker') {
       breadcrumbEl.innerHTML = '<span class="sfnav-bc-seg">@object</span> <span class="sfnav-bc-arrow">›</span>';
@@ -682,9 +683,19 @@
     hintEl.textContent = resolution.hint || '';
     listEl.innerHTML = '';
 
-    resolution.results.forEach(function (result, i) {
+    var selectableIndex = 0;
+    resolution.results.forEach(function (result) {
+      if (result.type === 'header') {
+        var hdr = document.createElement('li');
+        hdr.className = 'sfnav-section-header';
+        hdr.textContent = result.label;
+        listEl.appendChild(hdr);
+        return;
+      }
+
       var li = document.createElement('li');
-      li.className = 'sfnav-item' + (i === selectedIndex ? ' selected' : '');
+      var isSelected = selectableIndex === selectedIndex;
+      li.className = 'sfnav-item' + (isSelected ? ' selected' : '');
       li.dataset.url = result.url;
 
       // Objects in picker mode get a ›  indicator to show they expand
@@ -695,6 +706,7 @@
         '<span class="sfnav-shortcut">' + shortcutLabel + '</span>';
       li.addEventListener('click', function () { navigateTo(result.url, result); });
       listEl.appendChild(li);
+      selectableIndex++;
     });
 
     var first = listEl.querySelector('.sfnav-item');
