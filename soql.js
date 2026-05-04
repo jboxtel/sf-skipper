@@ -205,7 +205,7 @@ function hasSoqlApiKey() {
 }
 
 function openSoqlSettings() {
-  if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
-    chrome.runtime.sendMessage({ type: 'openOptions' });
+  if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.getURL) {
+    window.open(chrome.runtime.getURL('options.html'), '_blank');
   }
 }

@@ -275,11 +275,14 @@
   color: var(--sf-error) !important;
 }
 
-#sfnav-soql-status a {
-  color: var(--sf-accent);
-  text-decoration: none;
+#sfnav-soql-status a,
+#sfnav-flowdebug-status a,
+.sfnav-settings-link {
+  color: var(--sf-accent) !important;
+  text-decoration: none !important;
   font-weight: 600;
   border-bottom: 1px solid currentColor;
+  cursor: pointer;
 }
 
 #sfnav-soql-output {
