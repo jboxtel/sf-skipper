@@ -106,6 +106,28 @@ function getRootResults() {
   return actions.concat(SETUP_QUICK_LINKS.slice(0, 10).map(toQuickLinkResult));
 }
 
+// Discoverable shortcut menu — typing `@` alone in the palette shows this list.
+var SHORTCUT_ACTIONS = [
+  { label: 'Browse all objects',           sublabel: '@object', keyword: 'object',     icon: ICON_MAP.object },
+  { label: 'Browse all flows',             sublabel: '@flow',   keyword: 'flow',       icon: ICON_MAP.flow },
+  { label: 'Browse custom metadata types', sublabel: '@cmd',    keyword: 'cmd',        icon: ICON_MAP.object },
+  { label: 'SOQL Generator',               sublabel: '@soql',   keyword: 'soql',       icon: ICON_MAP.code },
+  { label: 'Debug this flow',              sublabel: '@debug',  keyword: 'flow-debug', icon: ICON_MAP.flow },
+];
+
+function getShortcutResults() {
+  return SHORTCUT_ACTIONS.map(function (s) {
+    return {
+      label: s.label,
+      sublabel: s.sublabel,
+      url: '#',
+      icon: s.icon,
+      type: 'shortcut',
+      keyword: s.keyword,
+    };
+  });
+}
+
 function isOnObjectManagerPage() {
   return window.location.pathname.includes('/ObjectManager');
 }
@@ -215,16 +237,26 @@ function resolveObjectScoped(filter, object) {
 }
 
 function resolveInput(rawInput) {
+  // Bare "@" → show the discoverable shortcut menu
+  if (rawInput === '@') {
+    return {
+      mode: 'shortcuts',
+      results: getShortcutResults(),
+      hint: 'Pick a shortcut or keep typing to filter Setup',
+    };
+  }
+
   const input = rawInput.startsWith('@') ? rawInput.slice(1) : rawInput;
 
   if (input === '' || input === 'help') {
     const customCount = getAllObjects().length - STANDARD_OBJECTS.length;
+    var base = 'Type @ for shortcuts';
     return {
       mode: 'root',
       results: getRootResults(),
       hint: customCount > 0
-        ? `${customCount} custom objects cached — type to search`
-        : 'Type @object + Enter to browse objects, or @flows, @apex …',
+        ? `${base} · ${customCount} custom objects cached`
+        : `${base} · or fuzzy-search any Setup page or object`,
     };
   }
 

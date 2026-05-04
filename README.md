@@ -38,6 +38,7 @@ No backend. No subscriptions. Your Salesforce session and (optionally) your Anth
 | Action | How |
 | --- | --- |
 | Open the palette | `⌘⇧K` / `Ctrl+Shift+K` on any Salesforce page |
+| **See all shortcuts** | Type `@` (alone) — palette lists every available shortcut |
 | Browse all objects | Type `object` → Enter |
 | Browse all flows | Type `flow` → Enter |
 | Browse custom metadata types | Type `cmd` (or `cmdt` / `mdt`) → Enter, pick a type, then **Manage Records** or **Object Definition** |

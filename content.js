@@ -703,8 +703,23 @@
       return;
     }
 
+    if (result && result.type === 'shortcut') {
+      executeShortcut(result.keyword);
+      return;
+    }
+
     hidePalette();
     window.location.href = url;
+  }
+
+  function executeShortcut(keyword) {
+    switch (keyword) {
+      case 'object':     enterObjectPickerMode(''); return;
+      case 'flow':       enterFlowPickerMode(''); return;
+      case 'cmd':        enterCmdPickerMode(''); return;
+      case 'soql':       enterSoqlMode(); return;
+      case 'flow-debug': enterFlowDebugMode(); return;
+    }
   }
 
   function handleCmdtAction(result) {
