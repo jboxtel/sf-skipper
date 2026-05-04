@@ -869,18 +869,13 @@
   function setFooterHints(mode) {
     var el = document.getElementById('sfnav-footer-hints');
     if (!el) return;
-    var hints;
-    switch (mode) {
-      case 'soql':
-        hints = '↵ generate   Esc back';
-        break;
-      case 'flow-debug':
-        hints = '⌘↵ analyze   Esc back';
-        break;
-      default:
-        hints = '↑↓ navigate   ↵ select   ⌫ back   Esc back';
+    if (mode === 'soql') {
+      el.textContent = 'Enter to generate \u00b7 Esc to go back';
+    } else if (mode === 'flow-debug') {
+      el.textContent = 'Cmd+Enter to analyze \u00b7 Esc to go back';
+    } else {
+      el.textContent = 'Esc to close';
     }
-    el.innerHTML = hints;
   }
 
   function esc(s) {
