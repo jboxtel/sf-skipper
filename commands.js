@@ -1,13 +1,3 @@
-var ICON_MAP = ICON_MAP || {
-  object: '◈',
-  field: '≡',
-  setup: '⚙',
-  user: '👤',
-  code: '</>',
-  flow: '⟳',
-  security: '🔒',
-};
-
 function fuzzyScore(query, target) {
   const q = query.toLowerCase();
   const t = target.toLowerCase();
@@ -30,21 +20,11 @@ function fuzzyFilter(query, items, getLabel) {
     .map(x => x.item);
 }
 
-function getIconForSetupLink(label) {
-  const l = label.toLowerCase();
-  if (l.includes('flow') || l.includes('process') || l.includes('workflow')) return ICON_MAP.flow;
-  if (l.includes('user') || l.includes('profile') || l.includes('role') || l.includes('permission')) return ICON_MAP.user;
-  if (l.includes('apex') || l.includes('static') || l.includes('class') || l.includes('trigger')) return ICON_MAP.code;
-  if (l.includes('security') || l.includes('sharing') || l.includes('health') || l.includes('login') || l.includes('audit')) return ICON_MAP.security;
-  return ICON_MAP.setup;
-}
-
 function toObjectResult(obj) {
   return {
     label: obj.label,
     sublabel: obj.isCustom ? obj.apiName : 'Standard Object',
     url: `${getObjectManagerBase()}/${obj.apiName}/view`,
-    icon: ICON_MAP.object,
     type: 'object',
     object: obj,
   };
@@ -55,7 +35,6 @@ function toQuickLinkResult(link) {
     label: link.label,
     sublabel: 'Setup',
     url: link.url(),
-    icon: getIconForSetupLink(link.label),
     type: 'setup',
   };
 }
@@ -65,7 +44,6 @@ function toAppResult(app) {
     label: app.label,
     sublabel: app.namespace ? app.namespace + '__' + app.durableId : 'Lightning App',
     url: getOrgBase() + '/lightning/app/' + app.durableId,
-    icon: ICON_MAP.setup,
     type: 'app',
   };
 }
@@ -75,7 +53,6 @@ function toFlowResult(flow) {
     label: flow.label,
     sublabel: flow.isActive ? 'Active Flow' : 'Inactive Flow',
     url: getOrgBase() + '/builder_platform_interaction/flowBuilder.app?flowId=' + (flow.versionId || flow.id),
-    icon: ICON_MAP.flow,
     type: 'flow',
   };
 }
@@ -85,59 +62,79 @@ function toSubPageResult(page, object) {
     label: page.label,
     sublabel: object.label,
     url: buildObjectSubPageUrl(object.apiName, page.segment),
-    icon: ICON_MAP.field,
     type: 'subpage',
   };
 }
 
 var SOQL_ACTION = {
-  label: 'SOQL Generator',
-  sublabel: 'Natural language → SOQL',
+  label: '@soql',
+  sublabel: 'Ask a data question',
   url: '#',
-  icon: ICON_MAP.code,
   type: 'action',
   action: 'soql-generator',
 };
 
 var FLOW_DEBUG_ACTION = {
-  label: 'Debug this flow',
-  sublabel: 'Analyze the flow + your debug output with Claude',
+  label: '@debug',
+  sublabel: 'Analyze a flow with Claude',
   url: '#',
-  icon: ICON_MAP.flow,
   type: 'action',
   action: 'flow-debug',
 };
 
-function getRootResults() {
-  var actions = [SOQL_ACTION];
-  if (typeof isFlowBuilderPage === 'function' && isFlowBuilderPage()) {
-    actions.unshift(FLOW_DEBUG_ACTION);
-  }
-  return actions.concat(SETUP_QUICK_LINKS.slice(0, 10).map(toQuickLinkResult));
+function makeHeader(label) {
+  return { label: label, type: 'header' };
 }
 
-// Discoverable shortcut menu — typing `@` alone in the palette shows this list.
-var SHORTCUT_ACTIONS = [
-  { label: 'Browse all objects',           sublabel: '@object', keyword: 'object',     icon: ICON_MAP.object },
-  { label: 'Browse all flows',             sublabel: '@flow',   keyword: 'flow',       icon: ICON_MAP.flow },
-  { label: 'Browse Lightning apps',        sublabel: '@app',    keyword: 'app',        icon: ICON_MAP.setup },
-  { label: 'Browse custom metadata types', sublabel: '@cmd',    keyword: 'cmd',        icon: ICON_MAP.object },
-  { label: 'SOQL Generator',               sublabel: '@soql',   keyword: 'soql',       icon: ICON_MAP.code },
-  { label: 'Debug this flow',              sublabel: '@debug',  keyword: 'flow-debug', icon: ICON_MAP.flow },
-  { label: 'Refresh metadata cache',       sublabel: '@refresh',keyword: 'refresh',    icon: ICON_MAP.setup },
-];
+function getRootResults() {
+  var results = [];
+
+  // ── Browse ──
+  results.push(makeHeader('Browse'));
+  results.push({ label: '@object',   sublabel: 'All standard & custom objects', url: '#', type: 'shortcut', keyword: 'object' });
+  results.push({ label: '@flow',     sublabel: 'All org flows',                 url: '#', type: 'shortcut', keyword: 'flow' });
+  results.push({ label: '@app',      sublabel: 'All installed Lightning apps',  url: '#', type: 'shortcut', keyword: 'app' });
+  results.push({ label: '@cmd',      sublabel: 'Custom metadata types',         url: '#', type: 'shortcut', keyword: 'cmd' });
+
+  // ── AI Tools ──
+  results.push(makeHeader('AI Tools'));
+  results.push(SOQL_ACTION);
+  var onFlowPage = typeof isFlowBuilderPage === 'function' && isFlowBuilderPage();
+  results.push({
+    label: FLOW_DEBUG_ACTION.label,
+    sublabel: onFlowPage ? FLOW_DEBUG_ACTION.sublabel : 'Open a flow first',
+    url: FLOW_DEBUG_ACTION.url,
+    type: FLOW_DEBUG_ACTION.type,
+    action: FLOW_DEBUG_ACTION.action,
+    disabled: !onFlowPage,
+  });
+
+  // ── Setup ──
+  results.push(makeHeader('Setup'));
+  SETUP_QUICK_LINKS.slice(0, 8).forEach(function (link) {
+    results.push(toQuickLinkResult(link));
+  });
+
+  return results;
+}
 
 function getShortcutResults() {
-  return SHORTCUT_ACTIONS.map(function (s) {
-    return {
-      label: s.label,
-      sublabel: s.sublabel,
-      url: '#',
-      icon: s.icon,
-      type: 'shortcut',
-      keyword: s.keyword,
-    };
-  });
+  var results = [];
+
+  results.push(makeHeader('Browse'));
+  results.push({ label: '@object',   sublabel: 'All standard & custom objects', url: '#', type: 'shortcut', keyword: 'object' });
+  results.push({ label: '@flow',     sublabel: 'All org flows',                 url: '#', type: 'shortcut', keyword: 'flow' });
+  results.push({ label: '@app',      sublabel: 'All installed Lightning apps',  url: '#', type: 'shortcut', keyword: 'app' });
+  results.push({ label: '@cmd',      sublabel: 'Custom metadata types',         url: '#', type: 'shortcut', keyword: 'cmd' });
+
+  results.push(makeHeader('AI Tools'));
+  results.push({ label: '@soql',     sublabel: 'Ask a data question',           url: '#', type: 'shortcut', keyword: 'soql' });
+  results.push({ label: '@debug',    sublabel: 'Analyze a flow with Claude',    url: '#', type: 'shortcut', keyword: 'flow-debug' });
+
+  results.push(makeHeader('Maintenance'));
+  results.push({ label: '@refresh',  sublabel: 'Reload cached metadata',        url: '#', type: 'shortcut', keyword: 'refresh' });
+
+  return results;
 }
 
 function isOnObjectManagerPage() {
@@ -198,7 +195,6 @@ function resolveCmdtPicker(filter) {
         label: o.label,
         sublabel: o.apiName,
         url: '#',
-        icon: ICON_MAP.object,
         type: 'cmdt',
         cmdt: o,
       };
@@ -229,7 +225,6 @@ function resolveCmdtScoped(filter, cmdt) {
         label: p.label,
         sublabel: cmdt.label,
         url: '#',
-        icon: ICON_MAP.field,
         type: 'cmdt-action',
         cmdt: cmdt,
         action: p.action,
@@ -274,21 +269,17 @@ function resolveInput(rawInput) {
     return {
       mode: 'shortcuts',
       results: getShortcutResults(),
-      hint: 'Pick a shortcut or keep typing to filter Setup',
+      hint: 'Pick a shortcut or keep typing to search',
     };
   }
 
   const input = rawInput.startsWith('@') ? rawInput.slice(1) : rawInput;
 
   if (input === '' || input === 'help') {
-    const customCount = getAllObjects().length - STANDARD_OBJECTS.length;
-    var base = 'Type @ for shortcuts';
     return {
       mode: 'root',
       results: getRootResults(),
-      hint: customCount > 0
-        ? `${base} · ${customCount} custom objects cached`
-        : `${base} · or fuzzy-search any Setup page or object`,
+      hint: 'Search objects, flows, setup pages — or pick a category below',
     };
   }
 

@@ -97,6 +97,11 @@ chrome.runtime.onMessage.addListener(function (req, sender, sendResponse) {
     handleSoqlGenerate(req, sendResponse);
     return true;
   }
+  if (req.type === 'openOptions') {
+    chrome.runtime.openOptionsPage();
+    sendResponse({ ok: true });
+    return false;
+  }
   sendResponse({ ok: false, error: 'Unknown message type: ' + req.type });
   return false;
 });
@@ -129,7 +134,7 @@ chrome.commands.onCommand.addListener(async (command, tab) => {
     await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       world: 'ISOLATED',
-      files: ['salesforce-urls.js', 'shared.js', 'objects.js', 'flows.js', 'flow-debug.js', 'commands.js', 'soql.js', 'content.js'],
+      files: ['salesforce-urls.js', 'shared.js', 'objects.js', 'flows.js', 'apps.js', 'flow-debug.js', 'commands.js', 'soql.js', 'content.js'],
     });
     await new Promise(r => setTimeout(r, 80));
     await chrome.scripting.executeScript({

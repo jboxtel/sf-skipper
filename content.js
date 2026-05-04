@@ -28,16 +28,16 @@
     overlay.innerHTML =
       '<div id="sfnav-palette">' +
         '<div id="sfnav-breadcrumb"></div>' +
-        '<input id="sfnav-input" type="text" placeholder="Type @ to start — e.g. @account" autocomplete="off" spellcheck="false" />' +
+        '<input id="sfnav-input" type="text" placeholder="Search or pick a category below" autocomplete="off" spellcheck="false" />' +
         '<div id="sfnav-hint"></div>' +
         '<ul id="sfnav-results"></ul>' +
         '<div id="sfnav-soql" style="display:none">' +
+          '<span id="sfnav-soql-apistat" class="sfnav-apistat"></span>' +
           '<div id="sfnav-soql-status"></div>' +
           '<pre id="sfnav-soql-output"></pre>' +
           '<div id="sfnav-soql-actions">' +
             '<button id="sfnav-soql-copy" class="sfnav-soql-btn-primary">Copy</button>' +
             '<button id="sfnav-soql-clear" class="sfnav-soql-btn-secondary">Clear</button>' +
-            '<button id="sfnav-soql-settings" class="sfnav-soql-btn-secondary">Settings</button>' +
           '</div>' +
           '<div id="sfnav-soql-history-label" class="sfnav-section-header">Recent</div>' +
           '<ul id="sfnav-soql-history"></ul>' +
@@ -48,8 +48,7 @@
           '<input id="sfnav-flowdebug-expectation" type="text" placeholder="Optional: what did you expect to happen?" autocomplete="off" />' +
           '<div id="sfnav-flowdebug-actions">' +
             '<button id="sfnav-flowdebug-run" class="sfnav-soql-btn-primary">Analyze <span class="sfnav-kbd">⌘↵</span></button>' +
-            '<button id="sfnav-flowdebug-settings" class="sfnav-soql-btn-secondary">Settings</button>' +
-            '<span class="sfnav-flowdebug-privacy">Flow + debug output sent to Anthropic</span>' +
+            '<span id="sfnav-flowdebug-apistat" class="sfnav-apistat"></span>' +
           '</div>' +
           '<div id="sfnav-flowdebug-status"></div>' +
           '<div id="sfnav-flowdebug-output" style="display:none">' +
@@ -58,7 +57,7 @@
             '<div class="sfnav-flowdebug-section sfnav-flowdebug-fix"><span class="sfnav-flowdebug-label">Suggested fix</span><ol class="sfnav-flowdebug-body sfnav-flowdebug-steps"></ol><button class="sfnav-flowdebug-copy">Copy fix</button></div>' +
           '</div>' +
         '</div>' +
-        '<div id="sfnav-footer"><span id="sfnav-brand">⌘ Salesforce Commander</span><span id="sfnav-footer-hints"></span></div>' +
+        '<div id="sfnav-footer"><span id="sfnav-brand">Salesforce Commander</span><span id="sfnav-footer-hints"></span></div>' +
       '</div>';
 
     document.body.appendChild(overlay);
@@ -198,7 +197,7 @@
     var input = document.getElementById('sfnav-input');
     if (input) {
       input.value = '';
-      input.placeholder = 'Type @ to start — e.g. @account';
+      input.placeholder = 'Search or pick a category below';
       input.disabled = false;
       renderResults(resolveInput(''));
       input.focus();
@@ -265,9 +264,21 @@
       document.getElementById('sfnav-soql-actions').style.display = 'none';
       document.getElementById('sfnav-input').focus();
     };
-    document.getElementById('sfnav-soql-settings').onclick = function () {
-      openSoqlSettings();
-    };
+
+    hasSoqlApiKey().then(function (ok) {
+      var el = document.getElementById('sfnav-soql-apistat');
+      if (!el) return;
+      if (ok) {
+        el.textContent = 'API key connected';
+        el.className = 'sfnav-apistat sfnav-apistat-ok';
+      } else {
+        el.innerHTML = 'No API key — <a href="#" class="sfnav-settings-link">configure in settings</a>';
+        el.className = 'sfnav-apistat sfnav-apistat-missing';
+        var link = el.querySelector('.sfnav-settings-link');
+        if (link) link.onclick = function (e) { e.preventDefault(); openSoqlSettings(); };
+      }
+    });
+
     input.focus();
   }
 
@@ -283,10 +294,10 @@
 
     var hasKey = await hasSoqlApiKey();
     if (!hasKey) {
-      statusEl.innerHTML = 'No API key configured. <a href="#" id="sfnav-soql-open-settings">Open settings</a>.';
+      statusEl.innerHTML = 'No API key configured. <a href="#" class="sfnav-settings-link">Open settings</a>.';
       statusEl.className = 'sfnav-soql-status-error';
       actionsEl.style.display = 'none';
-      var link = document.getElementById('sfnav-soql-open-settings');
+      var link = statusEl.querySelector('.sfnav-settings-link');
       if (link) link.onclick = function (e) { e.preventDefault(); openSoqlSettings(); };
       return;
     }
@@ -415,11 +426,12 @@
     var metaEl = document.getElementById('sfnav-flowdebug-meta');
     if (!flowId) {
       metaEl.innerHTML = '<em class="sfnav-flowdebug-warn">No flow detected on this page. Open a flow in the Flow Builder, then try again.</em>';
+    } else if (typeof isManagedFlowId === 'function' && isManagedFlowId(flowId)) {
+      metaEl.textContent = 'Managed package flow — paste the debug output and we\u2019ll analyze based on that alone.';
     } else {
       metaEl.textContent = 'Loading flow…';
       fetchFlowMetadata(flowId)
         .then(function (record) {
-          // Only update if user is still in flow-debug mode for this flow
           if (searchMode !== 'flow-debug') return;
           metaEl.textContent = 'Flow: ' + (record.MasterLabel || flowId);
         })
@@ -429,8 +441,21 @@
         });
     }
 
+    hasSoqlApiKey().then(function (ok) {
+      var el = document.getElementById('sfnav-flowdebug-apistat');
+      if (!el) return;
+      if (ok) {
+        el.textContent = 'API key connected';
+        el.className = 'sfnav-apistat sfnav-apistat-ok';
+      } else {
+        el.innerHTML = 'No API key — <a href="#" class="sfnav-settings-link">configure in settings</a>';
+        el.className = 'sfnav-apistat sfnav-apistat-missing';
+        var link = el.querySelector('.sfnav-settings-link');
+        if (link) link.onclick = function (e) { e.preventDefault(); openSoqlSettings(); };
+      }
+    });
+
     document.getElementById('sfnav-flowdebug-run').onclick = runFlowDebugAnalysis;
-    document.getElementById('sfnav-flowdebug-settings').onclick = function () { openSoqlSettings(); };
 
     // Submit on Cmd/Ctrl+Enter from inside the textarea (plain Enter keeps newline);
     // Escape steps back to root.
@@ -483,9 +508,9 @@
 
     var hasKey = await hasSoqlApiKey();
     if (!hasKey) {
-      statusEl.innerHTML = 'No API key configured. <a href="#" id="sfnav-flowdebug-open-settings">Open settings</a>.';
+      statusEl.innerHTML = 'No API key configured. <a href="#" class="sfnav-settings-link">Open settings</a>.';
       statusEl.className = 'sfnav-flowdebug-status-error';
-      var link = document.getElementById('sfnav-flowdebug-open-settings');
+      var link = statusEl.querySelector('.sfnav-settings-link');
       if (link) link.onclick = function (e) { e.preventDefault(); openSoqlSettings(); };
       return;
     }
@@ -605,7 +630,7 @@
     overlay.style.display = 'flex';
     paletteVisible = true;
     input.value = '';
-    input.placeholder = 'Type @ to start — e.g. @account';
+    input.placeholder = 'Search or pick a category below';
     hideSoqlPanel();
     renderResults(resolveInput(''));
     setFooterHints('root');
@@ -648,8 +673,9 @@
     var hintEl = document.getElementById('sfnav-hint');
     var breadcrumbEl = document.getElementById('sfnav-breadcrumb');
 
-    currentResults = resolution.results;
-    selectedIndex = resolution.results.length > 0 ? 0 : -1;
+    // Filter out headers and disabled items for navigation
+    currentResults = resolution.results.filter(function (r) { return r.type !== 'header' && !r.disabled; });
+    selectedIndex = currentResults.length > 0 ? 0 : -1;
 
     if (resolution.mode === 'object-picker') {
       breadcrumbEl.innerHTML = '<span class="sfnav-bc-seg">@object</span> <span class="sfnav-bc-arrow">›</span>';
@@ -682,20 +708,41 @@
     hintEl.textContent = resolution.hint || '';
     listEl.innerHTML = '';
 
-    resolution.results.forEach(function (result, i) {
+    var selectableIndex = 0;
+    resolution.results.forEach(function (result) {
+      if (result.type === 'header') {
+        var hdr = document.createElement('li');
+        hdr.className = 'sfnav-section-header';
+        hdr.textContent = result.label;
+        listEl.appendChild(hdr);
+        return;
+      }
+
       var li = document.createElement('li');
-      li.className = 'sfnav-item' + (i === selectedIndex ? ' selected' : '');
+
+      if (result.disabled) {
+        li.className = 'sfnav-item sfnav-disabled';
+        li.innerHTML =
+          '<span class="sfnav-label">'   + esc(result.label)             + '</span>' +
+          '<span class="sfnav-sublabel">'+ esc(result.sublabel || '')    + '</span>';
+        li.addEventListener('click', function (e) { e.stopPropagation(); });
+        listEl.appendChild(li);
+        return;
+      }
+
+      var isSelected = selectableIndex === selectedIndex;
+      li.className = 'sfnav-item' + (isSelected ? ' selected' : '');
       li.dataset.url = result.url;
 
       // Objects in picker mode get a ›  indicator to show they expand
       var shortcutLabel = (result.type === 'object' || result.type === 'cmdt') ? '›' : '↵';
       li.innerHTML =
-        '<span class="sfnav-icon">'    + esc(result.icon || '⚙') + '</span>' +
         '<span class="sfnav-label">'   + esc(result.label)             + '</span>' +
         '<span class="sfnav-sublabel">'+ esc(result.sublabel || '')    + '</span>' +
         '<span class="sfnav-shortcut">' + shortcutLabel + '</span>';
       li.addEventListener('click', function () { navigateTo(result.url, result); });
       listEl.appendChild(li);
+      selectableIndex++;
     });
 
     var first = listEl.querySelector('.sfnav-item');
@@ -789,8 +836,16 @@
   function handleCmdtAction(result) {
     var hintEl = document.getElementById('sfnav-hint');
     if (result.action === 'definition') {
-      hidePalette();
-      window.location.href = buildCmdtObjectDefinitionUrl(result.cmdt.apiName);
+      if (hintEl) hintEl.textContent = 'Resolving entity ID…';
+      getEntityIdForCmdt(result.cmdt.apiName)
+        .then(function (entityId) {
+          hidePalette();
+          window.location.href = buildCmdtObjectDefinitionUrl(entityId);
+        })
+        .catch(function (err) {
+          if (hintEl) hintEl.textContent = 'Error: ' + err.message;
+          console.warn('sfnav: CMDT entity ID lookup failed —', err);
+        });
       return;
     }
     if (result.action === 'records') {
@@ -822,18 +877,13 @@
   function setFooterHints(mode) {
     var el = document.getElementById('sfnav-footer-hints');
     if (!el) return;
-    var hints;
-    switch (mode) {
-      case 'soql':
-        hints = '↵ generate   Esc back';
-        break;
-      case 'flow-debug':
-        hints = '⌘↵ analyze   Esc back';
-        break;
-      default:
-        hints = '↑↓ navigate   ↵ select   ⌫ back   Esc back';
+    if (mode === 'soql') {
+      el.textContent = 'Enter to generate \u00b7 Esc to go back';
+    } else if (mode === 'flow-debug') {
+      el.textContent = 'Cmd+Enter to analyze \u00b7 Esc to go back';
+    } else {
+      el.textContent = '\u2191\u2193 navigate \u00b7 Enter to select \u00b7 Esc to close';
     }
-    el.innerHTML = hints;
   }
 
   function esc(s) {

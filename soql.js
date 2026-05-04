@@ -205,7 +205,14 @@ function hasSoqlApiKey() {
 }
 
 function openSoqlSettings() {
-  if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.openOptionsPage) {
-    chrome.runtime.openOptionsPage();
+  try {
+    chrome.runtime.sendMessage({ type: 'openOptions' }, function () {
+      if (chrome.runtime.lastError) {
+        // Extension context invalidated (tab not reloaded after extension update)
+        alert('Please reload this page first, then try again.');
+      }
+    });
+  } catch (e) {
+    alert('Please reload this page first, then try again.');
   }
 }

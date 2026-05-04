@@ -47,8 +47,10 @@ function buildCmdtManageRecordsUrl(keyPrefix) {
   return `${getOrgBase()}/lightning/setup/CustomMetadata/page?address=${encodeURIComponent(inner)}`;
 }
 
-function buildCmdtObjectDefinitionUrl(apiName) {
-  return `${getObjectManagerBase()}/${apiName}/view`;
+function buildCmdtObjectDefinitionUrl(entityId) {
+  // CMDTs use Setup > Custom Metadata with the entity definition ID (01Ixx…).
+  var inner = '/' + entityId + '?setupid=CustomMetadata';
+  return `${getOrgBase()}/lightning/setup/CustomMetadata/page?address=${encodeURIComponent(inner)}`;
 }
 
 var SETUP_QUICK_LINKS = SETUP_QUICK_LINKS || [
