@@ -9,10 +9,12 @@
   var paletteVisible = false;
   var selectedIndex = -1;
   var currentResults = [];
-  var searchMode = 'root'; // 'root' | 'object-picker' | 'object-scoped' | 'flow-picker' | 'soql' | 'flow-debug'
+  var searchMode = 'root'; // 'root' | 'object-picker' | 'object-scoped' | 'flow-picker' | 'soql' | 'flow-debug' | 'cmd-picker' | 'cmd-scoped'
   var scopedObject = null;
+  var scopedCmdt = null;
   var objectPickerFilter = '';
   var flowPickerFilter = '';
+  var cmdtPickerFilter = '';
   var soqlInFlight = false;
   var flowDebugInFlight = false;
 
@@ -73,6 +75,10 @@
         renderResults(resolveObjectScoped(val, scopedObject));
       } else if (searchMode === 'flow-picker') {
         renderResults(resolveFlowPicker(val));
+      } else if (searchMode === 'cmd-picker') {
+        renderResults(resolveCmdtPicker(val));
+      } else if (searchMode === 'cmd-scoped') {
+        renderResults(resolveCmdtScoped(val, scopedCmdt));
       } else if (searchMode === 'soql') {
         // No live filtering; only react to Enter
       } else {
@@ -109,6 +115,10 @@
         enterFlowDebugMode();
         return;
       }
+      if (keyword === 'cmd' || keyword === 'cmdt' || keyword === 'mdt') {
+        enterCmdPickerMode('');
+        return;
+      }
     }
     if (searchMode === 'soql') {
       runSoqlGeneration();
@@ -127,8 +137,12 @@
       case 'object-scoped':
         enterObjectPickerMode(objectPickerFilter);
         return;
+      case 'cmd-scoped':
+        enterCmdPickerMode(cmdtPickerFilter);
+        return;
       case 'object-picker':
       case 'flow-picker':
+      case 'cmd-picker':
       case 'soql':
       case 'flow-debug':
         goToRoot();
@@ -141,8 +155,10 @@
   function goToRoot() {
     searchMode = 'root';
     scopedObject = null;
+    scopedCmdt = null;
     objectPickerFilter = '';
     flowPickerFilter = '';
+    cmdtPickerFilter = '';
     hideSoqlPanel();
     setFooterHints('root');
     var breadcrumbEl = document.getElementById('sfnav-breadcrumb');
@@ -310,6 +326,31 @@
     input.value = filterText || '';
     input.placeholder = 'Filter flows…';
     renderResults(resolveFlowPicker(filterText || ''));
+    input.focus();
+  }
+
+  function enterCmdPickerMode(filterText) {
+    searchMode = 'cmd-picker';
+    scopedCmdt = null;
+    var input = document.getElementById('sfnav-input');
+    input.value = filterText || '';
+    input.placeholder = 'Filter custom metadata types…';
+    renderResults(resolveCmdtPicker(filterText || ''));
+    input.focus();
+  }
+
+  function enterCmdScopedMode(cmdt) {
+    if (searchMode === 'cmd-picker') {
+      cmdtPickerFilter = document.getElementById('sfnav-input').value;
+    } else {
+      cmdtPickerFilter = '';
+    }
+    searchMode = 'cmd-scoped';
+    scopedCmdt = cmdt;
+    var input = document.getElementById('sfnav-input');
+    input.value = '';
+    input.placeholder = 'Filter destinations…';
+    renderResults(resolveCmdtScoped('', cmdt));
     input.focus();
   }
 
@@ -516,8 +557,10 @@
     injectPalette();
     searchMode = 'root';
     scopedObject = null;
+    scopedCmdt = null;
     objectPickerFilter = '';
     flowPickerFilter = '';
+    cmdtPickerFilter = '';
     var overlay = document.getElementById('sfnav-overlay');
     var input = document.getElementById('sfnav-input');
     overlay.style.display = 'flex';
@@ -546,8 +589,10 @@
     selectedIndex = -1;
     searchMode = 'root';
     scopedObject = null;
+    scopedCmdt = null;
     objectPickerFilter = '';
     flowPickerFilter = '';
+    cmdtPickerFilter = '';
   }
 
   function togglePalette() {
@@ -579,6 +624,16 @@
     } else if (resolution.mode === 'flow-picker') {
       breadcrumbEl.innerHTML = '<span class="sfnav-bc-seg">@flows</span> <span class="sfnav-bc-arrow">›</span>';
       breadcrumbEl.style.display = 'flex';
+    } else if (resolution.mode === 'cmd-picker') {
+      breadcrumbEl.innerHTML = '<span class="sfnav-bc-seg">@cmd</span> <span class="sfnav-bc-arrow">›</span>';
+      breadcrumbEl.style.display = 'flex';
+    } else if (resolution.mode === 'cmd-scoped' && resolution.cmdt) {
+      breadcrumbEl.innerHTML =
+        '<span class="sfnav-bc-seg">@cmd</span>' +
+        ' <span class="sfnav-bc-arrow">›</span> ' +
+        '<span class="sfnav-bc-seg sfnav-bc-current">' + esc(resolution.cmdt.label) + '</span>' +
+        ' <span class="sfnav-bc-arrow">›</span>';
+      breadcrumbEl.style.display = 'flex';
     } else {
       breadcrumbEl.textContent = '';
       breadcrumbEl.style.display = 'none';
@@ -593,7 +648,7 @@
       li.dataset.url = result.url;
 
       // Objects in picker mode get a ›  indicator to show they expand
-      var shortcutLabel = (result.type === 'object') ? '›' : '↵';
+      var shortcutLabel = (result.type === 'object' || result.type === 'cmdt') ? '›' : '↵';
       li.innerHTML =
         '<span class="sfnav-icon">'    + esc(result.icon || '⚙') + '</span>' +
         '<span class="sfnav-label">'   + esc(result.label)             + '</span>' +
@@ -638,8 +693,39 @@
       return;
     }
 
+    if (result && result.type === 'cmdt') {
+      enterCmdScopedMode(result.cmdt);
+      return;
+    }
+
+    if (result && result.type === 'cmdt-action') {
+      handleCmdtAction(result);
+      return;
+    }
+
     hidePalette();
     window.location.href = url;
+  }
+
+  function handleCmdtAction(result) {
+    var hintEl = document.getElementById('sfnav-hint');
+    if (result.action === 'definition') {
+      hidePalette();
+      window.location.href = buildCmdtObjectDefinitionUrl(result.cmdt.apiName);
+      return;
+    }
+    if (result.action === 'records') {
+      if (hintEl) hintEl.textContent = 'Resolving CMDT id…';
+      getCustomObjectIdForCmdt(result.cmdt.apiName)
+        .then(function (id) {
+          hidePalette();
+          window.location.href = buildCmdtManageRecordsUrl(id);
+        })
+        .catch(function (err) {
+          if (hintEl) hintEl.textContent = 'Error: ' + err.message;
+          console.warn('sfnav: CMDT id lookup failed —', err);
+        });
+    }
   }
 
   function navigateToSelected() {

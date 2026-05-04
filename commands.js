@@ -130,6 +130,61 @@ function resolveFlowPicker(filter) {
   };
 }
 
+// CMDT picker: filter across only custom metadata types (objects ending in __mdt)
+function resolveCmdtPicker(filter) {
+  var all = getAllCustomMetadataTypes();
+  var filtered = filter
+    ? fuzzyFilter(filter, all, function (o) { return o.label + ' ' + o.apiName; })
+    : all;
+  var count = filtered.length;
+  return {
+    mode: 'cmd-picker',
+    results: filtered.slice(0, 30).map(function (o) {
+      return {
+        label: o.label,
+        sublabel: o.apiName,
+        url: '#',
+        icon: ICON_MAP.object,
+        type: 'cmdt',
+        cmdt: o,
+      };
+    }),
+    hint: all.length === 0
+      ? 'No custom metadata types found in your org cache yet — wait a moment for it to load'
+      : filter
+        ? (count === 0 ? 'No CMDTs match' : count + ' matching CMDT' + (count === 1 ? '' : 's'))
+        : all.length + ' custom metadata type' + (all.length === 1 ? '' : 's') + ' — type to filter',
+  };
+}
+
+// CMDT-scoped: select a destination for a chosen CMDT (Manage Records or Object Definition)
+var CMDT_DESTINATIONS = [
+  { label: 'Manage Records',    sublabel: 'Open the records list', action: 'records' },
+  { label: 'Object Definition', sublabel: 'Open in Object Manager', action: 'definition' },
+];
+
+function resolveCmdtScoped(filter, cmdt) {
+  var pages = filter
+    ? fuzzyFilter(filter, CMDT_DESTINATIONS, function (p) { return p.label; })
+    : CMDT_DESTINATIONS;
+  return {
+    mode: 'cmd-scoped',
+    cmdt: cmdt,
+    results: pages.map(function (p) {
+      return {
+        label: p.label,
+        sublabel: cmdt.label,
+        url: '#',
+        icon: ICON_MAP.field,
+        type: 'cmdt-action',
+        cmdt: cmdt,
+        action: p.action,
+      };
+    }),
+    hint: cmdt.label + ' — pick a destination',
+  };
+}
+
 // Object picker mode: filter across all objects only
 function resolveObjectPicker(filter) {
   const allObjects = getAllObjects();
@@ -188,6 +243,16 @@ function resolveInput(rawInput) {
       mode: 'object-hint',
       results: [],
       hint: 'Press Enter to browse all objects',
+    };
+  }
+
+  // "@cmd" / "@cmdt" / "@mdt" — hint to press Enter to browse CMDTs
+  var lc = input.toLowerCase();
+  if (lc === 'cmd' || lc === 'cmdt' || lc === 'mdt') {
+    return {
+      mode: 'cmd-hint',
+      results: [],
+      hint: 'Press Enter to browse custom metadata types',
     };
   }
 

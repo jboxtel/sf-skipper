@@ -40,6 +40,17 @@ function buildObjectSubPageUrl(apiName, segment) {
   return `${getObjectManagerBase()}/${apiName}/${segment}`;
 }
 
+// CMDT "Manage Records" URL — opens the records list for a custom metadata type.
+// customObjectId is the 15-char CustomObject id (from Tooling API).
+function buildCmdtManageRecordsUrl(customObjectId) {
+  var inner = '/' + customObjectId + '?setupid=CustomMetadata';
+  return `${getOrgBase()}/lightning/setup/CustomMetadata/page?address=${encodeURIComponent(inner)}`;
+}
+
+function buildCmdtObjectDefinitionUrl(apiName) {
+  return `${getObjectManagerBase()}/${apiName}/view`;
+}
+
 var SETUP_QUICK_LINKS = SETUP_QUICK_LINKS || [
   { label: "Object Manager",            url: () => `${getOrgBase()}/lightning/setup/ObjectManager/home` },
   { label: "Profiles",                  url: () => `${getOrgBase()}/lightning/setup/Profiles/home` },

@@ -40,6 +40,7 @@ No backend. No subscriptions. Your Salesforce session and (optionally) your Anth
 | Open the palette | `⌘⇧K` / `Ctrl+Shift+K` on any Salesforce page |
 | Browse all objects | Type `object` → Enter |
 | Browse all flows | Type `flow` → Enter |
+| Browse custom metadata types | Type `cmd` (or `cmdt` / `mdt`) → Enter, pick a type, then **Manage Records** or **Object Definition** |
 | Open SOQL Generator | Type `soql` → Enter |
 | Debug a flow | Open a flow → press `⌘⇧K` → "Debug this flow" (or type `debug` → Enter) |
 | Search Setup quick-links | Type freely — e.g. `profiles`, `permission set`, `audit trail` |

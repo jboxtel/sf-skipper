@@ -133,3 +133,35 @@ function getAllObjects() {
   var customs = _customObjects.filter(function (o) { return !standardApiNames.has(o.apiName); });
   return STANDARD_OBJECTS.concat(customs);
 }
+
+function getAllCustomMetadataTypes() {
+  return getAllObjects().filter(function (o) { return /__mdt$/i.test(o.apiName); });
+}
+
+// CMDTs need a CustomObject id to build the "Manage Records" URL. Resolve once
+// per api name and cache; the id never changes for a given CMDT.
+var _cmdtIdCache = {}; // apiName → { id, ts }
+var CMDT_ID_TTL_MS = 60 * 60 * 1000; // 1 hour
+
+async function getCustomObjectIdForCmdt(apiName) {
+  var cached = _cmdtIdCache[apiName];
+  if (cached && (Date.now() - cached.ts) < CMDT_ID_TTL_MS) {
+    return cached.id;
+  }
+  var pre = await sfRestPreamble();
+  var devName = apiName.replace(/__mdt$/i, '');
+  var soql = "SELECT Id FROM CustomObject WHERE DeveloperName = '" + devName.replace(/'/g, "\\'") + "'";
+  var url = pre.apiBase + pre.basePath + '/tooling/query/?q=' + encodeURIComponent(soql);
+  var resp = await fetch(url, { headers: pre.headers });
+  if (resp.status === 401 || resp.status === 403) {
+    throw new Error('No Tooling API access — your profile needs read access to CustomObject metadata.');
+  }
+  if (!resp.ok) throw new Error('CustomObject lookup failed: ' + resp.status);
+  var data = await resp.json();
+  if (!data.records || !data.records.length) {
+    throw new Error('CustomObject not found for ' + apiName);
+  }
+  var id = data.records[0].Id;
+  _cmdtIdCache[apiName] = { id: id, ts: Date.now() };
+  return id;
+}
