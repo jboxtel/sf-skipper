@@ -63,8 +63,8 @@ async function injectExtension(page) {
       window.isFlowBuilderPage = () => false;
       window.getFlowIdFromUrl = () => null;
       window.analyzeFlowDebug = () => Promise.reject(new Error('not stubbed'));
-      // CMDT helpers (defined in objects.js — but the lookup helper hits Tooling API)
-      window.getCustomObjectIdForCmdt = () => Promise.reject(new Error('not stubbed'));
+      // CMDT helpers (defined in objects.js — but the lookup helper hits the describe API)
+      window.getKeyPrefixForCmdt = () => Promise.reject(new Error('not stubbed'));
       // Mock fetch so @load returns 2 test custom objects
       window.fetch = (url) => {
         if (url === '/services/data/') {

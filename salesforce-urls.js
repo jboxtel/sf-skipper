@@ -41,9 +41,9 @@ function buildObjectSubPageUrl(apiName, segment) {
 }
 
 // CMDT "Manage Records" URL — opens the records list for a custom metadata type.
-// customObjectId is the 15-char CustomObject id (from Tooling API).
-function buildCmdtManageRecordsUrl(customObjectId) {
-  var inner = '/' + customObjectId + '?setupid=CustomMetadata';
+// keyPrefix is the type's 3-char key prefix (e.g. "m0u"), available from describeGlobal.
+function buildCmdtManageRecordsUrl(keyPrefix) {
+  var inner = '/' + keyPrefix + '?setupid=CustomMetadata';
   return `${getOrgBase()}/lightning/setup/CustomMetadata/page?address=${encodeURIComponent(inner)}`;
 }
 

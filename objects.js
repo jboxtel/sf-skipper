@@ -85,7 +85,7 @@ async function loadObjectsFromPage() {
 
   var objects = (data.sobjects || [])
     .filter(function (s) { return s.name && s.label; })
-    .map(function (s) { return { label: s.label, apiName: s.name, isCustom: !!s.custom }; });
+    .map(function (s) { return { label: s.label, apiName: s.name, isCustom: !!s.custom, keyPrefix: s.keyPrefix || null }; });
   if (!objects.length) return 0;
   mergeIntoCache(objects);
   persistCache();
@@ -138,30 +138,25 @@ function getAllCustomMetadataTypes() {
   return getAllObjects().filter(function (o) { return /__mdt$/i.test(o.apiName); });
 }
 
-// CMDTs need a CustomObject id to build the "Manage Records" URL. Resolve once
-// per api name and cache; the id never changes for a given CMDT.
-var _cmdtIdCache = {}; // apiName → { id, ts }
-var CMDT_ID_TTL_MS = 60 * 60 * 1000; // 1 hour
+// The CMDT "Manage Records" URL uses the type's key prefix (e.g. "m0u").
+// We get keyPrefix from describeGlobal during initial load, but fall back
+// to a per-object describe if it isn't in the cache (older cached entries).
+async function getKeyPrefixForCmdt(apiName) {
+  var match = _customObjects.find(function (o) { return o.apiName === apiName; });
+  if (match && match.keyPrefix) return match.keyPrefix;
 
-async function getCustomObjectIdForCmdt(apiName) {
-  var cached = _cmdtIdCache[apiName];
-  if (cached && (Date.now() - cached.ts) < CMDT_ID_TTL_MS) {
-    return cached.id;
-  }
   var pre = await sfRestPreamble();
-  var devName = apiName.replace(/__mdt$/i, '');
-  var soql = "SELECT Id FROM CustomObject WHERE DeveloperName = '" + devName.replace(/'/g, "\\'") + "'";
-  var url = pre.apiBase + pre.basePath + '/tooling/query/?q=' + encodeURIComponent(soql);
-  var resp = await fetch(url, { headers: pre.headers });
+  var resp = await fetch(pre.apiBase + pre.basePath + '/sobjects/' + encodeURIComponent(apiName) + '/describe', { headers: pre.headers });
   if (resp.status === 401 || resp.status === 403) {
-    throw new Error('No Tooling API access — your profile needs read access to CustomObject metadata.');
+    throw new Error('No describe access for ' + apiName + ' — check your permissions.');
   }
-  if (!resp.ok) throw new Error('CustomObject lookup failed: ' + resp.status);
+  if (!resp.ok) throw new Error('describe failed for ' + apiName + ': ' + resp.status);
   var data = await resp.json();
-  if (!data.records || !data.records.length) {
-    throw new Error('CustomObject not found for ' + apiName);
+  if (!data.keyPrefix) throw new Error('No key prefix for ' + apiName);
+
+  if (match) {
+    match.keyPrefix = data.keyPrefix;
+    persistCache();
   }
-  var id = data.records[0].Id;
-  _cmdtIdCache[apiName] = { id: id, ts: Date.now() };
-  return id;
+  return data.keyPrefix;
 }

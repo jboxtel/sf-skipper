@@ -715,15 +715,22 @@
       return;
     }
     if (result.action === 'records') {
-      if (hintEl) hintEl.textContent = 'Resolving CMDT id…';
-      getCustomObjectIdForCmdt(result.cmdt.apiName)
-        .then(function (id) {
+      // keyPrefix is usually already on the cached object (from describeGlobal); only
+      // hits the network on a cache miss for older entries.
+      if (result.cmdt.keyPrefix) {
+        hidePalette();
+        window.location.href = buildCmdtManageRecordsUrl(result.cmdt.keyPrefix);
+        return;
+      }
+      if (hintEl) hintEl.textContent = 'Resolving key prefix…';
+      getKeyPrefixForCmdt(result.cmdt.apiName)
+        .then(function (prefix) {
           hidePalette();
-          window.location.href = buildCmdtManageRecordsUrl(id);
+          window.location.href = buildCmdtManageRecordsUrl(prefix);
         })
         .catch(function (err) {
           if (hintEl) hintEl.textContent = 'Error: ' + err.message;
-          console.warn('sfnav: CMDT id lookup failed —', err);
+          console.warn('sfnav: CMDT key prefix lookup failed —', err);
         });
     }
   }
