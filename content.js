@@ -836,8 +836,16 @@
   function handleCmdtAction(result) {
     var hintEl = document.getElementById('sfnav-hint');
     if (result.action === 'definition') {
-      hidePalette();
-      window.location.href = buildCmdtObjectDefinitionUrl(result.cmdt.apiName);
+      if (hintEl) hintEl.textContent = 'Resolving entity ID…';
+      getEntityIdForCmdt(result.cmdt.apiName)
+        .then(function (entityId) {
+          hidePalette();
+          window.location.href = buildCmdtObjectDefinitionUrl(entityId);
+        })
+        .catch(function (err) {
+          if (hintEl) hintEl.textContent = 'Error: ' + err.message;
+          console.warn('sfnav: CMDT entity ID lookup failed —', err);
+        });
       return;
     }
     if (result.action === 'records') {
