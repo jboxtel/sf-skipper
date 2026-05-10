@@ -1,4 +1,6 @@
 node_modules/
+.playwright-profile/
+.sf-credentials
 .DS_Store
 *.log
 .vscode/

@@ -9,6 +9,7 @@
     "https://*.salesforce.com/*",
     "https://*.my.salesforce.com/*",
     "https://*.salesforce-setup.com/*",
+    "https://*.my.salesforce-setup.com/*",
     "https://*.force.com/*",
     "https://api.anthropic.com/*"
   ],
@@ -22,9 +23,10 @@
         "https://*.lightning.force.com/*",
         "https://*.salesforce.com/*",
         "https://*.salesforce-setup.com/*",
+        "https://*.my.salesforce-setup.com/*",
         "https://*.force.com/*"
       ],
-      "js": ["salesforce-urls.js", "shared.js", "objects.js", "flows.js", "apps.js", "flow-debug.js", "commands.js", "soql.js", "content.js"],
+      "js": ["salesforce-urls.js", "shared.js", "objects.js", "flows.js", "apps.js", "labels.js", "flow-debug.js", "commands.js", "soql.js", "content.js"],
       "css": ["content.css"],
       "run_at": "document_idle"
     }

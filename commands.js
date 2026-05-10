@@ -48,6 +48,22 @@ function toAppResult(app) {
   };
 }
 
+function toLabelResult(label) {
+  var displayLabel = label.label || label.name;
+  var preview = (label.value || '').replace(/\s+/g, ' ').trim();
+  if (preview.length > 80) preview = preview.slice(0, 77) + '…';
+  // When MasterLabel == Name, the API name on the left already identifies the label;
+  // surface the value. When they differ, the API name disambiguates instead.
+  var sub = displayLabel === label.name ? preview : label.name;
+  return {
+    label: displayLabel,
+    sublabel: sub,
+    url: getOrgBase() + '/lightning/setup/ExternalStrings/page?address=%2F' + encodeURIComponent(label.id),
+    type: 'label',
+    customLabel: label,
+  };
+}
+
 function toFlowResult(flow) {
   return {
     label: flow.label,
@@ -95,6 +111,8 @@ function getRootResults() {
   results.push({ label: '@flow',     sublabel: 'All org flows',                 url: '#', type: 'shortcut', keyword: 'flow' });
   results.push({ label: '@app',      sublabel: 'All installed Lightning apps',  url: '#', type: 'shortcut', keyword: 'app' });
   results.push({ label: '@cmd',      sublabel: 'Custom metadata types',         url: '#', type: 'shortcut', keyword: 'cmd' });
+  results.push({ label: '@label',    sublabel: 'Custom labels',                 url: '#', type: 'shortcut', keyword: 'label' });
+  results.push({ label: '@setup',    sublabel: 'All setup quick links',         url: '#', type: 'shortcut', keyword: 'setup' });
 
   // ── AI Tools ──
   results.push(makeHeader('AI Tools'));
@@ -126,6 +144,8 @@ function getShortcutResults() {
   results.push({ label: '@flow',     sublabel: 'All org flows',                 url: '#', type: 'shortcut', keyword: 'flow' });
   results.push({ label: '@app',      sublabel: 'All installed Lightning apps',  url: '#', type: 'shortcut', keyword: 'app' });
   results.push({ label: '@cmd',      sublabel: 'Custom metadata types',         url: '#', type: 'shortcut', keyword: 'cmd' });
+  results.push({ label: '@label',    sublabel: 'Custom labels',                 url: '#', type: 'shortcut', keyword: 'label' });
+  results.push({ label: '@setup',    sublabel: 'All setup quick links',         url: '#', type: 'shortcut', keyword: 'setup' });
 
   results.push(makeHeader('AI Tools'));
   results.push({ label: '@soql',     sublabel: 'Ask a data question',           url: '#', type: 'shortcut', keyword: 'soql' });
@@ -234,6 +254,41 @@ function resolveCmdtScoped(filter, cmdt) {
   };
 }
 
+// Custom Label picker mode: filter across all org Custom Labels
+function resolveLabelPicker(filter) {
+  var all = getAllLabels();
+  var filtered = filter
+    ? fuzzyFilter(filter, all, function (l) { return (l.label || '') + ' ' + l.name + ' ' + (l.value || ''); })
+    : all;
+  var count = filtered.length;
+  return {
+    mode: 'label-picker',
+    results: filtered.slice(0, 30).map(toLabelResult),
+    hint: getLabelsState() === 'error'
+      ? 'Failed to load custom labels: ' + getLabelsError()
+      : all.length === 0
+        ? 'Loading custom labels…'
+        : filter
+          ? (count === 0 ? 'No custom labels match' : count + ' matching custom label' + (count === 1 ? '' : 's'))
+          : all.length + ' custom label' + (all.length === 1 ? '' : 's') + ' — type to filter',
+  };
+}
+
+// Setup picker mode: filter across all setup quick links
+function resolveSetupPicker(filter) {
+  var filtered = filter
+    ? fuzzyFilter(filter, SETUP_QUICK_LINKS, function (l) { return l.label; })
+    : SETUP_QUICK_LINKS;
+  var count = filtered.length;
+  return {
+    mode: 'setup-picker',
+    results: filtered.slice(0, 30).map(toQuickLinkResult),
+    hint: filter
+      ? (count === 0 ? 'No setup pages match' : count + ' matching setup page' + (count === 1 ? '' : 's'))
+      : SETUP_QUICK_LINKS.length + ' setup page' + (SETUP_QUICK_LINKS.length === 1 ? '' : 's') + ' — type to filter',
+  };
+}
+
 // Object picker mode: filter across all objects only
 function resolveObjectPicker(filter) {
   const allObjects = getAllObjects();
@@ -273,7 +328,8 @@ function resolveInput(rawInput) {
     };
   }
 
-  const input = rawInput.startsWith('@') ? rawInput.slice(1) : rawInput;
+  const stripped = rawInput.startsWith('@') ? rawInput.slice(1) : rawInput;
+  const input = stripped.trim();
 
   if (input === '' || input === 'help') {
     return {
@@ -317,6 +373,24 @@ function resolveInput(rawInput) {
       mode: 'cmd-hint',
       results: [],
       hint: 'Press Enter to browse custom metadata types',
+    };
+  }
+
+  // "@label" / "@labels" — hint to press Enter to browse custom labels
+  if (lc === 'label' || lc === 'labels') {
+    return {
+      mode: 'label-hint',
+      results: [],
+      hint: 'Press Enter to browse custom labels',
+    };
+  }
+
+  // "@setup" — hint to press Enter to browse setup pages
+  if (lc === 'setup') {
+    return {
+      mode: 'setup-hint',
+      results: [],
+      hint: 'Press Enter to browse all setup pages',
     };
   }
 
