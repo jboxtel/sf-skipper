@@ -6,6 +6,7 @@
   initCustomObjects(); // populate custom object cache from storage + URL + DOM
   initFlows();         // populate flow cache from storage + API
   initApps();          // populate Lightning app cache from storage + API
+  initLabels();        // populate custom label cache from storage + Tooling API
 
   var paletteVisible = false;
   var selectedIndex = -1;
@@ -17,6 +18,7 @@
   var flowPickerFilter = '';
   var appPickerFilter = '';
   var cmdtPickerFilter = '';
+  var labelPickerFilter = '';
   var soqlInFlight = false;
   var flowDebugInFlight = false;
 
@@ -75,7 +77,7 @@
       // space after the keyword so users can keep typing without pressing Enter.
       if (searchMode === 'root') {
         var trimmed = val.replace(/^@/, '');
-        var m = trimmed.match(/^(cmd|cmdt|mdt|flow|flows|object|objects|app|apps)\s+(.*)$/i);
+        var m = trimmed.match(/^(cmd|cmdt|mdt|flow|flows|object|objects|app|apps|label|labels|setup|soql|debug|flow-debug)\s+(.*)$/i);
         if (m) {
           var kw = m[1].toLowerCase();
           var rest = m[2];
@@ -83,6 +85,10 @@
           if (kw === 'flow' || kw === 'flows')               { enterFlowPickerMode(rest); return; }
           if (kw === 'object' || kw === 'objects')           { enterObjectPickerMode(rest); return; }
           if (kw === 'app' || kw === 'apps')                 { enterAppPickerMode(rest); return; }
+          if (kw === 'label' || kw === 'labels')             { enterLabelPickerMode(rest); return; }
+          if (kw === 'setup')                                { enterSetupPickerMode(rest); return; }
+          if (kw === 'soql')                                 { enterSoqlMode(); return; }
+          if (kw === 'debug' || kw === 'flow-debug')         { enterFlowDebugMode(); return; }
         }
       }
       if (searchMode === 'object-picker') {
@@ -95,6 +101,10 @@
         renderResults(resolveAppPicker(val));
       } else if (searchMode === 'cmd-picker') {
         renderResults(resolveCmdtPicker(val));
+      } else if (searchMode === 'label-picker') {
+        renderResults(resolveLabelPicker(val));
+      } else if (searchMode === 'setup-picker') {
+        renderResults(resolveSetupPicker(val));
       } else if (searchMode === 'cmd-scoped') {
         renderResults(resolveCmdtScoped(val, scopedCmdt));
       } else if (searchMode === 'soql') {
@@ -141,6 +151,14 @@
         enterCmdPickerMode('');
         return;
       }
+      if (keyword === 'label' || keyword === 'labels') {
+        enterLabelPickerMode('');
+        return;
+      }
+      if (keyword === 'setup') {
+        enterSetupPickerMode('');
+        return;
+      }
       if (keyword === 'refresh' || keyword === 'reload') {
         runRefresh();
         return;
@@ -170,6 +188,8 @@
       case 'flow-picker':
       case 'app-picker':
       case 'cmd-picker':
+      case 'label-picker':
+      case 'setup-picker':
       case 'soql':
       case 'flow-debug':
         goToRoot();
@@ -187,6 +207,7 @@
     flowPickerFilter = '';
     appPickerFilter = '';
     cmdtPickerFilter = '';
+    labelPickerFilter = '';
     hideSoqlPanel();
     setFooterHints('root');
     var breadcrumbEl = document.getElementById('sfnav-breadcrumb');
@@ -232,6 +253,7 @@
 
   function enterSoqlMode() {
     searchMode = 'soql';
+    soqlHistoryExpanded = false;
     setFooterHints('soql');
     var input = document.getElementById('sfnav-input');
     input.value = '';
@@ -328,6 +350,8 @@
     }
   }
 
+  var soqlHistoryExpanded = false;
+
   function renderSoqlHistory() {
     var listEl = document.getElementById('sfnav-soql-history');
     var labelEl = document.getElementById('sfnav-soql-history-label');
@@ -342,7 +366,11 @@
       labelEl.style.display = 'block';
       listEl.style.display = 'block';
       listEl.innerHTML = '';
-      history.forEach(function (entry) {
+
+      var COLLAPSED = 3;
+      var visible = soqlHistoryExpanded ? history : history.slice(0, COLLAPSED);
+
+      visible.forEach(function (entry) {
         var li = document.createElement('li');
         li.className = 'sfnav-soql-history-item';
         li.innerHTML =
@@ -357,6 +385,19 @@
         });
         listEl.appendChild(li);
       });
+
+      if (history.length > COLLAPSED) {
+        var moreLi = document.createElement('li');
+        moreLi.className = 'sfnav-soql-history-more';
+        moreLi.textContent = soqlHistoryExpanded
+          ? 'Show less'
+          : '… ' + (history.length - COLLAPSED) + ' more';
+        moreLi.addEventListener('click', function () {
+          soqlHistoryExpanded = !soqlHistoryExpanded;
+          renderSoqlHistory();
+        });
+        listEl.appendChild(moreLi);
+      }
     });
   }
 
@@ -375,6 +416,24 @@
     input.value = filterText || '';
     input.placeholder = 'Filter Lightning apps…';
     renderResults(resolveAppPicker(filterText || ''));
+    input.focus();
+  }
+
+  function enterSetupPickerMode(filterText) {
+    searchMode = 'setup-picker';
+    var input = document.getElementById('sfnav-input');
+    input.value = filterText || '';
+    input.placeholder = 'Filter setup pages…';
+    renderResults(resolveSetupPicker(filterText || ''));
+    input.focus();
+  }
+
+  function enterLabelPickerMode(filterText) {
+    searchMode = 'label-picker';
+    var input = document.getElementById('sfnav-input');
+    input.value = filterText || '';
+    input.placeholder = 'Filter custom labels…';
+    renderResults(resolveLabelPicker(filterText || ''));
     input.focus();
   }
 
@@ -625,6 +684,7 @@
     flowPickerFilter = '';
     appPickerFilter = '';
     cmdtPickerFilter = '';
+    labelPickerFilter = '';
     var overlay = document.getElementById('sfnav-overlay');
     var input = document.getElementById('sfnav-input');
     overlay.style.display = 'flex';
@@ -658,6 +718,7 @@
     flowPickerFilter = '';
     appPickerFilter = '';
     cmdtPickerFilter = '';
+    labelPickerFilter = '';
   }
 
   function togglePalette() {
@@ -693,6 +754,9 @@
     } else if (resolution.mode === 'cmd-picker') {
       breadcrumbEl.innerHTML = '<span class="sfnav-bc-seg">@cmd</span> <span class="sfnav-bc-arrow">›</span>';
       breadcrumbEl.style.display = 'flex';
+    } else if (resolution.mode === 'label-picker') {
+      breadcrumbEl.innerHTML = '<span class="sfnav-bc-seg">@label</span> <span class="sfnav-bc-arrow">›</span>';
+      breadcrumbEl.style.display = 'flex';
     } else if (resolution.mode === 'cmd-scoped' && resolution.cmdt) {
       breadcrumbEl.innerHTML =
         '<span class="sfnav-bc-seg">@cmd</span>' +
@@ -724,7 +788,8 @@
         li.className = 'sfnav-item sfnav-disabled';
         li.innerHTML =
           '<span class="sfnav-label">'   + esc(result.label)             + '</span>' +
-          '<span class="sfnav-sublabel">'+ esc(result.sublabel || '')    + '</span>';
+          '<span class="sfnav-sublabel">'+ esc(result.sublabel || '')    + '</span>' +
+          '<span class="sfnav-shortcut" aria-hidden="true">↵</span>';
         li.addEventListener('click', function (e) { e.stopPropagation(); });
         listEl.appendChild(li);
         return;
@@ -805,6 +870,8 @@
       case 'flow':       enterFlowPickerMode(''); return;
       case 'app':        enterAppPickerMode(''); return;
       case 'cmd':        enterCmdPickerMode(''); return;
+      case 'label':      enterLabelPickerMode(''); return;
+      case 'setup':      enterSetupPickerMode(''); return;
       case 'soql':       enterSoqlMode(); return;
       case 'flow-debug': enterFlowDebugMode(); return;
       case 'refresh':    runRefresh(); return;
@@ -821,6 +888,7 @@
     if (typeof loadFlows === 'function')           tasks.push(loadFlows());
     if (typeof loadObjectsFromPage === 'function') tasks.push(loadObjectsFromPage());
     if (typeof loadApps === 'function')            tasks.push(loadApps());
+    if (typeof loadLabels === 'function')          tasks.push(loadLabels());
 
     Promise.allSettled(tasks).then(function (results) {
       var failed = results.filter(function (r) { return r.status === 'rejected'; });
@@ -900,6 +968,15 @@
       renderResults(resolveFlowPicker(input.value));
     } else if (input.value.replace(/^@/, '').toLowerCase().startsWith('flow')) {
       renderResults(resolveInput(input.value));
+    }
+  });
+
+  document.addEventListener('sfnav:labels-loaded', function () {
+    if (!paletteVisible) return;
+    var input = document.getElementById('sfnav-input');
+    if (!input) return;
+    if (searchMode === 'label-picker') {
+      renderResults(resolveLabelPicker(input.value));
     }
   });
 

@@ -32,7 +32,9 @@ No backend. No subscriptions. Your Salesforce session and (optionally) your Anth
 - **Object drill-down** — Pick an object and jump straight to Fields & Relationships, Validation Rules, Page Layouts, Triggers, Record Types, Sharing Rules, and more.
 - **Flow picker** — Browse every active and inactive flow with one keystroke.
 - **Lightning app picker** — Type `@app` to fuzzy-search every Lightning app in the org and jump straight to it (`/lightning/app/<DurableId>`).
-- **Inline filter** — Type `@cmd account`, `@flow opportunity`, `@object case`, or `@app sales` and the picker opens already filtered. No need to press Enter first.
+- **Custom label picker** — Type `@label` to fuzzy-search every Custom Label in the org (across `MasterLabel`, API name, and value) and jump straight to its Setup page.
+- **Setup quick-link picker** — Type `@setup` to filter the full registry of Setup pages without leaving the palette.
+- **Inline filter** — Type `@cmd account`, `@flow opportunity`, `@object case`, `@app sales`, `@label welcome`, or `@setup profiles` and the picker opens already filtered. No need to press Enter first.
 - **Manual refresh** — Caches refresh automatically every 30 minutes. Type `@refresh` to force-refresh the flow, app, and object caches immediately (handy after creating a new flow or installing a managed package).
 - **SOQL Generator** — Describe what you want; get a `SELECT` query that uses real field names from the object's describe (no hallucinated fields). The query is copied to your clipboard — execution stays in your hands.
 - **Flow Debug Assistant** — Open a flow in the Flow Builder, run a debug session, paste the Debug-panel output into Commander, and Claude tells you which path the flow took, what went wrong, and how to fix it.
@@ -59,7 +61,9 @@ After changing any source file, click the reload icon for the extension on `chro
 | Browse all flows | Type `flow` → Enter |
 | Browse Lightning apps | Type `app` → Enter |
 | Browse custom metadata types | Type `cmd` (or `cmdt` / `mdt`) → Enter, pick a type, then **Manage Records** or **Object Definition** |
-| Filter inline | Type `@cmd foo` / `@flow foo` / `@object foo` / `@app foo` — the picker opens pre-filtered |
+| Browse custom labels | Type `label` → Enter |
+| Browse all setup pages | Type `setup` → Enter |
+| Filter inline | Type `@cmd foo` / `@flow foo` / `@object foo` / `@app foo` / `@label foo` / `@setup foo` — the picker opens pre-filtered |
 | Refresh caches | Type `refresh` → Enter (re-fetches flows, apps, and objects) |
 | Open SOQL Generator | Type `soql` → Enter |
 | Debug a flow | Open a flow → press `⌘⇧K` → "Debug this flow" (or type `debug` → Enter) |
@@ -118,6 +122,7 @@ commands.js            Search resolution + fuzzy matching
 objects.js             Object cache (REST describeGlobal + storage)
 flows.js               Flow cache (FlowDefinitionView SOQL)
 apps.js                Lightning app cache (AppDefinition SOQL)
+labels.js              Custom Label cache (ExternalString Tooling API query)
 flow-debug.js          Flow Debug Assistant: Tooling API fetch, prompt, parser
 salesforce-urls.js     URL builders + Setup quick-links registry
 soql.js                SOQL generator: schema fetch, prompt, history
