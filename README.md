@@ -4,26 +4,16 @@ A keyboard-first command palette for Salesforce. Press `⌘⇧K` (Mac) or `Ctrl+
 
 > Built for admins, developers, and consultants who live in Salesforce Setup all day and would like to spend less time clicking through menus.
 
-## Why
+## Install (developer mode)
 
-Salesforce Setup is powerful but slow to navigate. Finding a specific validation rule on a custom object can take five clicks and three page loads. Salesforce Commander turns that into two keystrokes:
+1. Clone or download this repository.
+2. Open `chrome://extensions` and enable **Developer mode** (top-right).
+3. Click **Load unpacked** and select the project folder.
+4. (Optional, for the SOQL Generator) Right-click the extension icon → **Options** → paste your Anthropic API key.
 
-- `⌘⇧K`, type `account val`, Enter → you're on **Validation Rules** for **Account**.
-- `⌘⇧K`, type `permission set`, Enter → you're on the Permission Sets list.
-- `⌘⇧K`, type `soql`, Enter, "all open cases assigned to me this week" → you have a working SOQL query in the clipboard.
+> The extension is not yet published to the Chrome Web Store. Until then, "Load unpacked" is the supported install path.
 
-No backend. No subscriptions. Your Salesforce session and (optionally) your Anthropic API key live in your browser only.
-
-## Screenshots
-
-| | |
-|---|---|
-| ![Command palette](screenshots/command-palette.jpg) | ![Flow browser](screenshots/flow-browser.jpg) |
-| Search objects, flows, setup pages, or pick a category | Browse and filter all flows in your org |
-| ![SOQL Generator](screenshots/soql-generator.jpg) | ![Custom metadata drill-down](screenshots/custom-metadata-drill.jpg) |
-| Generate SOQL from natural language | Drill into custom metadata types |
-| ![Flow Debug — paste input](screenshots/flow-debug-input.jpg) | ![Flow Debug — suggested fix](screenshots/flow-debug-suggested-fix.jpg) |
-| Paste debug output from Flow Builder | Get a root-cause analysis and suggested fix |
+After changing any source file, click the reload icon for the extension on `chrome://extensions`.
 
 ## Features
 
@@ -40,16 +30,18 @@ No backend. No subscriptions. Your Salesforce session and (optionally) your Anth
 - **Flow Debug Assistant** — Open a flow in the Flow Builder, run a debug session, paste the Debug-panel output into Commander, and Claude tells you which path the flow took, what went wrong, and how to fix it.
 - **Works in production and sandboxes** — `*.lightning.force.com`, `*.my.salesforce.com`, `*.salesforce-setup.com`, and `*.force.com`.
 
-## Install (developer mode)
+  
+## Screenshots
 
-1. Clone or download this repository.
-2. Open `chrome://extensions` and enable **Developer mode** (top-right).
-3. Click **Load unpacked** and select the project folder.
-4. (Optional, for the SOQL Generator) Right-click the extension icon → **Options** → paste your Anthropic API key.
+| | |
+|---|---|
+| ![Command palette](screenshots/command-palette.jpg) | ![Flow browser](screenshots/flow-browser.jpg) |
+| Search objects, flows, setup pages, or pick a category | Browse and filter all flows in your org |
+| ![SOQL Generator](screenshots/soql-generator.jpg) | ![Custom metadata drill-down](screenshots/custom-metadata-drill.jpg) |
+| Generate SOQL from natural language | Drill into custom metadata types |
+| ![Flow Debug — paste input](screenshots/flow-debug-input.jpg) | ![Flow Debug — suggested fix](screenshots/flow-debug-suggested-fix.jpg) |
+| Paste debug output from Flow Builder | Get a root-cause analysis and suggested fix |
 
-> The extension is not yet published to the Chrome Web Store. Until then, "Load unpacked" is the supported install path.
-
-After changing any source file, click the reload icon for the extension on `chrome://extensions`.
 
 ## Usage
 
