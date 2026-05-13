@@ -20,7 +20,7 @@ async function loadPermsets() {
     'FROM PermissionSet WHERE IsOwnedByProfile = false ' +
     'ORDER BY Label LIMIT 2000'
   );
-  var resp = await fetch(pre.apiBase + pre.basePath + '/query/?q=' + q, { headers: pre.headers });
+  var resp = await sfFetch(pre.apiBase + pre.basePath + '/query/?q=' + q, { headers: pre.headers });
   if (!resp.ok) {
     var body = await resp.text();
     throw new Error('Permission Set query ' + resp.status + ': ' + body.slice(0, 120));
