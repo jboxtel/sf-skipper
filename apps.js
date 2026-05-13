@@ -16,7 +16,7 @@ async function loadApps() {
   // AppDefinition is the queryable view of installed Lightning apps.
   // DurableId is the value used in /lightning/app/<DurableId> URLs.
   var q = encodeURIComponent('SELECT DurableId, Label, NamespacePrefix FROM AppDefinition ORDER BY Label LIMIT 2000');
-  var resp = await fetch(pre.apiBase + pre.basePath + '/query/?q=' + q, { headers: pre.headers });
+  var resp = await sfFetch(pre.apiBase + pre.basePath + '/query/?q=' + q, { headers: pre.headers });
   if (!resp.ok) {
     var body = await resp.text();
     throw new Error('App query ' + resp.status + ': ' + body.slice(0, 120));

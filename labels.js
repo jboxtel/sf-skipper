@@ -15,7 +15,7 @@ async function loadLabels() {
 
   // ExternalString = the sObject behind Custom Labels. Tooling API only.
   var q = encodeURIComponent('SELECT Id, Name, MasterLabel, Value, Language, Category FROM ExternalString ORDER BY MasterLabel LIMIT 2000');
-  var resp = await fetch(pre.apiBase + pre.basePath + '/tooling/query/?q=' + q, { headers: pre.headers });
+  var resp = await sfFetch(pre.apiBase + pre.basePath + '/tooling/query/?q=' + q, { headers: pre.headers });
   if (!resp.ok) {
     var body = await resp.text();
     throw new Error('Custom Label query ' + resp.status + ': ' + body.slice(0, 120));

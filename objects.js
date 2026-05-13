@@ -81,7 +81,7 @@ function persistCache() {
 async function loadObjectsFromPage() {
   var pre = await sfRestPreamble();
 
-  var sobjResp = await fetch(pre.apiBase + pre.basePath + '/sobjects/', { headers: pre.headers });
+  var sobjResp = await sfFetch(pre.apiBase + pre.basePath + '/sobjects/', { headers: pre.headers });
   if (!sobjResp.ok) throw new Error('describeGlobal failed: ' + sobjResp.status);
   var data = await sobjResp.json();
 
@@ -149,7 +149,7 @@ async function getEntityIdForCmdt(apiName) {
 
   var pre = await sfRestPreamble();
   var soql = "SELECT Id FROM CustomObject WHERE DeveloperName = '" + apiName.replace(/__mdt$/i, '').replace(/'/g, "\\'") + "' AND ManageableState != 'deleted'";
-  var resp = await fetch(pre.apiBase + pre.basePath + '/tooling/query/?q=' + encodeURIComponent(soql), { headers: pre.headers });
+  var resp = await sfFetch(pre.apiBase + pre.basePath + '/tooling/query/?q=' + encodeURIComponent(soql), { headers: pre.headers });
   if (!resp.ok) throw new Error('Tooling query failed for ' + apiName + ': ' + resp.status);
   var data = await resp.json();
   if (!data.records || !data.records.length) throw new Error('Entity not found for ' + apiName);
@@ -170,7 +170,7 @@ async function getKeyPrefixForCmdt(apiName) {
   if (match && match.keyPrefix) return match.keyPrefix;
 
   var pre = await sfRestPreamble();
-  var resp = await fetch(pre.apiBase + pre.basePath + '/sobjects/' + encodeURIComponent(apiName) + '/describe', { headers: pre.headers });
+  var resp = await sfFetch(pre.apiBase + pre.basePath + '/sobjects/' + encodeURIComponent(apiName) + '/describe', { headers: pre.headers });
   if (resp.status === 401 || resp.status === 403) {
     throw new Error('No describe access for ' + apiName + ' — check your permissions.');
   }

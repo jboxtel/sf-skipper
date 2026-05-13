@@ -15,7 +15,7 @@ async function loadFlows() {
 
   // FlowDefinitionView is queryable via the standard REST query endpoint
   var q = encodeURIComponent('SELECT Id, Label, ApiName, ActiveVersionId, LatestVersionId FROM FlowDefinitionView ORDER BY Label LIMIT 2000');
-  var resp = await fetch(pre.apiBase + pre.basePath + '/query/?q=' + q, { headers: pre.headers });
+  var resp = await sfFetch(pre.apiBase + pre.basePath + '/query/?q=' + q, { headers: pre.headers });
   if (!resp.ok) {
     var body = await resp.text();
     throw new Error('Flow query ' + resp.status + ': ' + body.slice(0, 120));

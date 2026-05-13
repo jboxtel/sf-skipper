@@ -54,7 +54,7 @@ async function fetchFlowMetadata(flowId) {
     soql = "SELECT Id, DefinitionId, MasterLabel, Metadata FROM Flow WHERE Definition.DeveloperName = '" + devName + "'" + nsFilter + " AND Status = 'Active' ORDER BY VersionNumber DESC LIMIT 1";
   }
   var url = pre.apiBase + pre.basePath + '/tooling/query/?q=' + encodeURIComponent(soql);
-  var resp = await fetch(url, { headers: pre.headers });
+  var resp = await sfFetch(url, { headers: pre.headers });
   if (resp.status === 401 || resp.status === 403) {
     throw new Error('No Tooling API access — your profile needs "View All Data" or Author Apex to read flow metadata.');
   }

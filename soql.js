@@ -52,7 +52,7 @@ async function fetchDescribe(apiName) {
 
   var pre = await sfRestPreamble();
 
-  var resp = await fetch(pre.apiBase + pre.basePath + '/sobjects/' + encodeURIComponent(apiName) + '/describe', { headers: pre.headers });
+  var resp = await sfFetch(pre.apiBase + pre.basePath + '/sobjects/' + encodeURIComponent(apiName) + '/describe', { headers: pre.headers });
   if (!resp.ok) throw new Error('describe failed: ' + resp.status);
   var data = await resp.json();
 
