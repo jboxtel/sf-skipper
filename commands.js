@@ -64,6 +64,17 @@ function toLabelResult(label) {
   };
 }
 
+function toPermsetResult(ps) {
+  var sub = ps.namespace ? (ps.namespace + '__' + ps.name) : ps.name;
+  return {
+    label: ps.label,
+    sublabel: sub,
+    url: getOrgBase() + '/lightning/setup/PermSets/page?address=%2F' + encodeURIComponent(ps.id),
+    type: 'permset',
+    permset: ps,
+  };
+}
+
 function toFlowResult(flow) {
   return {
     label: flow.label,
@@ -98,6 +109,14 @@ var FLOW_DEBUG_ACTION = {
   action: 'flow-debug',
 };
 
+var ASK_ACTION = {
+  label: '@ask',
+  sublabel: 'Ask Claude about this screen',
+  url: '#',
+  type: 'action',
+  action: 'ask',
+};
+
 function makeHeader(label) {
   return { label: label, type: 'header' };
 }
@@ -112,10 +131,12 @@ function getRootResults() {
   results.push({ label: '@app',      sublabel: 'All installed Lightning apps',  url: '#', type: 'shortcut', keyword: 'app' });
   results.push({ label: '@cmd',      sublabel: 'Custom metadata types',         url: '#', type: 'shortcut', keyword: 'cmd' });
   results.push({ label: '@label',    sublabel: 'Custom labels',                 url: '#', type: 'shortcut', keyword: 'label' });
+  results.push({ label: '@permset',  sublabel: 'Permission sets',               url: '#', type: 'shortcut', keyword: 'permset' });
   results.push({ label: '@setup',    sublabel: 'All setup quick links',         url: '#', type: 'shortcut', keyword: 'setup' });
 
   // ── AI Tools ──
   results.push(makeHeader('AI Tools'));
+  results.push(ASK_ACTION);
   results.push(SOQL_ACTION);
   var onFlowPage = typeof isFlowBuilderPage === 'function' && isFlowBuilderPage();
   results.push({
@@ -145,9 +166,11 @@ function getShortcutResults() {
   results.push({ label: '@app',      sublabel: 'All installed Lightning apps',  url: '#', type: 'shortcut', keyword: 'app' });
   results.push({ label: '@cmd',      sublabel: 'Custom metadata types',         url: '#', type: 'shortcut', keyword: 'cmd' });
   results.push({ label: '@label',    sublabel: 'Custom labels',                 url: '#', type: 'shortcut', keyword: 'label' });
+  results.push({ label: '@permset',  sublabel: 'Permission sets',               url: '#', type: 'shortcut', keyword: 'permset' });
   results.push({ label: '@setup',    sublabel: 'All setup quick links',         url: '#', type: 'shortcut', keyword: 'setup' });
 
   results.push(makeHeader('AI Tools'));
+  results.push({ label: '@ask',      sublabel: 'Ask Claude about this screen',  url: '#', type: 'shortcut', keyword: 'ask' });
   results.push({ label: '@soql',     sublabel: 'Ask a data question',           url: '#', type: 'shortcut', keyword: 'soql' });
   results.push({ label: '@debug',    sublabel: 'Analyze a flow with Claude',    url: '#', type: 'shortcut', keyword: 'flow-debug' });
 
@@ -274,6 +297,26 @@ function resolveLabelPicker(filter) {
   };
 }
 
+// Permission Set picker mode: filter across all org Permission Sets
+function resolvePermsetPicker(filter) {
+  var all = getAllPermsets();
+  var filtered = filter
+    ? fuzzyFilter(filter, all, function (p) { return p.label + ' ' + p.name; })
+    : all;
+  var count = filtered.length;
+  return {
+    mode: 'permset-picker',
+    results: filtered.slice(0, 30).map(toPermsetResult),
+    hint: getPermsetsState() === 'error'
+      ? 'Failed to load permission sets: ' + getPermsetsError()
+      : all.length === 0
+        ? 'Loading permission sets…'
+        : filter
+          ? (count === 0 ? 'No permission sets match' : count + ' matching permission set' + (count === 1 ? '' : 's'))
+          : all.length + ' permission set' + (all.length === 1 ? '' : 's') + ' — type to filter',
+  };
+}
+
 // Setup picker mode: filter across all setup quick links
 function resolveSetupPicker(filter) {
   var filtered = filter
@@ -385,6 +428,15 @@ function resolveInput(rawInput) {
     };
   }
 
+  // "@permset" / "@permsets" / "@ps" — hint to press Enter to browse permission sets
+  if (lc === 'permset' || lc === 'permsets' || lc === 'ps') {
+    return {
+      mode: 'permset-hint',
+      results: [],
+      hint: 'Press Enter to browse permission sets',
+    };
+  }
+
   // "@setup" — hint to press Enter to browse setup pages
   if (lc === 'setup') {
     return {
@@ -400,6 +452,15 @@ function resolveInput(rawInput) {
       mode: 'soql-hint',
       results: [SOQL_ACTION],
       hint: 'Press Enter to open the SOQL generator',
+    };
+  }
+
+  // "@ask" — hint to press Enter
+  if (input.toLowerCase() === 'ask') {
+    return {
+      mode: 'ask-hint',
+      results: [ASK_ACTION],
+      hint: 'Press Enter to ask Claude about this screen',
     };
   }
 

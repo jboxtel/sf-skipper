@@ -7,11 +7,12 @@
   initFlows();         // populate flow cache from storage + API
   initApps();          // populate Lightning app cache from storage + API
   initLabels();        // populate custom label cache from storage + Tooling API
+  initPermsets();      // populate permission set cache from storage + REST API
 
   var paletteVisible = false;
   var selectedIndex = -1;
   var currentResults = [];
-  var searchMode = 'root'; // 'root' | 'object-picker' | 'object-scoped' | 'flow-picker' | 'app-picker' | 'soql' | 'flow-debug' | 'cmd-picker' | 'cmd-scoped'
+  var searchMode = 'root'; // 'root' | 'object-picker' | 'object-scoped' | 'flow-picker' | 'app-picker' | 'soql' | 'flow-debug' | 'cmd-picker' | 'cmd-scoped' | 'permset-picker'
   var scopedObject = null;
   var scopedCmdt = null;
   var objectPickerFilter = '';
@@ -19,8 +20,10 @@
   var appPickerFilter = '';
   var cmdtPickerFilter = '';
   var labelPickerFilter = '';
+  var permsetPickerFilter = '';
   var soqlInFlight = false;
   var flowDebugInFlight = false;
+  var askInFlight = false;
 
   function injectPalette() {
     if (document.getElementById('sfnav-overlay')) return;
@@ -59,6 +62,20 @@
             '<div class="sfnav-flowdebug-section sfnav-flowdebug-fix"><span class="sfnav-flowdebug-label">Suggested fix</span><ol class="sfnav-flowdebug-body sfnav-flowdebug-steps"></ol><button class="sfnav-flowdebug-copy">Copy fix</button></div>' +
           '</div>' +
         '</div>' +
+        '<div id="sfnav-ask" style="display:none">' +
+          '<div id="sfnav-ask-meta"></div>' +
+          '<textarea id="sfnav-ask-question" placeholder="What’s happening here? Why this error? Anything you want to know about the current screen…" spellcheck="false"></textarea>' +
+          '<div id="sfnav-ask-actions">' +
+            '<button id="sfnav-ask-run" class="sfnav-soql-btn-primary">Ask <span class="sfnav-kbd">⌘↵</span></button>' +
+            '<span id="sfnav-ask-apistat" class="sfnav-apistat"></span>' +
+          '</div>' +
+          '<div id="sfnav-ask-status"></div>' +
+          '<ul id="sfnav-ask-activity" style="display:none"></ul>' +
+          '<div id="sfnav-ask-output" style="display:none">' +
+            '<div class="sfnav-ask-answer"></div>' +
+            '<button class="sfnav-ask-copy">Copy answer</button>' +
+          '</div>' +
+        '</div>' +
         '<div id="sfnav-footer"><span id="sfnav-brand">Salesforce Commander</span><span id="sfnav-footer-hints"></span></div>' +
       '</div>';
 
@@ -77,7 +94,7 @@
       // space after the keyword so users can keep typing without pressing Enter.
       if (searchMode === 'root') {
         var trimmed = val.replace(/^@/, '');
-        var m = trimmed.match(/^(cmd|cmdt|mdt|flow|flows|object|objects|app|apps|label|labels|setup|soql|debug|flow-debug)\s+(.*)$/i);
+        var m = trimmed.match(/^(cmd|cmdt|mdt|flow|flows|object|objects|app|apps|label|labels|permset|permsets|ps|setup|soql|ask|debug|flow-debug)\s+(.*)$/i);
         if (m) {
           var kw = m[1].toLowerCase();
           var rest = m[2];
@@ -86,8 +103,10 @@
           if (kw === 'object' || kw === 'objects')           { enterObjectPickerMode(rest); return; }
           if (kw === 'app' || kw === 'apps')                 { enterAppPickerMode(rest); return; }
           if (kw === 'label' || kw === 'labels')             { enterLabelPickerMode(rest); return; }
+          if (kw === 'permset' || kw === 'permsets' || kw === 'ps') { enterPermsetPickerMode(rest); return; }
           if (kw === 'setup')                                { enterSetupPickerMode(rest); return; }
           if (kw === 'soql')                                 { enterSoqlMode(); return; }
+          if (kw === 'ask')                                  { enterAskMode(rest); return; }
           if (kw === 'debug' || kw === 'flow-debug')         { enterFlowDebugMode(); return; }
         }
       }
@@ -103,6 +122,8 @@
         renderResults(resolveCmdtPicker(val));
       } else if (searchMode === 'label-picker') {
         renderResults(resolveLabelPicker(val));
+      } else if (searchMode === 'permset-picker') {
+        renderResults(resolvePermsetPicker(val));
       } else if (searchMode === 'setup-picker') {
         renderResults(resolveSetupPicker(val));
       } else if (searchMode === 'cmd-scoped') {
@@ -143,6 +164,10 @@
         enterSoqlMode();
         return;
       }
+      if (keyword === 'ask') {
+        enterAskMode('');
+        return;
+      }
       if (keyword === 'flow-debug' || keyword === 'debug') {
         enterFlowDebugMode();
         return;
@@ -153,6 +178,10 @@
       }
       if (keyword === 'label' || keyword === 'labels') {
         enterLabelPickerMode('');
+        return;
+      }
+      if (keyword === 'permset' || keyword === 'permsets' || keyword === 'ps') {
+        enterPermsetPickerMode('');
         return;
       }
       if (keyword === 'setup') {
@@ -173,6 +202,10 @@
       runFlowDebugAnalysis();
       return;
     }
+    if (searchMode === 'ask') {
+      runAskQuery();
+      return;
+    }
     navigateToSelected();
   }
 
@@ -189,9 +222,11 @@
       case 'app-picker':
       case 'cmd-picker':
       case 'label-picker':
+      case 'permset-picker':
       case 'setup-picker':
       case 'soql':
       case 'flow-debug':
+      case 'ask':
         goToRoot();
         return;
       default:
@@ -208,6 +243,7 @@
     appPickerFilter = '';
     cmdtPickerFilter = '';
     labelPickerFilter = '';
+    permsetPickerFilter = '';
     hideSoqlPanel();
     setFooterHints('root');
     var breadcrumbEl = document.getElementById('sfnav-breadcrumb');
@@ -437,6 +473,15 @@
     input.focus();
   }
 
+  function enterPermsetPickerMode(filterText) {
+    searchMode = 'permset-picker';
+    var input = document.getElementById('sfnav-input');
+    input.value = filterText || '';
+    input.placeholder = 'Filter permission sets…';
+    renderResults(resolvePermsetPicker(filterText || ''));
+    input.focus();
+  }
+
   function enterCmdPickerMode(filterText) {
     searchMode = 'cmd-picker';
     scopedCmdt = null;
@@ -651,6 +696,285 @@
     outputEl.style.display = 'block';
   }
 
+  function enterAskMode(initialQuestion) {
+    searchMode = 'ask';
+    setFooterHints('ask');
+    var input = document.getElementById('sfnav-input');
+
+    input.value = '';
+    input.placeholder = 'Use the box below to describe what you’re seeing';
+    input.disabled = true;
+    document.getElementById('sfnav-results').style.display = 'none';
+    document.getElementById('sfnav-hint').textContent = '';
+    document.getElementById('sfnav-breadcrumb').innerHTML =
+      '<span class="sfnav-bc-seg">@ask</span> <span class="sfnav-bc-arrow">›</span>';
+    document.getElementById('sfnav-breadcrumb').style.display = 'flex';
+    document.getElementById('sfnav-ask').style.display = 'flex';
+    document.getElementById('sfnav-ask-status').textContent = '';
+    document.getElementById('sfnav-ask-status').className = '';
+    document.getElementById('sfnav-ask-output').style.display = 'none';
+    var actEl = document.getElementById('sfnav-ask-activity');
+    actEl.innerHTML = '';
+    actEl.style.display = 'none';
+    document.getElementById('sfnav-ask-question').value = initialQuestion || '';
+
+    var metaEl = document.getElementById('sfnav-ask-meta');
+    var ctx = (typeof getAskOrgContext === 'function') ? getAskOrgContext() : null;
+    if (ctx) {
+      var bits = [];
+      if (ctx.pageType)  bits.push(ctx.pageType);
+      if (ctx.sObject)   bits.push(ctx.sObject);
+      if (ctx.setupNode) bits.push(ctx.setupNode);
+      var line = bits.length ? 'Context: ' + bits.join(' · ') : 'Context: ' + ctx.host;
+      if (ctx.pageType === 'record' && ctx.sObject && ctx.recordId) {
+        line += ' · sending live record fields';
+      }
+      metaEl.textContent = line;
+    } else {
+      metaEl.textContent = '';
+    }
+
+    hasSoqlApiKey().then(function (ok) {
+      var el = document.getElementById('sfnav-ask-apistat');
+      if (!el) return;
+      if (ok) {
+        el.textContent = 'API key connected';
+        el.className = 'sfnav-apistat sfnav-apistat-ok';
+      } else {
+        el.innerHTML = 'No API key — <a href="#" class="sfnav-settings-link">configure in settings</a>';
+        el.className = 'sfnav-apistat sfnav-apistat-missing';
+        var link = el.querySelector('.sfnav-settings-link');
+        if (link) link.onclick = function (e) { e.preventDefault(); openSoqlSettings(); };
+      }
+    });
+
+    document.getElementById('sfnav-ask-run').onclick = runAskQuery;
+
+    var qEl = document.getElementById('sfnav-ask-question');
+    qEl.addEventListener('keydown', function (e) {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+        e.preventDefault();
+        runAskQuery();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        handleBack();
+      }
+    });
+
+    qEl.focus();
+  }
+
+  async function runAskQuery() {
+    if (askInFlight) return;
+    var qEl = document.getElementById('sfnav-ask-question');
+    var statusEl = document.getElementById('sfnav-ask-status');
+    var outputEl = document.getElementById('sfnav-ask-output');
+    var runBtn = document.getElementById('sfnav-ask-run');
+    var overlay = document.getElementById('sfnav-overlay');
+
+    var question = qEl.value.trim();
+    if (!question) {
+      statusEl.textContent = 'Type a question first.';
+      statusEl.className = 'sfnav-ask-status-error';
+      return;
+    }
+
+    var hasKey = await hasSoqlApiKey();
+    if (!hasKey) {
+      statusEl.innerHTML = 'No API key configured. <a href="#" class="sfnav-settings-link">Open settings</a>.';
+      statusEl.className = 'sfnav-ask-status-error';
+      var link = statusEl.querySelector('.sfnav-settings-link');
+      if (link) link.onclick = function (e) { e.preventDefault(); openSoqlSettings(); };
+      return;
+    }
+
+    askInFlight = true;
+    runBtn.disabled = true;
+    qEl.disabled = true;
+    statusEl.textContent = 'Capturing screen + loading record…';
+    statusEl.className = 'sfnav-ask-status-loading';
+    outputEl.style.display = 'none';
+
+    // Hide the palette so it doesn't end up in the screenshot. We restore it as
+    // soon as captureVisibleTab returns — well before the Claude round-trip.
+    var prevDisplay = overlay.style.display;
+    overlay.style.display = 'none';
+
+    var restored = false;
+    function restoreOverlay() {
+      if (restored) return;
+      restored = true;
+      overlay.style.display = prevDisplay || 'flex';
+    }
+
+    var activityEl = document.getElementById('sfnav-ask-activity');
+    activityEl.innerHTML = '';
+    activityEl.style.display = 'none';
+
+    try {
+      // Force a paint frame so the screenshot doesn't catch a half-rendered overlay
+      await new Promise(function (resolve) {
+        requestAnimationFrame(function () { requestAnimationFrame(resolve); });
+      });
+      var result = await runAsk(question, function (event) {
+        if (event.kind === 'captured') {
+          restoreOverlay();
+        } else if (event.kind === 'enriched') {
+          var ctx = event.ctx;
+          if (ctx && ctx.recordFields) {
+            var n = Object.keys(ctx.recordFields).length;
+            statusEl.textContent = 'Asking Claude (sent ' + n + ' record fields)…';
+          } else {
+            statusEl.textContent = 'Asking Claude…';
+          }
+        } else if (event.kind === 'tool_call') {
+          appendAskActivity(activityEl, event);
+          statusEl.textContent = 'Claude is investigating…';
+        } else if (event.kind === 'tool_result') {
+          updateLastAskActivity(activityEl, event);
+        } else if (event.kind === 'interim_text') {
+          appendAskInterim(activityEl, event.text);
+        } else if (event.kind === 'escalate') {
+          appendAskInterim(activityEl, 'Escalating to claude.ai — ' + event.reason);
+        }
+      });
+      restoreOverlay();
+      renderAskResult(result);
+      statusEl.textContent = result.toolCallCount
+        ? 'Done · ' + result.toolCallCount + ' tool call' + (result.toolCallCount === 1 ? '' : 's')
+        : 'Done';
+      statusEl.className = 'sfnav-ask-status-ok';
+    } catch (err) {
+      restoreOverlay();
+      statusEl.textContent = 'Error: ' + err.message;
+      statusEl.className = 'sfnav-ask-status-error';
+      outputEl.style.display = 'none';
+      console.warn('sfnav: ask failed —', err);
+    } finally {
+      askInFlight = false;
+      runBtn.disabled = false;
+      qEl.disabled = false;
+      qEl.focus();
+    }
+  }
+
+  // Human-readable label for each tool. Kept in content.js (not ask.js) so the
+  // labelling lives next to the rendering that uses it.
+  var ASK_TOOL_LABELS = {
+    runSoql:           'Running SOQL',
+    runToolingSoql:    'Querying Tooling API',
+    describeSObject:   'Describing object',
+    getFieldHistory:   'Reading field history',
+    searchApex:        'Searching Apex',
+    readApexClass:     'Reading Apex class',
+    escalateToDesktop: 'Escalating to claude.ai'
+  };
+
+  function appendAskActivity(activityEl, event) {
+    activityEl.style.display = 'block';
+    var label = ASK_TOOL_LABELS[event.name] || event.name;
+    var detail = '';
+    if (event.input) {
+      if (event.input.query) detail = event.input.query;
+      else if (event.input.sObject) detail = event.input.sObject;
+      else if (event.input.recordId) detail = event.input.recordId;
+    }
+    var li = document.createElement('li');
+    li.className = 'sfnav-ask-activity-item sfnav-ask-activity-pending';
+    li.innerHTML =
+      '<span class="sfnav-ask-activity-spinner">●</span>' +
+      '<span class="sfnav-ask-activity-label">' + esc(label) + '</span>' +
+      (detail ? '<code class="sfnav-ask-activity-detail">' + esc(detail) + '</code>' : '') +
+      '<span class="sfnav-ask-activity-summary"></span>';
+    activityEl.appendChild(li);
+  }
+
+  function updateLastAskActivity(activityEl, event) {
+    var items = activityEl.querySelectorAll('.sfnav-ask-activity-pending');
+    var li = items[items.length - 1];
+    if (!li) return;
+    li.classList.remove('sfnav-ask-activity-pending');
+    li.classList.add(event.ok ? 'sfnav-ask-activity-ok' : 'sfnav-ask-activity-err');
+    var sumEl = li.querySelector('.sfnav-ask-activity-summary');
+    if (sumEl) sumEl.textContent = event.summary || (event.ok ? 'ok' : 'failed');
+  }
+
+  function appendAskInterim(activityEl, text) {
+    if (!text) return;
+    activityEl.style.display = 'block';
+    var li = document.createElement('li');
+    li.className = 'sfnav-ask-activity-item sfnav-ask-activity-interim';
+    li.textContent = text;
+    activityEl.appendChild(li);
+  }
+
+  function renderAskResult(result) {
+    var outputEl = document.getElementById('sfnav-ask-output');
+    var answerEl = outputEl.querySelector('.sfnav-ask-answer');
+    var copyBtn  = outputEl.querySelector('.sfnav-ask-copy');
+    var text = (result && result.text) || '';
+    answerEl.innerHTML = renderAskMarkdown(text);
+    copyBtn.onclick = function () {
+      navigator.clipboard.writeText(text).then(function () {
+        var prev = copyBtn.textContent;
+        copyBtn.textContent = 'Copied!';
+        setTimeout(function () { copyBtn.textContent = prev; }, 1500);
+      });
+    };
+    outputEl.style.display = 'block';
+  }
+
+  // Minimal Markdown-ish renderer: paragraphs, bullets, inline code, bold.
+  // We deliberately don't pull in a full Markdown lib — this keeps the answer
+  // readable when Claude uses light formatting, without HTML-injection risk.
+  function renderAskMarkdown(text) {
+    if (!text) return '';
+    var lines = text.split(/\r?\n/);
+    var html = '';
+    var inList = false;
+    var paragraph = [];
+
+    function flushParagraph() {
+      if (!paragraph.length) return;
+      html += '<p>' + renderAskInline(paragraph.join(' ')) + '</p>';
+      paragraph = [];
+    }
+    function openList() { if (!inList) { html += '<ul>'; inList = true; } }
+    function closeList() { if (inList) { html += '</ul>'; inList = false; } }
+
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i];
+      var bullet = line.match(/^\s*[-*]\s+(.*)$/);
+      if (bullet) {
+        flushParagraph();
+        openList();
+        html += '<li>' + renderAskInline(bullet[1]) + '</li>';
+        continue;
+      }
+      if (!line.trim()) {
+        flushParagraph();
+        closeList();
+        continue;
+      }
+      if (inList) { closeList(); }
+      paragraph.push(line.trim());
+    }
+    flushParagraph();
+    closeList();
+    return html;
+  }
+
+  function renderAskInline(s) {
+    // Escape first, then re-introduce known markup. Bold (**x**) and inline
+    // `code` only — no links/images, since the model shouldn't be producing them.
+    var out = esc(s);
+    out = out.replace(/`([^`]+)`/g, function (_, code) {
+      return '<code class="sfnav-ask-code">' + code + '</code>';
+    });
+    out = out.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    return out;
+  }
+
   // Render `…` as <code>…</code>, escaping HTML in everything else.
   function renderInlineCode(s) {
     var out = '';
@@ -702,6 +1026,8 @@
     if (soqlEl) soqlEl.style.display = 'none';
     var fdEl = document.getElementById('sfnav-flowdebug');
     if (fdEl) fdEl.style.display = 'none';
+    var askEl = document.getElementById('sfnav-ask');
+    if (askEl) askEl.style.display = 'none';
     var resultsEl = document.getElementById('sfnav-results');
     if (resultsEl) resultsEl.style.display = '';
   }
@@ -756,6 +1082,9 @@
       breadcrumbEl.style.display = 'flex';
     } else if (resolution.mode === 'label-picker') {
       breadcrumbEl.innerHTML = '<span class="sfnav-bc-seg">@label</span> <span class="sfnav-bc-arrow">›</span>';
+      breadcrumbEl.style.display = 'flex';
+    } else if (resolution.mode === 'permset-picker') {
+      breadcrumbEl.innerHTML = '<span class="sfnav-bc-seg">@permset</span> <span class="sfnav-bc-arrow">›</span>';
       breadcrumbEl.style.display = 'flex';
     } else if (resolution.mode === 'cmd-scoped' && resolution.cmdt) {
       breadcrumbEl.innerHTML =
@@ -840,6 +1169,11 @@
       return;
     }
 
+    if (result && result.type === 'action' && result.action === 'ask') {
+      enterAskMode('');
+      return;
+    }
+
     if (result && result.type === 'object') {
       enterObjectScopedMode(result.object);
       return;
@@ -871,8 +1205,10 @@
       case 'app':        enterAppPickerMode(''); return;
       case 'cmd':        enterCmdPickerMode(''); return;
       case 'label':      enterLabelPickerMode(''); return;
+      case 'permset':    enterPermsetPickerMode(''); return;
       case 'setup':      enterSetupPickerMode(''); return;
       case 'soql':       enterSoqlMode(); return;
+      case 'ask':        enterAskMode(''); return;
       case 'flow-debug': enterFlowDebugMode(); return;
       case 'refresh':    runRefresh(); return;
     }
@@ -889,6 +1225,7 @@
     if (typeof loadObjectsFromPage === 'function') tasks.push(loadObjectsFromPage());
     if (typeof loadApps === 'function')            tasks.push(loadApps());
     if (typeof loadLabels === 'function')          tasks.push(loadLabels());
+    if (typeof loadPermsets === 'function')        tasks.push(loadPermsets());
 
     Promise.allSettled(tasks).then(function (results) {
       var failed = results.filter(function (r) { return r.status === 'rejected'; });
@@ -949,6 +1286,8 @@
       el.textContent = 'Enter to generate \u00b7 Esc to go back';
     } else if (mode === 'flow-debug') {
       el.textContent = 'Cmd+Enter to analyze \u00b7 Esc to go back';
+    } else if (mode === 'ask') {
+      el.textContent = 'Cmd+Enter to ask \u00b7 Esc to go back';
     } else {
       el.textContent = '\u2191\u2193 navigate \u00b7 Enter to select \u00b7 Esc to close';
     }
@@ -977,6 +1316,15 @@
     if (!input) return;
     if (searchMode === 'label-picker') {
       renderResults(resolveLabelPicker(input.value));
+    }
+  });
+
+  document.addEventListener('sfnav:permsets-loaded', function () {
+    if (!paletteVisible) return;
+    var input = document.getElementById('sfnav-input');
+    if (!input) return;
+    if (searchMode === 'permset-picker') {
+      renderResults(resolvePermsetPicker(input.value));
     }
   });
 

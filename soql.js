@@ -62,6 +62,7 @@ async function fetchDescribe(apiName) {
     if (f.picklistValues && f.picklistValues.length) {
       compact.values = f.picklistValues.slice(0, 50).map(function (v) { return v.value; });
     }
+    if (f.inlineHelpText) compact.helpText = f.inlineHelpText;
     return compact;
   });
 

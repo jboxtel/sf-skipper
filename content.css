@@ -633,3 +633,215 @@ ol.sfnav-flowdebug-steps li::before {
 .sfnav-flowdebug-fix {
   padding-right: 80px;
 }
+
+/* ─── Ask Panel ────────────────────────────────────── */
+
+#sfnav-ask {
+  padding: 14px 18px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+#sfnav-ask-meta {
+  font-family: var(--sf-sans);
+  font-size: 12px;
+  color: var(--sf-ink-soft);
+}
+
+#sfnav-ask-question {
+  font-family: var(--sf-sans);
+  font-size: 13px;
+  color: var(--sf-ink);
+  background: var(--sf-rule-soft);
+  border: 1px solid var(--sf-rule);
+  border-radius: var(--sf-radius);
+  padding: 10px 12px;
+  resize: vertical;
+  min-height: 70px;
+  width: 100%;
+  box-sizing: border-box;
+  outline: none;
+  transition: border-color var(--sf-transition);
+}
+
+#sfnav-ask-question:focus {
+  border-color: var(--sf-ink-soft);
+}
+
+#sfnav-ask-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+#sfnav-ask-status {
+  font-family: var(--sf-sans);
+  font-style: normal;
+  font-size: 12px;
+  font-weight: 400;
+  min-height: 14px;
+}
+
+.sfnav-ask-status-loading { color: var(--sf-ink-soft); }
+.sfnav-ask-status-ok      { color: var(--sf-success); }
+.sfnav-ask-status-error   { color: var(--sf-error); }
+
+#sfnav-ask-output {
+  border: 1px solid var(--sf-rule);
+  background: var(--sf-rule-soft);
+  border-radius: var(--sf-radius);
+  padding: 12px 14px;
+  position: relative;
+  margin-top: 4px;
+  padding-right: 100px;
+}
+
+.sfnav-ask-answer {
+  font-family: var(--sf-sans);
+  font-size: 13px;
+  color: var(--sf-ink);
+  line-height: 1.6;
+}
+
+.sfnav-ask-answer p {
+  margin: 0 0 8px 0;
+}
+
+.sfnav-ask-answer p:last-child {
+  margin-bottom: 0;
+}
+
+.sfnav-ask-answer ul {
+  margin: 0 0 8px 0;
+  padding-left: 20px;
+}
+
+.sfnav-ask-answer li {
+  margin: 2px 0;
+}
+
+.sfnav-ask-code {
+  font-family: var(--sf-mono);
+  font-size: 12px;
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-rule);
+  border-radius: 4px;
+  padding: 1px 6px;
+  color: var(--sf-ink);
+}
+
+.sfnav-ask-copy {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  background: var(--sf-surface);
+  color: var(--sf-ink-soft);
+  border: 1px solid var(--sf-rule);
+  font-family: var(--sf-sans);
+  font-size: 11px;
+  font-weight: 500;
+  padding: 3px 10px;
+  border-radius: var(--sf-radius);
+  cursor: pointer;
+  transition: background var(--sf-transition), color var(--sf-transition);
+}
+
+.sfnav-ask-copy:hover {
+  background: var(--sf-ink);
+  color: #ffffff;
+  border-color: var(--sf-ink);
+}
+
+/* ─── Ask Activity (tool-use trace) ────────────────── */
+
+#sfnav-ask-activity {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--sf-rule);
+  border-radius: var(--sf-radius);
+  background: var(--sf-surface);
+  font-family: var(--sf-sans);
+  font-size: 12px;
+  overflow: hidden;
+}
+
+.sfnav-ask-activity-item {
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--sf-rule-soft);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  color: var(--sf-ink);
+  line-height: 1.4;
+}
+
+.sfnav-ask-activity-item:last-child {
+  border-bottom: none;
+}
+
+.sfnav-ask-activity-spinner {
+  width: 8px;
+  height: 8px;
+  display: inline-block;
+  border-radius: 50%;
+  font-size: 0;
+  flex-shrink: 0;
+}
+
+.sfnav-ask-activity-pending .sfnav-ask-activity-spinner {
+  background: var(--sf-ink-soft);
+  animation: sfnav-ask-pulse 1s ease-in-out infinite;
+}
+
+.sfnav-ask-activity-ok .sfnav-ask-activity-spinner {
+  background: var(--sf-success);
+}
+
+.sfnav-ask-activity-err .sfnav-ask-activity-spinner {
+  background: var(--sf-error);
+}
+
+@keyframes sfnav-ask-pulse {
+  0%, 100% { opacity: 0.3; }
+  50%      { opacity: 1; }
+}
+
+.sfnav-ask-activity-label {
+  font-weight: 500;
+  color: var(--sf-ink);
+}
+
+.sfnav-ask-activity-detail {
+  font-family: var(--sf-mono);
+  font-size: 11px;
+  color: var(--sf-ink-soft);
+  background: var(--sf-rule-soft);
+  border: 1px solid var(--sf-rule);
+  border-radius: 4px;
+  padding: 1px 6px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sfnav-ask-activity-summary {
+  margin-left: auto;
+  color: var(--sf-ink-faint);
+  font-size: 11px;
+}
+
+.sfnav-ask-activity-err .sfnav-ask-activity-summary {
+  color: var(--sf-error);
+}
+
+.sfnav-ask-activity-interim {
+  font-style: italic;
+  color: var(--sf-ink-soft);
+  background: var(--sf-rule-soft);
+}
