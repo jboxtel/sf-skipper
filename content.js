@@ -25,6 +25,76 @@
   var flowDebugInFlight = false;
   var askInFlight = false;
 
+  // ─── Mode dispatch tables ────────────────────────────────────────────────
+  // Adding a new top-level @keyword means one new entry in KEYWORD_HANDLERS.
+  // Adding a new panel mode (soql/ask/debug-style) means one entry in
+  // MODE_RUN_HANDLERS plus one in FOOTER_HINTS. Adding a picker that goes
+  // back to a parent picker (not root) means one entry in MODE_BACK_HANDLERS.
+  var KEYWORD_HANDLERS = {};
+  (function () {
+    function bind(keys, fn) { keys.forEach(function (k) { KEYWORD_HANDLERS[k] = fn; }); }
+    bind(['object', 'objects'],         function () { enterObjectPickerMode(''); });
+    bind(['flow', 'flows'],             function () { enterFlowPickerMode(''); });
+    bind(['app', 'apps'],               function () { enterAppPickerMode(''); });
+    bind(['soql'],                      function () { enterSoqlMode(); });
+    bind(['ask'],                       function () { enterAskMode(''); });
+    bind(['flow-debug', 'debug'],       function () { enterFlowDebugMode(); });
+    bind(['cmd', 'cmdt', 'mdt'],        function () { enterCmdPickerMode(''); });
+    bind(['label', 'labels'],           function () { enterLabelPickerMode(''); });
+    bind(['permset', 'permsets', 'ps'], function () { enterPermsetPickerMode(''); });
+    bind(['setup'],                     function () { enterSetupPickerMode(''); });
+    bind(['refresh', 'reload'],         function () { runRefresh(); });
+  })();
+
+  var MODE_RUN_HANDLERS = {
+    'soql':       function () { runSoqlGeneration(); },
+    'flow-debug': function () { runFlowDebugAnalysis(); },
+    'ask':        function () { runAskQuery(); }
+  };
+
+  // Modes that go back to a parent picker rather than root.
+  var MODE_BACK_HANDLERS = {
+    'object-scoped': function () { enterObjectPickerMode(objectPickerFilter); },
+    'cmd-scoped':    function () { enterCmdPickerMode(cmdtPickerFilter); }
+  };
+
+  var FOOTER_HINTS = {
+    'soql':       'Enter to generate · Esc to go back',
+    'flow-debug': 'Cmd+Enter to analyze · Esc to go back',
+    'ask':        'Cmd+Enter to ask · Esc to go back'
+  };
+  var DEFAULT_FOOTER_HINT = '↑↓ navigate · Enter to select · Esc to close';
+
+  // Breadcrumb segments per resolution mode (single-segment pickers only —
+  // scoped modes are handled by breadcrumbForResolution which needs runtime
+  // data like the selected object/cmdt label).
+  var BREADCRUMB_PICKER_LABELS = {
+    'object-picker':  '@object',
+    'flow-picker':    '@flows',
+    'cmd-picker':     '@cmd',
+    'label-picker':   '@label',
+    'permset-picker': '@permset'
+  };
+
+  function renderBreadcrumbHtml(segments) {
+    return segments.map(function (s) {
+      return '<span class="sfnav-bc-seg' + (s.current ? ' sfnav-bc-current' : '') + '">' + esc(s.text) + '</span>' +
+        ' <span class="sfnav-bc-arrow">›</span>';
+    }).join(' ');
+  }
+
+  function breadcrumbForResolution(resolution) {
+    var simple = BREADCRUMB_PICKER_LABELS[resolution.mode];
+    if (simple) return [{ text: simple }];
+    if (resolution.mode === 'object-scoped' && resolution.object) {
+      return [{ text: '@object' }, { text: resolution.object.label, current: true }];
+    }
+    if (resolution.mode === 'cmd-scoped' && resolution.cmdt) {
+      return [{ text: '@cmd' }, { text: resolution.cmdt.label, current: true }];
+    }
+    return null;
+  }
+
   function injectPalette() {
     if (document.getElementById('sfnav-overlay')) return;
 
@@ -148,90 +218,20 @@
     if (searchMode === 'root') {
       var input = document.getElementById('sfnav-input');
       var keyword = input.value.trim().replace(/^@/, '').toLowerCase();
-      if (keyword === 'object' || keyword === 'objects') {
-        enterObjectPickerMode('');
-        return;
-      }
-      if (keyword === 'flow' || keyword === 'flows') {
-        enterFlowPickerMode('');
-        return;
-      }
-      if (keyword === 'app' || keyword === 'apps') {
-        enterAppPickerMode('');
-        return;
-      }
-      if (keyword === 'soql') {
-        enterSoqlMode();
-        return;
-      }
-      if (keyword === 'ask') {
-        enterAskMode('');
-        return;
-      }
-      if (keyword === 'flow-debug' || keyword === 'debug') {
-        enterFlowDebugMode();
-        return;
-      }
-      if (keyword === 'cmd' || keyword === 'cmdt' || keyword === 'mdt') {
-        enterCmdPickerMode('');
-        return;
-      }
-      if (keyword === 'label' || keyword === 'labels') {
-        enterLabelPickerMode('');
-        return;
-      }
-      if (keyword === 'permset' || keyword === 'permsets' || keyword === 'ps') {
-        enterPermsetPickerMode('');
-        return;
-      }
-      if (keyword === 'setup') {
-        enterSetupPickerMode('');
-        return;
-      }
-      if (keyword === 'refresh' || keyword === 'reload') {
-        runRefresh();
-        return;
-      }
-    }
-    if (searchMode === 'soql') {
-      runSoqlGeneration();
-      return;
-    }
-    if (searchMode === 'flow-debug') {
-      // Enter inside the flow-debug panel = run the analyzer
-      runFlowDebugAnalysis();
-      return;
-    }
-    if (searchMode === 'ask') {
-      runAskQuery();
-      return;
+      var keywordHandler = KEYWORD_HANDLERS[keyword];
+      if (keywordHandler) { keywordHandler(); return; }
+    } else {
+      var modeHandler = MODE_RUN_HANDLERS[searchMode];
+      if (modeHandler) { modeHandler(); return; }
     }
     navigateToSelected();
   }
 
   function handleBack() {
-    switch (searchMode) {
-      case 'object-scoped':
-        enterObjectPickerMode(objectPickerFilter);
-        return;
-      case 'cmd-scoped':
-        enterCmdPickerMode(cmdtPickerFilter);
-        return;
-      case 'object-picker':
-      case 'flow-picker':
-      case 'app-picker':
-      case 'cmd-picker':
-      case 'label-picker':
-      case 'permset-picker':
-      case 'setup-picker':
-      case 'soql':
-      case 'flow-debug':
-      case 'ask':
-        goToRoot();
-        return;
-      default:
-        hidePalette();
-    }
+    if (searchMode === 'root') { hidePalette(); return; }
+    var custom = MODE_BACK_HANDLERS[searchMode];
+    if (custom) { custom(); return; }
+    goToRoot();
   }
 
   function goToRoot() {
@@ -296,8 +296,7 @@
     input.placeholder = 'Describe what to query — e.g. all open cases assigned to me';
     document.getElementById('sfnav-results').style.display = 'none';
     document.getElementById('sfnav-hint').textContent = 'Press Enter to generate SOQL';
-    document.getElementById('sfnav-breadcrumb').innerHTML =
-      '<span class="sfnav-bc-seg">@soql</span> <span class="sfnav-bc-arrow">›</span>';
+    document.getElementById('sfnav-breadcrumb').innerHTML = renderBreadcrumbHtml([{ text: '@soql' }]);
     document.getElementById('sfnav-breadcrumb').style.display = 'flex';
     document.getElementById('sfnav-soql').style.display = 'block';
     document.getElementById('sfnav-soql-status').textContent = '';
@@ -517,8 +516,7 @@
     input.placeholder = flowId ? 'Paste the Debug panel output below, then press ⌘↵' : 'Open a flow first to use this';
     document.getElementById('sfnav-results').style.display = 'none';
     document.getElementById('sfnav-hint').textContent = '';
-    document.getElementById('sfnav-breadcrumb').innerHTML =
-      '<span class="sfnav-bc-seg">@flow-debug</span> <span class="sfnav-bc-arrow">›</span>';
+    document.getElementById('sfnav-breadcrumb').innerHTML = renderBreadcrumbHtml([{ text: '@flow-debug' }]);
     document.getElementById('sfnav-breadcrumb').style.display = 'flex';
     document.getElementById('sfnav-flowdebug').style.display = 'flex';
     document.getElementById('sfnav-flowdebug-status').textContent = '';
@@ -706,8 +704,7 @@
     input.disabled = true;
     document.getElementById('sfnav-results').style.display = 'none';
     document.getElementById('sfnav-hint').textContent = '';
-    document.getElementById('sfnav-breadcrumb').innerHTML =
-      '<span class="sfnav-bc-seg">@ask</span> <span class="sfnav-bc-arrow">›</span>';
+    document.getElementById('sfnav-breadcrumb').innerHTML = renderBreadcrumbHtml([{ text: '@ask' }]);
     document.getElementById('sfnav-breadcrumb').style.display = 'flex';
     document.getElementById('sfnav-ask').style.display = 'flex';
     document.getElementById('sfnav-ask-status').textContent = '';
@@ -927,78 +924,6 @@
   // Minimal Markdown-ish renderer: paragraphs, bullets, inline code, bold.
   // We deliberately don't pull in a full Markdown lib — this keeps the answer
   // readable when Claude uses light formatting, without HTML-injection risk.
-  function renderAskMarkdown(text) {
-    if (!text) return '';
-    var lines = text.split(/\r?\n/);
-    var html = '';
-    var inList = false;
-    var paragraph = [];
-
-    function flushParagraph() {
-      if (!paragraph.length) return;
-      html += '<p>' + renderAskInline(paragraph.join(' ')) + '</p>';
-      paragraph = [];
-    }
-    function openList() { if (!inList) { html += '<ul>'; inList = true; } }
-    function closeList() { if (inList) { html += '</ul>'; inList = false; } }
-
-    for (var i = 0; i < lines.length; i++) {
-      var line = lines[i];
-      var bullet = line.match(/^\s*[-*]\s+(.*)$/);
-      if (bullet) {
-        flushParagraph();
-        openList();
-        html += '<li>' + renderAskInline(bullet[1]) + '</li>';
-        continue;
-      }
-      if (!line.trim()) {
-        flushParagraph();
-        closeList();
-        continue;
-      }
-      if (inList) { closeList(); }
-      paragraph.push(line.trim());
-    }
-    flushParagraph();
-    closeList();
-    return html;
-  }
-
-  function renderAskInline(s) {
-    // Escape first, then re-introduce known markup. Bold (**x**) and inline
-    // `code` only — no links/images, since the model shouldn't be producing them.
-    var out = esc(s);
-    out = out.replace(/`([^`]+)`/g, function (_, code) {
-      return '<code class="sfnav-ask-code">' + code + '</code>';
-    });
-    out = out.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-    return out;
-  }
-
-  // Render `…` as <code>…</code>, escaping HTML in everything else.
-  function renderInlineCode(s) {
-    var out = '';
-    var inCode = false;
-    var buf = '';
-    for (var i = 0; i < s.length; i++) {
-      var ch = s[i];
-      if (ch === '`') {
-        if (inCode) {
-          out += '<code class="sfnav-flowdebug-code">' + esc(buf) + '</code>';
-        } else {
-          out += esc(buf);
-        }
-        buf = '';
-        inCode = !inCode;
-      } else {
-        buf += ch;
-      }
-    }
-    // Unclosed backtick — flush remainder as plain text
-    out += esc(buf);
-    return out;
-  }
-
   function showPalette() {
     injectPalette();
     searchMode = 'root';
@@ -1064,34 +989,9 @@
     currentResults = resolution.results.filter(function (r) { return r.type !== 'header' && !r.disabled; });
     selectedIndex = currentResults.length > 0 ? 0 : -1;
 
-    if (resolution.mode === 'object-picker') {
-      breadcrumbEl.innerHTML = '<span class="sfnav-bc-seg">@object</span> <span class="sfnav-bc-arrow">›</span>';
-      breadcrumbEl.style.display = 'flex';
-    } else if (resolution.mode === 'object-scoped' && resolution.object) {
-      breadcrumbEl.innerHTML =
-        '<span class="sfnav-bc-seg">@object</span>' +
-        ' <span class="sfnav-bc-arrow">›</span> ' +
-        '<span class="sfnav-bc-seg sfnav-bc-current">' + esc(resolution.object.label) + '</span>' +
-        ' <span class="sfnav-bc-arrow">›</span>';
-      breadcrumbEl.style.display = 'flex';
-    } else if (resolution.mode === 'flow-picker') {
-      breadcrumbEl.innerHTML = '<span class="sfnav-bc-seg">@flows</span> <span class="sfnav-bc-arrow">›</span>';
-      breadcrumbEl.style.display = 'flex';
-    } else if (resolution.mode === 'cmd-picker') {
-      breadcrumbEl.innerHTML = '<span class="sfnav-bc-seg">@cmd</span> <span class="sfnav-bc-arrow">›</span>';
-      breadcrumbEl.style.display = 'flex';
-    } else if (resolution.mode === 'label-picker') {
-      breadcrumbEl.innerHTML = '<span class="sfnav-bc-seg">@label</span> <span class="sfnav-bc-arrow">›</span>';
-      breadcrumbEl.style.display = 'flex';
-    } else if (resolution.mode === 'permset-picker') {
-      breadcrumbEl.innerHTML = '<span class="sfnav-bc-seg">@permset</span> <span class="sfnav-bc-arrow">›</span>';
-      breadcrumbEl.style.display = 'flex';
-    } else if (resolution.mode === 'cmd-scoped' && resolution.cmdt) {
-      breadcrumbEl.innerHTML =
-        '<span class="sfnav-bc-seg">@cmd</span>' +
-        ' <span class="sfnav-bc-arrow">›</span> ' +
-        '<span class="sfnav-bc-seg sfnav-bc-current">' + esc(resolution.cmdt.label) + '</span>' +
-        ' <span class="sfnav-bc-arrow">›</span>';
+    var segments = breadcrumbForResolution(resolution);
+    if (segments) {
+      breadcrumbEl.innerHTML = renderBreadcrumbHtml(segments);
       breadcrumbEl.style.display = 'flex';
     } else {
       breadcrumbEl.textContent = '';
@@ -1282,20 +1182,7 @@
   function setFooterHints(mode) {
     var el = document.getElementById('sfnav-footer-hints');
     if (!el) return;
-    if (mode === 'soql') {
-      el.textContent = 'Enter to generate \u00b7 Esc to go back';
-    } else if (mode === 'flow-debug') {
-      el.textContent = 'Cmd+Enter to analyze \u00b7 Esc to go back';
-    } else if (mode === 'ask') {
-      el.textContent = 'Cmd+Enter to ask \u00b7 Esc to go back';
-    } else {
-      el.textContent = '\u2191\u2193 navigate \u00b7 Enter to select \u00b7 Esc to close';
-    }
-  }
-
-  function esc(s) {
-    if (!s) return '';
-    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    el.textContent = FOOTER_HINTS[mode] || DEFAULT_FOOTER_HINT;
   }
 
   // Re-render when async data finishes loading while the palette is open
