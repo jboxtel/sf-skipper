@@ -296,7 +296,7 @@ async function analyzeFlowDebug(flowId, debugText, expectation) {
   var sysPrompt = buildFlowDebugSystemPrompt();
   var userMsg = buildFlowDebugUserMessage(flowLabel, compact.text || '(flow structure unavailable — analyze based on debug output only)', debugText, expectation);
 
-  var raw = await callClaude(sysPrompt, userMsg);
+  var raw = await callClaude(sysPrompt, userMsg, { cacheSystem: true });
   var parsed = parseFlowDebugResponse(raw);
   parsed.flowLabel = flowLabel;
   parsed.truncated = compact.truncated;

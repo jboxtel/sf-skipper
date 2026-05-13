@@ -76,7 +76,11 @@ async function handleSoqlGenerate(req, sendResponse) {
       sendResponse({ ok: false, error: 'No API key configured. Open the extension Options and paste your Anthropic key.' });
       return;
     }
-    const text = await callAnthropic(opts, req.system, req.user, 1024);
+    let system = req.system;
+    if (req.cacheSystem && typeof system === 'string') {
+      system = [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }];
+    }
+    const text = await callAnthropic(opts, system, req.user, 1024);
     sendResponse({ ok: true, text: text });
   } catch (err) {
     if (err.name === 'AbortError') {
