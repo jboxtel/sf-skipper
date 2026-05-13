@@ -73,11 +73,14 @@ async function sfRestPreamble() {
 }
 
 // Send a system+user prompt to the background, which proxies to Anthropic.
-// Returns the raw text from the model.
-function callClaude(systemPrompt, userMessage) {
+// Returns the raw text from the model. Pass { cacheSystem: true } to mark the
+// system prompt as an ephemeral cache breakpoint — worth it when the same
+// system prompt is reused across calls within ~5 minutes (e.g. @debug runs).
+function callClaude(systemPrompt, userMessage, opts) {
+  opts = opts || {};
   return new Promise(function (resolve, reject) {
     chrome.runtime.sendMessage(
-      { type: 'soql.generate', system: systemPrompt, user: userMessage },
+      { type: 'soql.generate', system: systemPrompt, user: userMessage, cacheSystem: !!opts.cacheSystem },
       function (resp) {
         if (chrome.runtime.lastError) { reject(new Error(chrome.runtime.lastError.message)); return; }
         if (!resp) { reject(new Error('No response from background')); return; }

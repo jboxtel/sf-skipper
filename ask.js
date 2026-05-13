@@ -58,13 +58,13 @@ function buildAskSystemPrompt() {
     '',
     'TOOL-USE STRATEGY:',
     '- If the first-turn snapshot already explains the issue (e.g. a status field clearly shows why), answer directly without tools.',
-    '- When the user mentions a custom field whose population is unclear, your FIRST move is searchApex(<field API name>). The class or trigger that writes it is almost always the answer; readApexClass on the top hit to read the logic.',
+    '- When the user mentions a custom field whose population is unclear, your FIRST move is searchApex(<field API name>). If Apex comes up empty, run searchFlows(<field API name>) next — the field is probably set by a Flow. readApexClass on a top Apex hit to read the logic.',
     '- Common patterns:',
-    '   "Why is field X empty / wrong?" → searchApex("X") to find who writes it. If empty Apex hits, getFieldHistory to see if anything ever wrote it, then runToolingSoql for Flow automations.',
+    '   "Why is field X empty / wrong?" → searchApex("X") to find who writes it. If empty, searchFlows("X") for Flow-set fields. If still empty, getFieldHistory to see whether anything ever wrote it.',
     '   "What does this validation error mean?" → runToolingSoql to fetch ValidationRule rows for the sObject and read the formula + message.',
     '   "Why can\'t I see this record / why is X read-only?" → runToolingSoql for FieldPermissions / ObjectPermissions for the running user\'s Profile/PermissionSets, or describeSObject to check field-level metadata.',
-    '   "What automation runs on save?" → searchApex("trigger on <SObject>") plus runToolingSoql for ApexTrigger and Flow with matching Start.object.',
-    '   "Why did the related X not get created?" → runSoql on the child object filtering on the lookup back to this record.',
+    '   "What automation runs on save?" → searchApex("trigger on <SObject>") for Apex triggers, plus searchFlows(<field or behaviour>, sObject: "<SObject>") for record-triggered Flows on that object.',
+    '   "Why did the related X not get created?" → runSoql on the child object filtering on the lookup back to this record, then searchFlows or searchApex for whatever should create it.',
     '- Cap yourself: at most 4 tool calls per question. If you still don\'t know after that, say so and ask one focused follow-up.',
     '- Tool failures are not fatal — adapt and try a different angle, or report what you couldn\'t check.',
     '',
@@ -290,6 +290,19 @@ var ASK_TOOLS = [
         query: { type: 'string', description: 'Literal substring to search for, e.g. a field API name like "FlightId__c" or a method name. Not a regex. Minimum 3 characters.' },
         kind:  { type: 'string', enum: ['class', 'trigger', 'both'], description: 'Default "both". Restrict to ApexClass or ApexTrigger.' },
         limit: { type: 'integer', description: 'Max matches per kind (default 10, max 25).' }
+      },
+      required: ['query']
+    }
+  },
+  {
+    name: 'searchFlows',
+    description: 'Substring-search inside active Flow definitions. Use when an automation likely lives in a Flow rather than Apex — admins increasingly implement field population, validation, and chained record updates as Flows. Returns matching Flow API names with short snippets from the metadata JSON. Up to ~25 active Flows are scanned per call; pass sObject to narrow to record-triggered Flows on a specific object.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query:   { type: 'string', description: 'Literal substring to search for, e.g. a field API name like "Product2Id" or a value like "Closed Won". Minimum 3 characters.' },
+        sObject: { type: 'string', description: 'Optional. Restrict to Flows whose start object matches this API name (e.g. "Account", "Opportunity"). Filters on Metadata.start.object after fetch.' },
+        limit:   { type: 'integer', description: 'Max active Flows to scan (default 25, max 50).' }
       },
       required: ['query']
     }
@@ -546,6 +559,54 @@ async function toolReadApexClass(input) {
   };
 }
 
+// Flow.Body isn't a thing — automation logic lives in the Metadata blob (a
+// nested object the Tooling API returns inline). SOSL doesn't index Flow
+// metadata, so substring search means: list active Flows, batch-fetch each
+// version's Metadata, stringify and grep client-side. Bounded by `limit`
+// (default 25) so this stays cheap even on busy orgs.
+async function toolSearchFlows(input) {
+  if (!input.query || String(input.query).length < 3) {
+    throw new Error('query must be at least 3 characters');
+  }
+  var limit = Math.min(Math.max(parseInt(input.limit || 25, 10), 1), 50);
+
+  var defsQuery = 'SELECT ApiName, Label, ProcessType, TriggerType, ActiveVersionId '
+    + 'FROM FlowDefinitionView WHERE ActiveVersionId != null '
+    + 'ORDER BY Label LIMIT ' + limit;
+  var defsResp = await toolingQueryRaw(defsQuery);
+  var defs = (defsResp.records || []).filter(function (d) { return d.ActiveVersionId; });
+  if (!defs.length) return { query: input.query, scanned: 0, totalHits: 0, hits: [] };
+
+  var ids = defs.map(function (d) { return "'" + escapeSoqlLiteral(d.ActiveVersionId) + "'"; }).join(',');
+  var flowQuery = 'SELECT Id, MasterLabel, Metadata FROM Flow WHERE Id IN (' + ids + ')';
+  var flowResp = await toolingQueryRaw(flowQuery);
+  var byId = {};
+  (flowResp.records || []).forEach(function (f) { byId[f.Id] = f; });
+
+  var q = String(input.query).toLowerCase();
+  var sObjFilter = input.sObject ? String(input.sObject).toLowerCase() : null;
+  var hits = [];
+  defs.forEach(function (d) {
+    var flow = byId[d.ActiveVersionId];
+    if (!flow || !flow.Metadata) return;
+    var startObj = (flow.Metadata.start && flow.Metadata.start.object) || null;
+    if (sObjFilter && (!startObj || String(startObj).toLowerCase() !== sObjFilter)) return;
+    var blob;
+    try { blob = JSON.stringify(flow.Metadata); } catch (_) { return; }
+    if (blob.toLowerCase().indexOf(q) < 0) return;
+    hits.push({
+      apiName: d.ApiName,
+      label: d.Label,
+      processType: d.ProcessType,
+      triggerType: d.TriggerType,
+      startObject: startObj,
+      snippets: makeApexSnippets(blob, input.query)
+    });
+  });
+
+  return { query: input.query, scanned: defs.length, totalHits: hits.length, hits: hits };
+}
+
 // Sentinel return — runAsk's loop checks for __escalate and breaks out to the
 // UI without further model calls.
 async function toolEscalateToDesktop(input) {
@@ -563,6 +624,7 @@ async function executeTool(name, input) {
     case 'describeSObject':   return await toolDescribeSObject(input);
     case 'getFieldHistory':   return await toolGetFieldHistory(input);
     case 'searchApex':        return await toolSearchApex(input);
+    case 'searchFlows':       return await toolSearchFlows(input);
     case 'readApexClass':     return await toolReadApexClass(input);
     case 'escalateToDesktop': return await toolEscalateToDesktop(input);
     default: throw new Error('Unknown tool: ' + name);
@@ -597,7 +659,11 @@ function buildInitialUserContent(image, ctx, question) {
     '',
     'Question: ' + question.trim()
   ].join('\n');
-  content.push({ type: 'text', text: text });
+  // cache_control here makes the entire first-turn prefix (tools + system +
+  // screenshot + page context + question) a single cached unit. The agentic
+  // loop runs 2-6 turns within seconds, so every turn after the first reads
+  // this prefix at ~10% of input cost.
+  content.push({ type: 'text', text: text, cache_control: { type: 'ephemeral' } });
   return content;
 }
 
@@ -619,6 +685,9 @@ async function runAsk(question, onActivity) {
   var enrichedCtx = both[1];
 
   var systemPrompt = buildAskSystemPrompt();
+  var systemBlocks = [
+    { type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }
+  ];
   var messages = [
     { role: 'user', content: buildInitialUserContent(image, enrichedCtx, question) }
   ];
@@ -628,7 +697,7 @@ async function runAsk(question, onActivity) {
   var escalate = null;
   for (var iter = 0; iter < ASK_MAX_TOOL_ITERATIONS; iter++) {
     var response = await postMessageStep({
-      system: systemPrompt,
+      system: systemBlocks,
       messages: messages,
       tools: ASK_TOOLS,
       max_tokens: 2048
@@ -711,6 +780,11 @@ function summarizeToolResult(name, result) {
   if (name === 'searchApex') {
     var h = result.totalHits || 0;
     return h + ' Apex hit' + (h === 1 ? '' : 's');
+  }
+  if (name === 'searchFlows') {
+    var fh = result.totalHits || 0;
+    var fs = result.scanned || 0;
+    return fh + ' Flow hit' + (fh === 1 ? '' : 's') + ' (scanned ' + fs + ')';
   }
   if (name === 'readApexClass') {
     return (result.totalLines || 0) + ' lines' + (result.truncated ? ' (truncated)' : '');
