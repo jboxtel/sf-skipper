@@ -36,7 +36,8 @@ async function injectExtension(page) {
 
   // Inject scripts as script tags so const/let declarations are shared across all of them.
   // Order matters: salesforce-urls (getApiBase) → shared (sfRestPreamble) → objects/commands.
-  for (const file of ['salesforce-urls.js', 'shared.js', 'objects.js', 'commands.js']) {
+  // markdown.js holds esc + renderAskMarkdown, used by content.js.
+  for (const file of ['salesforce-urls.js', 'shared.js', 'markdown.js', 'objects.js', 'commands.js']) {
     await page.addScriptTag({ path: path.join(EXT, file) });
   }
 
@@ -48,23 +49,44 @@ async function injectExtension(page) {
         runtime: {},
         storage: { local: { get: (_k, cb) => cb({}), set: () => {} } }
       };
-      // flows.js / soql.js aren't injected — stub the functions content.js calls
+      // flows.js / apps.js / labels.js / permsets.js / soql.js / ask.js aren't
+      // injected — stub every symbol content.js / commands.js reaches for.
       window.initFlows = () => {};
       window.getAllFlows = () => [];
       window.getFlowsState = () => 'idle';
       window.getFlowsError = () => '';
       window.resolveFlowPicker = () => ({ mode: 'flow-picker', results: [], hint: '' });
+      window.initApps = () => {};
+      window.getAllApps = () => [];
+      window.getAppsState = () => 'idle';
+      window.getAppsError = () => '';
+      window.resolveAppPicker = () => ({ mode: 'app-picker', results: [], hint: '' });
+      window.initLabels = () => {};
+      window.getAllLabels = () => [];
+      window.getLabelsState = () => 'idle';
+      window.getLabelsError = () => '';
+      window.resolveLabelPicker = () => ({ mode: 'label-picker', results: [], hint: '' });
+      window.initPermsets = () => {};
+      window.getAllPermsets = () => [];
+      window.getPermsetsState = () => 'idle';
+      window.getPermsetsError = () => '';
+      window.resolvePermsetPicker = () => ({ mode: 'permset-picker', results: [], hint: '' });
       window.hasSoqlApiKey = () => Promise.resolve(false);
       window.openSoqlSettings = () => {};
       window.generateSoql = () => Promise.reject(new Error('not stubbed'));
       window.getSoqlHistory = () => Promise.resolve([]);
       window.addToSoqlHistory = () => Promise.resolve();
-      // flow-debug.js isn't injected either — stub the symbols content.js / commands.js touch
+      // flow-debug.js isn't injected — stub the symbols content.js / commands.js touch
       window.isFlowBuilderPage = () => false;
       window.getFlowIdFromUrl = () => null;
       window.analyzeFlowDebug = () => Promise.reject(new Error('not stubbed'));
-      // CMDT helpers (defined in objects.js — but the lookup helper hits the describe API)
+      // ask.js isn't injected — stub the symbols content.js touches
+      window.runAsk = () => Promise.reject(new Error('not stubbed'));
+      window.getAskOrgContext = () => ({ url: '', host: '' });
+      // CMDT helpers live in cmdt.js (not injected) — stub the lookups
       window.getKeyPrefixForCmdt = () => Promise.reject(new Error('not stubbed'));
+      window.getEntityIdForCmdt = () => Promise.reject(new Error('not stubbed'));
+      window.getAllCustomMetadataTypes = () => [];
       // Mock fetch so @load returns 2 test custom objects
       window.fetch = (url) => {
         if (url === '/services/data/') {
