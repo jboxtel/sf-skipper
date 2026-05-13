@@ -40,15 +40,16 @@ var STANDARD_OBJECTS = STANDARD_OBJECTS || [
   { label: "Holiday",                   apiName: "Holiday" },
 ];
 
-// In-memory cache of custom objects, populated at init and kept in sync with storage
+// Custom-object cache. This doesn't use createSfCache because it has three
+// sources (storage / URL / describeGlobal) that merge into one in-memory list,
+// and entries are mutated in place by cmdt.js to memoize entityId/keyPrefix
+// after the first lookup.
 var _customObjects = [];
 
-// Convert an API name like "My_Custom_Object__c" → "My Custom Object"
 function apiNameToLabel(apiName) {
   return apiName.replace(/__c$/i, '').replace(/__mdt$/i, ' (MDT)').replace(/_/g, ' ').trim();
 }
 
-// Extract custom object API name from the current URL if we're on an ObjectManager page.
 // e.g. /lightning/setup/ObjectManager/Claim__c/FieldsAndRelationships/view → "Claim__c"
 function getObjectApiNameFromUrl() {
   var match = window.location.pathname.match(/\/ObjectManager\/([^/]+)/);
@@ -58,8 +59,7 @@ function getObjectApiNameFromUrl() {
   return name;
 }
 
-// Merge new objects into the cache, deduplicating by apiName.
-// Incoming objects win (they're fresher/more accurate).
+// Incoming objects win — they're fresher than what's already cached.
 function mergeIntoCache(incoming) {
   var map = {};
   _customObjects.forEach(function (o) { map[o.apiName] = o; });
@@ -67,7 +67,6 @@ function mergeIntoCache(incoming) {
   _customObjects = Object.values(map);
 }
 
-// Persist the current cache to chrome.storage.local
 function persistCache() {
   if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
     var payload = {};
@@ -76,8 +75,20 @@ function persistCache() {
   }
 }
 
-// Pull every sObject (standard + custom) from the org's REST API and merge
-// into the cache. No copy/paste required.
+// Public mutation hook for cmdt.js (or future siblings) that need to memoize
+// derived data (entityId, keyPrefix) into an existing cache entry.
+function updateCachedObject(apiName, patch) {
+  var match = _customObjects.find(function (o) { return o.apiName === apiName; });
+  if (!match) return;
+  Object.keys(patch).forEach(function (k) { match[k] = patch[k]; });
+  persistCache();
+}
+
+// Look up a cached entry without exposing the array (read-only access for cmdt.js etc.).
+function findCachedObject(apiName) {
+  return _customObjects.find(function (o) { return o.apiName === apiName; }) || null;
+}
+
 async function loadObjectsFromPage() {
   var pre = await sfRestPreamble();
 
@@ -94,10 +105,6 @@ async function loadObjectsFromPage() {
   return objects.length;
 }
 
-// Called once when content scripts load. Populates _customObjects from:
-//   1. chrome.storage.local (objects remembered from previous visits)
-//   2. The current URL (if we're already on a specific object page)
-//   3. DOM scraping (if we're on the Object Manager list page)
 function initCustomObjects() {
   // Source 1: stored cache (instant — gives the user something to search before the API call returns)
   if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
@@ -120,9 +127,7 @@ function initCustomObjects() {
     }
   }
 
-  // Source 3: REST API describeGlobal — fetches every sObject in the org.
-  // Fire-and-forget; failures are non-fatal (we still have the cache + URL).
-  // No hostname guard needed — the content script manifest already limits us to Salesforce pages.
+  // Source 3: REST API describeGlobal. Fire-and-forget; failures are non-fatal.
   if (typeof window !== 'undefined') {
     loadObjectsFromPage().catch(function (err) {
       console.warn('sfnav: describeGlobal failed —', err.message);
@@ -132,55 +137,6 @@ function initCustomObjects() {
 
 function getAllObjects() {
   var standardApiNames = new Set(STANDARD_OBJECTS.map(function (o) { return o.apiName; }));
-  // Custom objects from cache that aren't already in the standard list
   var customs = _customObjects.filter(function (o) { return !standardApiNames.has(o.apiName); });
   return STANDARD_OBJECTS.concat(customs);
-}
-
-function getAllCustomMetadataTypes() {
-  return getAllObjects().filter(function (o) { return /__mdt$/i.test(o.apiName); });
-}
-
-// Resolve the CustomObject entity definition ID (01Ixx…) for a CMDT.
-// Used to build the Setup definition URL. Queries Tooling API and caches.
-async function getEntityIdForCmdt(apiName) {
-  var match = _customObjects.find(function (o) { return o.apiName === apiName; });
-  if (match && match.entityId) return match.entityId;
-
-  var pre = await sfRestPreamble();
-  var soql = "SELECT Id FROM CustomObject WHERE DeveloperName = '" + apiName.replace(/__mdt$/i, '').replace(/'/g, "\\'") + "' AND ManageableState != 'deleted'";
-  var resp = await sfFetch(pre.apiBase + pre.basePath + '/tooling/query/?q=' + encodeURIComponent(soql), { headers: pre.headers });
-  if (!resp.ok) throw new Error('Tooling query failed for ' + apiName + ': ' + resp.status);
-  var data = await resp.json();
-  if (!data.records || !data.records.length) throw new Error('Entity not found for ' + apiName);
-  var entityId = data.records[0].Id;
-
-  if (match) {
-    match.entityId = entityId;
-    persistCache();
-  }
-  return entityId;
-}
-
-// The CMDT "Manage Records" URL uses the type's key prefix (e.g. "m0u").
-// We get keyPrefix from describeGlobal during initial load, but fall back
-// to a per-object describe if it isn't in the cache (older cached entries).
-async function getKeyPrefixForCmdt(apiName) {
-  var match = _customObjects.find(function (o) { return o.apiName === apiName; });
-  if (match && match.keyPrefix) return match.keyPrefix;
-
-  var pre = await sfRestPreamble();
-  var resp = await sfFetch(pre.apiBase + pre.basePath + '/sobjects/' + encodeURIComponent(apiName) + '/describe', { headers: pre.headers });
-  if (resp.status === 401 || resp.status === 403) {
-    throw new Error('No describe access for ' + apiName + ' — check your permissions.');
-  }
-  if (!resp.ok) throw new Error('describe failed for ' + apiName + ': ' + resp.status);
-  var data = await resp.json();
-  if (!data.keyPrefix) throw new Error('No key prefix for ' + apiName);
-
-  if (match) {
-    match.keyPrefix = data.keyPrefix;
-    persistCache();
-  }
-  return data.keyPrefix;
 }
