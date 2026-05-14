@@ -269,7 +269,9 @@
 
   // Recognize @<objectName> or @<objectName> <filter> as a direct jump into
   // object-scoped mode. Returns null if the first token is a known shortcut
-  // keyword (those have priority via sfnavParseShortcutInvocation).
+  // keyword (those have priority via sfnavParseShortcutInvocation) or if the
+  // token isn't an exact match for an object's apiName or label — fuzzy
+  // matching here would auto-jump on every keystroke (`@a` → Account, etc.).
   function resolveObjectScopedInvocation(value) {
     var stripped = String(value || '').trim().replace(/^@/, '');
     if (!stripped) return null;
@@ -279,11 +281,9 @@
     if (sfnavFindShortcut(objectQuery)) return null;
 
     var query = objectQuery.toLowerCase();
-    var objects = getAllObjects();
-    var exact = objects.find(function (o) {
+    var match = getAllObjects().find(function (o) {
       return o.apiName.toLowerCase() === query || o.label.toLowerCase() === query;
     });
-    var match = exact || fuzzyFilter(objectQuery, objects, function (o) { return o.label + ' ' + o.apiName; })[0];
     if (!match) return null;
     return { object: match, filter: parts[2] || '' };
   }
