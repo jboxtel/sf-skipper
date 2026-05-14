@@ -49,22 +49,23 @@ function buildAskSystemPrompt() {
     '1. A screenshot of the user\'s current Salesforce browser tab.',
     '2. Page context (URL, sObject, record Id, setup node, flow id, etc.) parsed from the URL.',
     '3. When the user is on a record page: a live snapshot of that record\'s fields from the Salesforce REST API — API name, label, current value, and inline help text from describe.',
+    '4. When the user is on a record page: the automation surface of that sObject — Apex triggers (with their before/after events), active record-triggered Flows (with TriggerType), and active validation rules (with error messages). This list is exhaustive for these three categories on this object.',
     '',
-    'You have tools to investigate further. The first-turn context only covers the current record\'s direct fields; everything else (history, validation rules, automations, related records, recent jobs, other records) requires a tool call. USE THE TOOLS — answers grounded in real org data are dramatically better than guesses.',
+    'You have tools to investigate further. The first-turn context covers the current record\'s direct fields plus the trigger/Flow/VR inventory on this object — everything else (field history, related records, recent jobs, other records, Apex/Flow bodies, permissions, scheduled jobs) requires a tool call. USE THE TOOLS — answers grounded in real org data are dramatically better than guesses.',
     '',
     'CONTEXT — WHAT YOU DO NOT KNOW:',
     '- You do not know this customer\'s naming conventions, business meaning, or how standard objects are repurposed. Product2 might be "Flight" in this org. A custom field name rarely tells you who populates it or when.',
     '- For ANY question that mentions a custom field, custom object, or a behaviour whose source you do not know: do NOT guess from the name. Look it up first.',
     '',
     'TOOL-USE STRATEGY:',
-    '- If the first-turn snapshot already explains the issue (e.g. a status field clearly shows why), answer directly without tools.',
-    '- When the user mentions a custom field whose population is unclear, your FIRST move is searchApex(<field API name>). If Apex comes up empty, run searchFlows(<field API name>) next — the field is probably set by a Flow. readApexClass on a top Apex hit to read the logic.',
+    '- Start from the pre-loaded context. The record snapshot may already explain the issue (a status field, an owner, a checkbox); the automation list tells you which triggers/Flows/VRs are even candidates. Cite specific names from that list before reaching for tools.',
+    '- When the user mentions a custom field whose population is unclear: the automation list shows which triggers and record-triggered Flows could be responsible. To find the exact one that writes the field, call searchApex(<field API name>); if empty, searchFlows(<field API name>). readApexClass on a top hit to read the logic.',
     '- Common patterns:',
-    '   "Why is field X empty / wrong?" → searchApex("X") to find who writes it. If empty, searchFlows("X") for Flow-set fields. If still empty, getFieldHistory to see whether anything ever wrote it.',
-    '   "What does this validation error mean?" → runToolingSoql to fetch ValidationRule rows for the sObject and read the formula + message.',
+    '   "Why is field X empty / wrong?" → check the pre-loaded automation list, then searchApex("X") and/or searchFlows("X") to pin down which entry sets it. If both empty, getFieldHistory to see whether anything ever wrote it.',
+    '   "What does this validation error mean?" → first check the pre-loaded validation rules; if the matching rule is listed, runToolingSoql for its full formula. If not listed (e.g. it lives on a parent object), runToolingSoql on ValidationRule against the relevant EntityDefinition.',
     '   "Why can\'t I see this record / why is X read-only?" → runToolingSoql for FieldPermissions / ObjectPermissions for the running user\'s Profile/PermissionSets, or describeSObject to check field-level metadata.',
-    '   "What automation runs on save?" → searchApex("trigger on <SObject>") for Apex triggers, plus searchFlows(<field or behaviour>, sObject: "<SObject>") for record-triggered Flows on that object.',
-    '   "Why did the related X not get created?" → runSoql on the child object filtering on the lookup back to this record, then searchFlows or searchApex for whatever should create it.',
+    '   "What automation runs on save?" → the pre-loaded list IS the answer for this object. Read it back to the user; only use searchApex/searchFlows if they ask which one does a specific behaviour.',
+    '   "Why did the related X not get created?" → runSoql on the child object filtering on the lookup back to this record, then searchFlows or searchApex for whatever should create it (cross-object — the pre-loaded list is for the current object only).',
     '- Cap yourself: at most 4 tool calls per question. If you still don\'t know after that, say so and ask one focused follow-up.',
     '- Tool failures are not fatal — adapt and try a different angle, or report what you couldn\'t check.',
     '',
@@ -76,7 +77,7 @@ function buildAskSystemPrompt() {
     '',
     'SOQL RULES:',
     '- runSoql uses the standard Data API. SELECT only — DML is rejected. Wrap string literals in single quotes. Reference fields by API name.',
-    '- runToolingSoql uses the Tooling API. Use this for metadata objects: ApexTrigger, ApexClass, Flow, FlowDefinitionView, ValidationRule, WorkflowRule, FieldPermissions, ObjectPermissions, PermissionSet, Profile, CustomField, EntityDefinition, etc.',
+    '- runToolingSoql uses the Tooling API. Use this for metadata objects: ApexTrigger, ApexClass, Flow, ValidationRule, WorkflowRule, FieldPermissions, ObjectPermissions, PermissionSet, Profile, CustomField, EntityDefinition, etc. FlowDefinitionView is NOT a Tooling object — query it via runSoql.',
     '- Always include LIMIT (≤ 50). Always include the fields you actually need — never SELECT *.',
     '',
     'ANSWER FORMAT:',
@@ -150,10 +151,51 @@ async function enrichAskContext(ctx) {
   var describeP = (typeof fetchDescribe === 'function')
     ? fetchDescribe(ctx.sObject).catch(function (err) { ctx.describeError = err.message; return null; })
     : Promise.resolve(null);
-  var results = await Promise.all([snapshotP, describeP]);
+  var automationsP = fetchObjectAutomations(ctx.sObject).catch(function (err) {
+    ctx.automationsError = err.message;
+    return null;
+  });
+  var results = await Promise.all([snapshotP, describeP, automationsP]);
   ctx.recordFields = results[0];
   ctx.fieldMetadata = results[1];
+  ctx.automations = results[2];
   return ctx;
+}
+
+// Pre-load the automation surface of the current sObject so the model can
+// reason about likely-responsible triggers/Flows/validation rules in turn 1
+// without spending tool calls just to discover what exists. Each query is
+// independent and failures are swallowed — a missing piece is better than
+// failing the whole enrichment.
+async function fetchObjectAutomations(sObject) {
+  var pre = await sfRestPreamble();
+  var safe = String(sObject).replace(/'/g, "\\'");
+
+  var triggerSoql = "SELECT Name, Status, UsageBeforeInsert, UsageAfterInsert, "
+    + "UsageBeforeUpdate, UsageAfterUpdate, UsageBeforeDelete, UsageAfterDelete "
+    + "FROM ApexTrigger WHERE TableEnumOrId = '" + safe + "' "
+    + "AND NamespacePrefix = null LIMIT 25";
+  var vrSoql = "SELECT ValidationName, ErrorMessage, ErrorDisplayField "
+    + "FROM ValidationRule WHERE EntityDefinition.QualifiedApiName = '" + safe + "' "
+    + "AND Active = true LIMIT 25";
+  var flowSoql = "SELECT ApiName, Label, ProcessType, TriggerType, TriggerOrder "
+    + "FROM FlowDefinitionView WHERE TriggerObjectOrEvent = '" + safe + "' "
+    + "AND ActiveVersionId != null LIMIT 25";
+
+  function tryQuery(path, soql) {
+    var url = pre.apiBase + pre.basePath + path + '?q=' + encodeURIComponent(soql);
+    return askFetch(url, { headers: pre.headers })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) { return (data && data.records) || []; })
+      .catch(function () { return []; });
+  }
+
+  var results = await Promise.all([
+    tryQuery('/tooling/query/', triggerSoql),
+    tryQuery('/tooling/query/', vrSoql),
+    tryQuery('/query/', flowSoql)
+  ]);
+  return { triggers: results[0], validationRules: results[1], flows: results[2] };
 }
 
 function formatScalar(v) {
@@ -199,6 +241,45 @@ function formatRecordFields(record, fieldMetadata) {
   return lines.join('\n');
 }
 
+function formatAutomations(auto, sObject) {
+  if (!auto) return null;
+  var lines = [];
+  if (auto.triggers && auto.triggers.length) {
+    lines.push('Apex triggers (' + auto.triggers.length + '):');
+    auto.triggers.forEach(function (t) {
+      var events = [];
+      if (t.UsageBeforeInsert) events.push('before insert');
+      if (t.UsageAfterInsert)  events.push('after insert');
+      if (t.UsageBeforeUpdate) events.push('before update');
+      if (t.UsageAfterUpdate)  events.push('after update');
+      if (t.UsageBeforeDelete) events.push('before delete');
+      if (t.UsageAfterDelete)  events.push('after delete');
+      var status = t.Status && t.Status !== 'Active' ? ' [' + t.Status + ']' : '';
+      lines.push('  ' + t.Name + status + ' — ' + (events.join(', ') || 'no events'));
+    });
+  }
+  if (auto.flows && auto.flows.length) {
+    lines.push('Active record-triggered Flows (' + auto.flows.length + '):');
+    auto.flows.forEach(function (f) {
+      var bits = [f.TriggerType];
+      if (f.TriggerOrder != null) bits.push('order ' + f.TriggerOrder);
+      lines.push('  ' + f.ApiName + ' [' + bits.join(', ') + ']');
+    });
+  }
+  if (auto.validationRules && auto.validationRules.length) {
+    lines.push('Active validation rules (' + auto.validationRules.length + '):');
+    auto.validationRules.forEach(function (v) {
+      var msg = (v.ErrorMessage || '').replace(/\s+/g, ' ').trim();
+      if (msg.length > 100) msg = msg.slice(0, 100) + '…';
+      lines.push('  ' + v.ValidationName + (msg ? ' — "' + msg + '"' : ''));
+    });
+  }
+  if (!lines.length) {
+    lines.push('No Apex triggers, active record-triggered Flows, or active validation rules found on ' + sObject + '.');
+  }
+  return lines.join('\n');
+}
+
 function formatAskOrgContext(ctx) {
   var lines = ['Current URL: ' + ctx.url];
   if (ctx.pageType)   lines.push('Page type: ' + ctx.pageType);
@@ -215,6 +296,15 @@ function formatAskOrgContext(ctx) {
   } else if (ctx.recordFetchError) {
     lines.push('');
     lines.push('Note: live record fetch failed — ' + ctx.recordFetchError);
+  }
+
+  if (ctx.automations) {
+    var autoText = formatAutomations(ctx.automations, ctx.sObject);
+    if (autoText) {
+      lines.push('');
+      lines.push('Automation on ' + ctx.sObject + ':');
+      lines.push(autoText);
+    }
   }
   return lines.join('\n');
 }
@@ -249,7 +339,7 @@ var ASK_TOOLS = [
   },
   {
     name: 'runToolingSoql',
-    description: 'Execute a SOQL query against the Salesforce Tooling API. Use this for metadata: ApexTrigger, ApexClass, Flow, FlowDefinitionView, ValidationRule, WorkflowRule, CustomField, EntityDefinition, FieldPermissions, ObjectPermissions, PermissionSet, Profile.',
+    description: 'Execute a SOQL query against the Salesforce Tooling API. Use this for metadata: ApexTrigger, ApexClass, Flow, ValidationRule, WorkflowRule, CustomField, EntityDefinition, FieldPermissions, ObjectPermissions, PermissionSet, Profile. Note: FlowDefinitionView lives on the standard Data API — use runSoql for it.',
     input_schema: {
       type: 'object',
       properties: {
@@ -481,6 +571,15 @@ async function toolingQueryRaw(soql) {
   return JSON.parse(body);
 }
 
+async function restQueryRaw(soql) {
+  var pre = await sfRestPreamble();
+  var url = pre.apiBase + pre.basePath + '/query/?q=' + encodeURIComponent(soql);
+  var resp = await askFetch(url, { headers: pre.headers });
+  var body = await resp.text();
+  if (!resp.ok) throw new Error('SOQL ' + resp.status + ': ' + body.slice(0, 240));
+  return JSON.parse(body);
+}
+
 // Apex Body is queryable but not filterable in SOQL, so substring search has
 // to go through SOSL (Tooling /search/), which is indexed full-text. SOSL can
 // lag a few minutes behind newly-deployed code; that's accepted.
@@ -573,8 +672,14 @@ async function toolSearchFlows(input) {
   var defsQuery = 'SELECT ApiName, Label, ProcessType, TriggerType, ActiveVersionId '
     + 'FROM FlowDefinitionView WHERE ActiveVersionId != null '
     + 'ORDER BY Label LIMIT ' + limit;
-  var defsResp = await toolingQueryRaw(defsQuery);
-  var defs = (defsResp.records || []).filter(function (d) { return d.ActiveVersionId; });
+  var defsResp = await restQueryRaw(defsQuery);
+  // Managed-package Flow templates surface as ActiveVersionId pseudo-IDs like
+  // `SvcCopilotTmpl__AddCaseComment-1` — not real Flow record IDs, so the
+  // Tooling `Flow WHERE Id IN (...)` query 400s on the whole batch. Filter to
+  // true 15/18-char Salesforce IDs.
+  var defs = (defsResp.records || []).filter(function (d) {
+    return d.ActiveVersionId && /^[a-zA-Z0-9]{15,18}$/.test(d.ActiveVersionId);
+  });
   if (!defs.length) return { query: input.query, scanned: 0, totalHits: 0, hits: [] };
 
   var ids = defs.map(function (d) { return "'" + escapeSoqlLiteral(d.ActiveVersionId) + "'"; }).join(',');
