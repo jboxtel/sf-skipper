@@ -126,7 +126,10 @@ function sfnavGetShortcutsByGroup(group) {
 // Parse `@flow foo` / `@cmd bar` into {shortcut, filter}. Returns null if the
 // keyword isn't a known shortcut.
 function sfnavParseShortcutInvocation(value) {
-  var match = String(value || '').trim().replace(/^@/, '').match(/^(\S+)\s+(.*)$/);
+  // Leading-only normalization — preserve the trailing space so `@object `
+  // (just the keyword + space, no filter yet) still triggers the picker.
+  var normalized = String(value || '').replace(/^\s+/, '').replace(/^@/, '');
+  var match = normalized.match(/^(\S+)\s+(.*)$/);
   if (!match) return null;
   var shortcut = sfnavFindShortcut(match[1]);
   return shortcut ? { shortcut: shortcut, filter: match[2] } : null;
