@@ -226,6 +226,8 @@ chrome.runtime.onMessage.addListener(function (req, sender, sendResponse) {
   return false;
 });
 
+const SF_HOST_RE = /^https:\/\/[^/]+\.(lightning\.force\.com|salesforce\.com|salesforce-setup\.com|force\.com)\//;
+
 chrome.commands.onCommand.addListener(async (command, tab) => {
   if (command !== 'open-palette') return;
 
@@ -234,6 +236,7 @@ chrome.commands.onCommand.addListener(async (command, tab) => {
     tab = tabs[0];
   }
   if (!tab) return;
+  if (!tab.url || !SF_HOST_RE.test(tab.url)) return;
 
   try {
     const [{ result }] = await chrome.scripting.executeScript({
