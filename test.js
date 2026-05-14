@@ -240,6 +240,7 @@ async function openPalette(page) {
   // ── Test 7: @objects shows all objects ──────────────────────────────────
   console.log('\n@objects mode');
   await page.fill('#sfnav-input', '@objects');
+  await page.keyboard.press('Enter');
   await page.waitForTimeout(50);
 
   await assert(
@@ -262,18 +263,20 @@ async function openPalette(page) {
     'no account-related object in filtered list',
   );
 
-  // ── Test 8: @flows → setup search ───────────────────────────────────────
-  console.log('\nGlobal search mode');
+  // ── Test 8: @flows shortcut hint ────────────────────────────────────────
+  // Escape back to root before testing the hint.
+  await page.keyboard.press('Escape');
+  console.log('\n@flows shortcut hint');
   await page.fill('#sfnav-input', '@flows');
   await page.waitForTimeout(50);
 
   await assert(
-    '@flows top result is "Flows" setup link',
+    '@flows shows the browse shortcut hint',
     async () => {
-      const first = await page.$eval('.sfnav-item .sfnav-label', el => el.textContent).catch(() => null);
-      return first === 'Flows';
+      const hint = await page.$eval('#sfnav-hint', el => el.textContent).catch(() => null);
+      return hint === 'Press Enter to browse all flows';
     },
-    'first result is not "Flows"',
+    'flow shortcut hint missing',
   );
 
   // ── Test 9: @load via REST API mock ─────────────────────────────────────
@@ -321,6 +324,7 @@ async function openPalette(page) {
   // ── Test 10: keyboard navigation ─────────────────────────────────────────
   console.log('\nKeyboard navigation');
   await page.fill('#sfnav-input', '@objects');
+  await page.keyboard.press('Enter');
   await page.waitForTimeout(50);
 
   const initialSelected = await page.$eval('.sfnav-item.selected', el => el.textContent).catch(() => null);
@@ -342,8 +346,11 @@ async function openPalette(page) {
     'selection did not return to original after ArrowUp',
   );
 
-  // ── Test 10: Escape closes palette ──────────────────────────────────────
+  // ── Test 11: Escape closes palette ──────────────────────────────────────
+  // Two Escapes: first pops out of object-picker (from the keyboard-nav
+  // test) back to root; second hides the palette.
   console.log('\nDismiss');
+  await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
 
   await assert(
