@@ -26,26 +26,12 @@
   var askInFlight = false;
 
   // ─── Mode dispatch tables ────────────────────────────────────────────────
-  // Adding a new top-level @keyword means one new entry in KEYWORD_HANDLERS.
-  // Adding a new panel mode (soql/ask/debug-style) means one entry in
-  // MODE_RUN_HANDLERS plus one in FOOTER_HINTS. Adding a picker that goes
-  // back to a parent picker (not root) means one entry in MODE_BACK_HANDLERS.
-  var KEYWORD_HANDLERS = {};
-  (function () {
-    function bind(keys, fn) { keys.forEach(function (k) { KEYWORD_HANDLERS[k] = fn; }); }
-    bind(['object', 'objects'],         function () { enterObjectPickerMode(''); });
-    bind(['flow', 'flows'],             function () { enterFlowPickerMode(''); });
-    bind(['app', 'apps'],               function () { enterAppPickerMode(''); });
-    bind(['soql'],                      function () { enterSoqlMode(); });
-    bind(['ask'],                       function () { enterAskMode(''); });
-    bind(['flow-debug', 'debug'],       function () { enterFlowDebugMode(); });
-    bind(['cmd', 'cmdt', 'mdt'],        function () { enterCmdPickerMode(''); });
-    bind(['label', 'labels'],           function () { enterLabelPickerMode(''); });
-    bind(['permset', 'permsets', 'ps'], function () { enterPermsetPickerMode(''); });
-    bind(['setup'],                     function () { enterSetupPickerMode(''); });
-    bind(['refresh', 'reload'],         function () { runRefresh(); });
-  })();
-
+  // The @keyword catalogue lives in commands.js (SHORTCUTS). Use
+  // sfnavFindShortcut(input) for keyword → shortcut lookup; enterShortcutMode
+  // (below) is the single dispatch that turns a shortcut into the right
+  // panel/picker. MODE_RUN_HANDLERS handles Enter when already inside a
+  // panel mode (soql/ask/debug); MODE_BACK_HANDLERS handles Esc for modes
+  // that go back to a parent picker rather than to root.
   var MODE_RUN_HANDLERS = {
     'soql':       function () { runSoqlGeneration(); },
     'flow-debug': function () { runFlowDebugAnalysis(); },
@@ -159,25 +145,27 @@
 
     input.addEventListener('input', function () {
       var val = input.value;
-      // From root, `@cmd foo` / `@flow foo` / `@object foo` jumps into the
-      // matching picker with `foo` as the live filter. Triggers on the first
-      // space after the keyword so users can keep typing without pressing Enter.
-      if (searchMode === 'root') {
-        var trimmed = val.replace(/^@/, '');
-        var m = trimmed.match(/^(cmd|cmdt|mdt|flow|flows|object|objects|app|apps|label|labels|permset|permsets|ps|setup|soql|ask|debug|flow-debug)\s+(.*)$/i);
-        if (m) {
-          var kw = m[1].toLowerCase();
-          var rest = m[2];
-          if (kw === 'cmd' || kw === 'cmdt' || kw === 'mdt') { enterCmdPickerMode(rest); return; }
-          if (kw === 'flow' || kw === 'flows')               { enterFlowPickerMode(rest); return; }
-          if (kw === 'object' || kw === 'objects')           { enterObjectPickerMode(rest); return; }
-          if (kw === 'app' || kw === 'apps')                 { enterAppPickerMode(rest); return; }
-          if (kw === 'label' || kw === 'labels')             { enterLabelPickerMode(rest); return; }
-          if (kw === 'permset' || kw === 'permsets' || kw === 'ps') { enterPermsetPickerMode(rest); return; }
-          if (kw === 'setup')                                { enterSetupPickerMode(rest); return; }
-          if (kw === 'soql')                                 { enterSoqlMode(); return; }
-          if (kw === 'ask')                                  { enterAskMode(rest); return; }
-          if (kw === 'debug' || kw === 'flow-debug')         { enterFlowDebugMode(); return; }
+      // `@cmd foo` / `@flow foo` / `@object foo` jumps into the matching
+      // picker with `foo` as the live filter. `@Account` / `@Account fields`
+      // jumps straight into Account's scoped pages. This runs in any mode
+      // so the user can pivot between scopes without first pressing Esc.
+      if (val.charAt(0) === '@') {
+        var invocation = sfnavParseShortcutInvocation(val);
+        if (invocation) {
+          enterShortcutMode(invocation.shortcut, invocation.filter);
+          return;
+        }
+        var objectInvocation = resolveObjectScopedInvocation(val);
+        if (objectInvocation) {
+          enterObjectScopedMode(objectInvocation.object, objectInvocation.filter);
+          return;
+        }
+        // Bare `@objects` / `@flows` / `@<exact-keyword>` — pop back to root
+        // and render the shortcut hint so Enter has somewhere to go.
+        if (sfnavFindShortcut(val)) {
+          searchMode = 'root';
+          renderResults(resolveInput(val));
+          return;
         }
       }
       if (searchMode === 'object-picker') {
@@ -217,9 +205,8 @@
   function handleEnter() {
     if (searchMode === 'root') {
       var input = document.getElementById('sfnav-input');
-      var keyword = input.value.trim().replace(/^@/, '').toLowerCase();
-      var keywordHandler = KEYWORD_HANDLERS[keyword];
-      if (keywordHandler) { keywordHandler(); return; }
+      var shortcut = sfnavFindShortcut(input.value);
+      if (shortcut) { executeShortcut(shortcut.id); return; }
     } else {
       var modeHandler = MODE_RUN_HANDLERS[searchMode];
       if (modeHandler) { modeHandler(); return; }
@@ -261,6 +248,46 @@
     }
   }
 
+  // Single dispatch for shortcut activation. Adding a new shortcut means one
+  // SHORTCUTS row + one case here (or none, if the shortcut is action-only
+  // and handled by executeShortcut below).
+  function enterShortcutMode(shortcut, filterText) {
+    switch (shortcut.id) {
+      case 'object':  enterObjectPickerMode(filterText || '');  return;
+      case 'flow':    enterFlowPickerMode(filterText || '');    return;
+      case 'app':     enterAppPickerMode(filterText || '');     return;
+      case 'cmd':     enterCmdPickerMode(filterText || '');     return;
+      case 'label':   enterLabelPickerMode(filterText || '');   return;
+      case 'permset': enterPermsetPickerMode(filterText || ''); return;
+      case 'setup':   enterSetupPickerMode(filterText || '');   return;
+      case 'ask':     enterAskMode(filterText || '');           return;
+      case 'soql':       enterSoqlMode();        return;
+      case 'flow-debug': enterFlowDebugMode();   return;
+      case 'refresh':    runRefresh();           return;
+    }
+  }
+
+  // Recognize @<objectName> or @<objectName> <filter> as a direct jump into
+  // object-scoped mode. Returns null if the first token is a known shortcut
+  // keyword (those have priority via sfnavParseShortcutInvocation).
+  function resolveObjectScopedInvocation(value) {
+    var stripped = String(value || '').trim().replace(/^@/, '');
+    if (!stripped) return null;
+    var parts = stripped.match(/^(\S+)(?:\s+(.*))?$/);
+    if (!parts) return null;
+    var objectQuery = parts[1];
+    if (sfnavFindShortcut(objectQuery)) return null;
+
+    var query = objectQuery.toLowerCase();
+    var objects = getAllObjects();
+    var exact = objects.find(function (o) {
+      return o.apiName.toLowerCase() === query || o.label.toLowerCase() === query;
+    });
+    var match = exact || fuzzyFilter(objectQuery, objects, function (o) { return o.label + ' ' + o.apiName; })[0];
+    if (!match) return null;
+    return { object: match, filter: parts[2] || '' };
+  }
+
   function enterObjectPickerMode(filterText) {
     searchMode = 'object-picker';
     scopedObject = null;
@@ -271,7 +298,7 @@
     input.focus();
   }
 
-  function enterObjectScopedMode(obj) {
+  function enterObjectScopedMode(obj, filterText) {
     // Remember where we came from so ESC can restore it
     if (searchMode === 'object-picker') {
       objectPickerFilter = document.getElementById('sfnav-input').value;
@@ -281,9 +308,9 @@
     searchMode = 'object-scoped';
     scopedObject = obj;
     var input = document.getElementById('sfnav-input');
-    input.value = '';
+    input.value = filterText || '';
     input.placeholder = 'Filter sections…';
-    renderResults(resolveObjectScoped('', obj));
+    renderResults(resolveObjectScoped(filterText || '', obj));
     input.focus();
   }
 
@@ -1099,19 +1126,8 @@
   }
 
   function executeShortcut(keyword) {
-    switch (keyword) {
-      case 'object':     enterObjectPickerMode(''); return;
-      case 'flow':       enterFlowPickerMode(''); return;
-      case 'app':        enterAppPickerMode(''); return;
-      case 'cmd':        enterCmdPickerMode(''); return;
-      case 'label':      enterLabelPickerMode(''); return;
-      case 'permset':    enterPermsetPickerMode(''); return;
-      case 'setup':      enterSetupPickerMode(''); return;
-      case 'soql':       enterSoqlMode(); return;
-      case 'ask':        enterAskMode(''); return;
-      case 'flow-debug': enterFlowDebugMode(); return;
-      case 'refresh':    runRefresh(); return;
-    }
+    var shortcut = sfnavFindShortcut(keyword);
+    if (shortcut) enterShortcutMode(shortcut, '');
   }
 
   function runRefresh() {
