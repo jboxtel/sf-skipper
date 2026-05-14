@@ -8,6 +8,7 @@
   initApps();          // populate Lightning app cache from storage + API
   initLabels();        // populate custom label cache from storage + Tooling API
   initPermsets();      // populate permission set cache from storage + REST API
+  if (typeof initSetupHarvest === 'function') initSetupHarvest();
 
   var paletteVisible = false;
   var selectedIndex = -1;
@@ -975,6 +976,7 @@
     hideSoqlPanel();
     renderResults(resolveInput(''));
     setFooterHints('root');
+    if (typeof sfnavInitOnboarding === 'function') sfnavInitOnboarding();
     input.focus();
   }
 
