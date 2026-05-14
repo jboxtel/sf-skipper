@@ -396,8 +396,13 @@
     try {
       var result = await generateSoql(prompt);
       outputEl.textContent = result.soql;
-      statusEl.textContent = result.explanation || ('Object: ' + result.objectName);
-      statusEl.className = 'sfnav-soql-status-ok';
+      if (result.validationError) {
+        statusEl.textContent = 'Salesforce rejected this query: ' + result.validationError;
+        statusEl.className = 'sfnav-soql-status-error';
+      } else {
+        statusEl.textContent = result.explanation || ('Object: ' + result.objectName);
+        statusEl.className = 'sfnav-soql-status-ok';
+      }
       actionsEl.style.display = 'flex';
       addToSoqlHistory({ prompt: prompt, soql: result.soql, objectName: result.objectName }).then(renderSoqlHistory);
     } catch (err) {
