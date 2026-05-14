@@ -420,6 +420,22 @@ function resolveInput(rawInput) {
     };
   }
 
+  // `@` is a shortcut sigil — when the user typed it, only suggest shortcuts.
+  // Falling through to a global fuzzy across objects/setup makes hits like
+  // `@a` → Account confusing. Bare-text search (no @) still spans everything.
+  if (rawInput.startsWith('@')) {
+    var shortcutMatches = fuzzyFilter(input, SHORTCUTS, function (s) {
+      return s.label + ' ' + s.aliases;
+    }).map(function (s) { return makeShortcutResult(s, 'shortcut'); });
+    return {
+      mode: 'shortcuts',
+      results: shortcutMatches,
+      hint: shortcutMatches.length
+        ? 'Pick a shortcut or keep typing'
+        : 'No matching shortcut — drop the @ to search objects and setup'
+    };
+  }
+
   // Fallback: fuzzy search across everything
   const allObjects = getAllObjects();
   const setupResults = fuzzyFilter(input, SETUP_QUICK_LINKS, l => l.label).map(toQuickLinkResult);
