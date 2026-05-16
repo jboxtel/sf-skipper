@@ -1,0 +1,9 @@
+{
+  "Account": 300,
+  "Contact": 1500,
+  "Opportunity": 800,
+  "Case": 2000,
+  "User": 60,
+  "Flight_Manifest__c": 8000,
+  "Flight_Log__c": 5
+}

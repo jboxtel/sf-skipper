@@ -2,12 +2,44 @@
   {
     "id": "cancelled-flight-with-assignments",
     "prompt": "Get me a cancelled flight that has flight assignments",
-    "orgs": ["flights-as-product2"],
+    "orgs": ["flights-literal", "flights-as-product2", "flights-picklist-only"],
     "expect": {
+      "flights-literal": {
+        "object": "Flight__c",
+        "mustInclude": ["Cancelled"],
+        "mustNotInclude": ["__dlm", "Family\\s*=\\s*'Flight'"]
+      },
       "flights-as-product2": {
         "object": "Product2",
         "mustInclude": ["Cancelled"],
         "mustNotInclude": ["__dlm", "StatusFlight_c__c", "FlightToFlightAssignment_c__c"]
+      },
+      "flights-picklist-only": {
+        "object": "Product2",
+        "mustInclude": ["Cancelled", "Family"],
+        "mustNotInclude": ["__dlm", "Flight__c"]
+      }
+    }
+  },
+  {
+    "id": "count-tiebreaker-cancelled-flights",
+    "prompt": "show me cancelled flights",
+    "orgs": ["two-flight-objects"],
+    "expect": {
+      "two-flight-objects": {
+        "object": "Flight_Manifest__c",
+        "mustInclude": ["Cancelled"],
+        "mustNotInclude": ["Flight_Log__c"]
+      }
+    }
+  },
+  {
+    "id": "missing-concept-flights",
+    "prompt": "Get me a cancelled flight that has flight assignments",
+    "orgs": ["no-flight-concept"],
+    "expect": {
+      "no-flight-concept": {
+        "mustNotInclude": ["Flight__c", "Flight_Assignment__c", "Family\\s*=\\s*'Flight'", "RecordType\\.DeveloperName\\s*=\\s*'Flight"]
       }
     }
   }

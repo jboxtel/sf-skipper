@@ -1,0 +1,21 @@
+{
+  "name": "Asset",
+  "label": "Asset",
+  "fields": [
+    { "name": "Id",                "label": "Asset ID",      "type": "id" },
+    { "name": "Name",              "label": "Asset Name",    "type": "string" },
+    { "name": "AccountId",         "label": "Account ID",    "type": "reference", "referenceTo": ["Account"] },
+    { "name": "ContactId",         "label": "Contact ID",    "type": "reference", "referenceTo": ["Contact"] },
+    { "name": "Product2Id",        "label": "Product ID",    "type": "reference", "referenceTo": ["Product2"] },
+    { "name": "Status",            "label": "Status",        "type": "picklist", "picklistValues": [
+      { "value": "Purchased", "active": true },
+      { "value": "Installed", "active": true },
+      { "value": "Assigned",  "active": true },
+      { "value": "Cancelled", "active": true },
+      { "value": "Obsolete",  "active": true }
+    ] },
+    { "name": "SerialNumber",      "label": "Serial Number", "type": "string" },
+    { "name": "Seat__c",           "label": "Seat",          "type": "string" },
+    { "name": "CreatedDate",       "label": "Created Date",  "type": "datetime" }
+  ]
+}

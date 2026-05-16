@@ -1,0 +1,5 @@
+{
+  "description": "Org mid-migration. The current operational flight object is Flight_Manifest__c (8000 records). A legacy Flight_Log__c (5 records) lingers from before the migration. Both lexically match 'flight' equally well. Tests whether record counts correctly break the tie in favor of the populated object.",
+  "domain": "aviation",
+  "shape": "G-count-tiebreaker"
+}

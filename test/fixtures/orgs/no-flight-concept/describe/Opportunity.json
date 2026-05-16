@@ -1,0 +1,19 @@
+{
+  "name": "Opportunity",
+  "label": "Opportunity",
+  "fields": [
+    { "name": "Id",         "label": "Opportunity ID", "type": "id" },
+    { "name": "Name",       "label": "Opportunity Name","type": "string" },
+    { "name": "AccountId",  "label": "Account ID",     "type": "reference", "referenceTo": ["Account"] },
+    { "name": "StageName",  "label": "Stage",          "type": "picklist", "picklistValues": [
+      { "value": "Prospecting",        "active": true },
+      { "value": "Qualification",      "active": true },
+      { "value": "Closed Won",         "active": true },
+      { "value": "Closed Lost",        "active": true }
+    ] },
+    { "name": "Amount",     "label": "Amount",         "type": "currency" },
+    { "name": "CloseDate",  "label": "Close Date",     "type": "date" },
+    { "name": "RecordTypeId","label": "Record Type ID","type": "reference", "referenceTo": ["RecordType"] },
+    { "name": "CreatedDate","label": "Created Date",   "type": "datetime" }
+  ]
+}

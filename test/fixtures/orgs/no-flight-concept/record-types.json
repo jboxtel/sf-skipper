@@ -1,0 +1,6 @@
+[
+  { "SobjectType": "Case",        "DeveloperName": "Support",      "Name": "Support",       "IsActive": true },
+  { "SobjectType": "Case",        "DeveloperName": "Billing",      "Name": "Billing",       "IsActive": true },
+  { "SobjectType": "Opportunity", "DeveloperName": "New_Business", "Name": "New Business",  "IsActive": true },
+  { "SobjectType": "Opportunity", "DeveloperName": "Renewal",      "Name": "Renewal",       "IsActive": true }
+]

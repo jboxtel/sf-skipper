@@ -1,0 +1,5 @@
+{
+  "description": "Aviation org where flights live on Product2 but ONLY as a picklist value (Product2.Family = 'Flight'). No Flight record type, no custom flight object. Flight assignments are Assets without a discriminating record type. Tests whether picklist-value grounding is needed to pick the right object when record-type signal is absent.",
+  "domain": "aviation",
+  "shape": "D-picklist-discriminator"
+}

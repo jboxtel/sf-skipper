@@ -1,0 +1,13 @@
+[
+  { "name": "Account",      "label": "Account",      "custom": false, "keyPrefix": "001" },
+  { "name": "Contact",      "label": "Contact",      "custom": false, "keyPrefix": "003" },
+  { "name": "Lead",         "label": "Lead",         "custom": false, "keyPrefix": "00Q" },
+  { "name": "Opportunity",  "label": "Opportunity",  "custom": false, "keyPrefix": "006" },
+  { "name": "Case",         "label": "Case",         "custom": false, "keyPrefix": "500" },
+  { "name": "Product2",     "label": "Product",      "custom": false, "keyPrefix": "01t" },
+  { "name": "Pricebook2",   "label": "Price Book",   "custom": false, "keyPrefix": "01s" },
+  { "name": "Order",        "label": "Order",        "custom": false, "keyPrefix": "801" },
+  { "name": "OrderItem",    "label": "Order Product","custom": false, "keyPrefix": "802" },
+  { "name": "User",         "label": "User",         "custom": false, "keyPrefix": "005" },
+  { "name": "RecordType",   "label": "Record Type",  "custom": false, "keyPrefix": "012" }
+]

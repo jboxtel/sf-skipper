@@ -1,0 +1,18 @@
+{
+  "name": "Flight_Assignment__c",
+  "label": "Flight Assignment",
+  "fields": [
+    { "name": "Id",              "label": "Flight Assignment ID", "type": "id" },
+    { "name": "Name",            "label": "Assignment Name",      "type": "string" },
+    { "name": "Flight__c",       "label": "Flight",               "type": "reference", "referenceTo": ["Flight__c"] },
+    { "name": "Contact__c",      "label": "Passenger",            "type": "reference", "referenceTo": ["Contact"] },
+    { "name": "Seat_Number__c",  "label": "Seat Number",          "type": "string" },
+    { "name": "Status__c",       "label": "Status",               "type": "picklist", "picklistValues": [
+      { "value": "Booked",    "active": true },
+      { "value": "Checked-In","active": true },
+      { "value": "Boarded",   "active": true },
+      { "value": "Cancelled", "active": true }
+    ] },
+    { "name": "CreatedDate",     "label": "Created Date",         "type": "datetime" }
+  ]
+}

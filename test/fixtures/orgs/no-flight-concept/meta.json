@@ -1,0 +1,5 @@
+{
+  "description": "Generic SaaS org with no aviation domain at all. Vanilla Account/Contact/Opportunity/Case + Order/OrderItem. The 'flight' concept does not exist anywhere in this org's metadata. Tests that @soql fails gracefully without inventing a Flight__c object or picklist value.",
+  "domain": "saas-generic",
+  "shape": "H-missing-concept"
+}
