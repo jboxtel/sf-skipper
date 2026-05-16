@@ -1,0 +1,8 @@
+[
+  { "SobjectType": "Asset",      "DeveloperName": "Flight_Assignment",  "Name": "Flight Assignment",  "IsActive": true },
+  { "SobjectType": "Asset",      "DeveloperName": "Spare_Part",         "Name": "Spare Part",          "IsActive": true },
+  { "SobjectType": "Product2",   "DeveloperName": "Aircraft",           "Name": "Aircraft",            "IsActive": true },
+  { "SobjectType": "Product2",   "DeveloperName": "Flight",             "Name": "Flight",              "IsActive": true },
+  { "SobjectType": "Product2",   "DeveloperName": "Catering",           "Name": "Catering",            "IsActive": true },
+  { "SobjectType": "Case",       "DeveloperName": "Customer_Complaint", "Name": "Customer Complaint",  "IsActive": true }
+]

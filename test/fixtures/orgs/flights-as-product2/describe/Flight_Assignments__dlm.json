@@ -1,0 +1,11 @@
+{
+  "name": "Flight_Assignments__dlm",
+  "label": "Flight Assignments",
+  "fields": [
+    { "name": "Id",                              "label": "Id",            "type": "id" },
+    { "name": "StatusFlight_c__c",               "label": "Flight Status", "type": "string" },
+    { "name": "FlightToFlightAssignment_c__c",   "label": "Flight Ref",    "type": "string" },
+    { "name": "AssignedTo_c__c",                 "label": "Assigned To",   "type": "string" },
+    { "name": "CreatedDate",                     "label": "Created Date",  "type": "datetime" }
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "name": "Product2",
+  "label": "Product",
+  "fields": [
+    { "name": "Id",                 "label": "Product ID",       "type": "id" },
+    { "name": "Name",               "label": "Product Name",     "type": "string" },
+    { "name": "ProductCode",        "label": "Product Code",     "type": "string" },
+    { "name": "Description",        "label": "Description",      "type": "textarea" },
+    { "name": "IsActive",           "label": "Active",           "type": "boolean" },
+    { "name": "Family",             "label": "Product Family",   "type": "picklist", "picklistValues": [
+      { "value": "Aircraft", "active": true },
+      { "value": "Flight",   "active": true },
+      { "value": "Catering", "active": true },
+      { "value": "Service",  "active": true }
+    ] },
+    { "name": "RecordTypeId",       "label": "Record Type ID",   "type": "reference", "referenceTo": ["RecordType"] },
+    { "name": "Status__c",          "label": "Status",           "type": "picklist", "picklistValues": [
+      { "value": "Scheduled", "active": true },
+      { "value": "Boarding",  "active": true },
+      { "value": "Departed",  "active": true },
+      { "value": "Arrived",   "active": true },
+      { "value": "Delayed",   "active": true },
+      { "value": "Cancelled", "active": true }
+    ] },
+    { "name": "Flight_Number__c",   "label": "Flight Number",    "type": "string" },
+    { "name": "Origin__c",          "label": "Origin",           "type": "string" },
+    { "name": "Destination__c",     "label": "Destination",      "type": "string" },
+    { "name": "Departure_Time__c",  "label": "Departure Time",   "type": "datetime" },
+    { "name": "Arrival_Time__c",    "label": "Arrival Time",     "type": "datetime" },
+    { "name": "CreatedDate",        "label": "Created Date",     "type": "datetime" },
+    { "name": "LastModifiedDate",   "label": "Last Modified",    "type": "datetime" }
+  ]
+}
