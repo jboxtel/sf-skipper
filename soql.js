@@ -16,6 +16,19 @@ var SOQL_VALIDATE_RETRIES = 2; // additional attempts after the first generation
 var _describeCache = {}; // apiName → { fields, ts }
 var _countCache = {};    // apiName → { count: number|null, ts }
 
+// Data Cloud objects (DMOs, DLOs, CIOs, activation channels, streaming data) are
+// queryable so the planner happily validates SOQL against them, but they
+// silently shadow the standard/custom object the user actually meant — e.g.
+// "cancelled flights" matches Flight__c AND Flight_Assignments__dlm. Exclude
+// them from SOQL candidate scoring entirely.
+var DATA_CLOUD_SUFFIX_RE = /__(dlm|dll|cio|chn|sdo|dla|dlr|hdt|ssot|unified)$/i;
+function isDataCloudObject(o) {
+  return DATA_CLOUD_SUFFIX_RE.test(o.apiName);
+}
+function getSoqlObjects() {
+  return getAllObjects().filter(function (o) { return !isDataCloudObject(o); });
+}
+
 function soqlScoreObject(prompt, obj) {
   // Normalize so "e-mails" matches "email", "user's" matches "user"
   var p = prompt.toLowerCase().replace(/[-']/g, '');
@@ -55,7 +68,7 @@ function soqlScoreObject(prompt, obj) {
 }
 
 function pickCandidateObjects(prompt, max) {
-  var all = getAllObjects();
+  var all = getSoqlObjects();
   var scored = all
     .map(function (o) { return { obj: o, score: soqlScoreObject(prompt, o) }; })
     .filter(function (x) { return x.score > 0; })
@@ -169,7 +182,7 @@ function buildUserMessage(prompt, schemaObjects) {
 }
 
 function buildObjectListMessage(prompt) {
-  var all = getAllObjects();
+  var all = getSoqlObjects();
   var lines = [];
   lines.push('User request: ' + prompt);
   lines.push('');
@@ -244,7 +257,7 @@ async function generateSoql(prompt) {
       buildObjectListMessage(prompt)
     );
     var chosen = pickerText.trim().split(/\s+/)[0].replace(/[`'"]/g, '');
-    var match = getAllObjects().find(function (o) { return o.apiName === chosen; });
+    var match = getSoqlObjects().find(function (o) { return o.apiName === chosen; });
     if (!match) throw new Error('Could not identify object for this prompt');
     candidates = [match];
   }
