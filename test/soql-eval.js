@@ -110,6 +110,9 @@ async function setupFixture(page, org) {
     if (typeof _countCache !== 'undefined') {
       for (const k of Object.keys(_countCache)) delete _countCache[k];
     }
+    if (typeof _recordTypesCache !== 'undefined') {
+      window._recordTypesCache = null;
+    }
 
     // Seed objects.js custom-object cache from fixture
     window._customObjects = fix.sobjects.map(s => ({
@@ -142,10 +145,23 @@ async function setupFixture(page, org) {
         if (!d) return Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve({}) });
         return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(d) });
       }
-      // COUNT() query
       const cm = u.match(/\/query\/?\?q=([^&]+)/);
       if (cm) {
         const q = decodeURIComponent(cm[1]);
+        // RecordType query — serve full records from record-types.json
+        if (/FROM\s+RecordType\b/i.test(q)) {
+          const records = (fix.recordTypes || []).map((rt, i) => ({
+            attributes: { type: 'RecordType', url: '/services/data/v60.0/sobjects/RecordType/0120000000RT' + (i + 1).toString().padStart(3, '0') },
+            SobjectType: rt.SobjectType,
+            DeveloperName: rt.DeveloperName,
+            Name: rt.Name
+          }));
+          return Promise.resolve({
+            ok: true, status: 200,
+            json: () => Promise.resolve({ totalSize: records.length, done: true, records })
+          });
+        }
+        // COUNT() query — extract FROM <Name>, return totalSize from fixture
         const m = q.match(/FROM\s+(\S+)/i);
         const apiName = m ? m[1] : null;
         const totalSize = apiName && fix.counts[apiName] != null ? fix.counts[apiName] : 0;

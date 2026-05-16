@@ -13,8 +13,12 @@ var SOQL_DESCRIBE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 var SOQL_COUNT_TTL_MS = 5 * 60 * 1000; // 5 minutes — counts drift faster than schema
 var SOQL_VALIDATE_RETRIES = 2; // additional attempts after the first generation
 
-var _describeCache = {}; // apiName → { fields, ts }
-var _countCache = {};    // apiName → { count: number|null, ts }
+var SOQL_RECORDTYPES_TTL_MS = 30 * 60 * 1000;
+
+var _describeCache = {};       // apiName → { fields, ts }
+var _countCache = {};          // apiName → { count: number|null, ts }
+var _recordTypesCache = null;  // { byObject: { apiName: [{developerName, name}] }, ts }
+var _recordTypesPromise = null; // dedupes concurrent loads
 
 // Data Cloud objects (DMOs, DLOs, CIOs, activation channels, streaming data) are
 // queryable so the planner happily validates SOQL against them, but they
@@ -27,6 +31,47 @@ function isDataCloudObject(o) {
 }
 function getSoqlObjects() {
   return getAllObjects().filter(function (o) { return !isDataCloudObject(o); });
+}
+
+// Record types encode business-domain terms onto generic standard objects
+// (e.g. Asset gets a "Flight_Assignment" record type in an aviation org).
+// Without them, lexical scoring on object api names / labels alone can't
+// see "flight" attached to Asset or Product2. One Tooling-free SOQL call
+// surfaces every active record type org-wide; we cache it for 30 min.
+async function loadRecordTypes() {
+  if (_recordTypesCache && (Date.now() - _recordTypesCache.ts) < SOQL_RECORDTYPES_TTL_MS) {
+    return _recordTypesCache.byObject;
+  }
+  if (_recordTypesPromise) return _recordTypesPromise;
+  _recordTypesPromise = (async function () {
+    try {
+      var pre = await sfRestPreamble();
+      var q = 'SELECT SobjectType, DeveloperName, Name FROM RecordType WHERE IsActive = true';
+      var url = pre.apiBase + pre.basePath + '/query/?q=' + encodeURIComponent(q);
+      var resp = await sfFetch(url, { headers: pre.headers });
+      if (!resp.ok) throw new Error('record types fetch failed: ' + resp.status);
+      var data = await resp.json();
+      var byObject = {};
+      var records = data.records || [];
+      for (var i = 0; i < records.length; i++) {
+        var rt = records[i];
+        var s = rt.SobjectType;
+        if (!s) continue;
+        if (!byObject[s]) byObject[s] = [];
+        byObject[s].push({ developerName: rt.DeveloperName, name: rt.Name });
+      }
+      _recordTypesCache = { byObject: byObject, ts: Date.now() };
+      return byObject;
+    } finally {
+      _recordTypesPromise = null;
+    }
+  })();
+  return _recordTypesPromise;
+}
+
+function getRecordTypesFor(apiName) {
+  if (!_recordTypesCache) return [];
+  return _recordTypesCache.byObject[apiName] || [];
 }
 
 function soqlScoreObject(prompt, obj) {
@@ -62,6 +107,25 @@ function soqlScoreObject(prompt, obj) {
     if (seen[tokens[j]]) continue;
     seen[tokens[j]] = true;
     score += scoreToken(tokens[j]);
+  }
+
+  // Record types — score each record type's name + developer name, plus their
+  // tokens. The whole-phrase match on a multi-word record type (e.g. "flight
+  // assignment") is the most valuable signal because it pinpoints the parent
+  // object exactly.
+  var rts = getRecordTypesFor(obj.apiName);
+  for (var k = 0; k < rts.length; k++) {
+    var rtName = (rts[k].name || '').toLowerCase();
+    var rtDev = (rts[k].developerName || '').replace(/_/g, ' ').toLowerCase();
+    score += scoreToken(rtName);
+    if (rtDev && rtDev !== rtName) score += scoreToken(rtDev);
+    var rtTokens = (rtName + ' ' + rtDev).split(/\s+/).filter(function (t) { return t.length >= 4; });
+    var rtSeen = {};
+    for (var m = 0; m < rtTokens.length; m++) {
+      if (rtSeen[rtTokens[m]]) continue;
+      rtSeen[rtTokens[m]] = true;
+      score += scoreToken(rtTokens[m]);
+    }
   }
 
   return score;
@@ -168,6 +232,12 @@ function buildUserMessage(prompt, schemaObjects) {
     var header = 'Object: ' + o.apiName + (o.label ? ' (' + o.label + ')' : '');
     if (typeof o.count === 'number') header += ' — ' + o.count.toLocaleString('en-US') + ' records';
     lines.push(header);
+    if (o.recordTypes && o.recordTypes.length) {
+      var rtSummary = o.recordTypes.map(function (rt) {
+        return rt.developerName + (rt.name && rt.name !== rt.developerName ? ' ("' + rt.name + '")' : '');
+      }).join(', ');
+      lines.push('  Record types: ' + rtSummary + '  — filter with RecordType.DeveloperName = \'<DeveloperName>\'');
+    }
     if (o.fields) {
       for (var j = 0; j < o.fields.length; j++) {
         var f = o.fields[j];
@@ -186,9 +256,14 @@ function buildObjectListMessage(prompt) {
   var lines = [];
   lines.push('User request: ' + prompt);
   lines.push('');
-  lines.push('I could not match an object from the prompt. Pick the most likely object from this list and reply ONLY with its api name (no JSON, no prose):');
+  lines.push('I could not match an object from the prompt. Pick the most likely object from this list and reply ONLY with its api name (no JSON, no prose). Record types on a generic standard object often encode the real business concept — treat them as a strong signal.');
   for (var i = 0; i < all.length; i++) {
-    lines.push('- ' + all[i].apiName + (all[i].label && all[i].label !== all[i].apiName ? ' (' + all[i].label + ')' : ''));
+    var rts = getRecordTypesFor(all[i].apiName);
+    var line = '- ' + all[i].apiName + (all[i].label && all[i].label !== all[i].apiName ? ' (' + all[i].label + ')' : '');
+    if (rts.length) {
+      line += '  [record types: ' + rts.map(function (r) { return r.name || r.developerName; }).join(', ') + ']';
+    }
+    lines.push(line);
   }
   return lines.join('\n');
 }
@@ -248,6 +323,14 @@ function buildRetryUserMessage(baseMessage, attempts) {
 async function generateSoql(prompt) {
   if (!prompt || !prompt.trim()) throw new Error('Empty prompt');
 
+  // Load record types first so scoring + the picker fallback both see them.
+  // Failure is non-fatal — degrades to label-only scoring.
+  try {
+    await loadRecordTypes();
+  } catch (err) {
+    console.warn('sfnav: record types load failed —', err.message);
+  }
+
   var candidates = pickCandidateObjects(prompt, 3);
 
   // No heuristic match — ask the model to pick from the object list, then re-run with that schema
@@ -266,7 +349,13 @@ async function generateSoql(prompt) {
   // Counts give Claude an org-grounded signal for picking between near-synonym
   // objects (e.g. Attachment vs EmailMessage, Note vs ContentNote).
   var schemaObjects = await Promise.all(candidates.map(async function (obj) {
-    var result = { apiName: obj.apiName, label: obj.label, fields: null, count: null };
+    var result = {
+      apiName: obj.apiName,
+      label: obj.label,
+      fields: null,
+      count: null,
+      recordTypes: getRecordTypesFor(obj.apiName)
+    };
     var describePromise = fetchDescribe(obj.apiName).then(
       function (fields) { result.fields = fields; },
       function (err) { console.warn('sfnav: describe failed for', obj.apiName, err.message); }
