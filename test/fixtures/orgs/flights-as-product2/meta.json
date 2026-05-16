@@ -1,0 +1,5 @@
+{
+  "description": "Aviation org. Flights are Product2 records (Family='Flight'); Flight Assignments are Asset records with the 'Flight_Assignment' record type. A Data Cloud DMO (Flight_Assignments__dlm) is present as a lexical lure but is not the operational object.",
+  "domain": "aviation",
+  "shape": "B-repurposed-standard"
+}

@@ -1,0 +1,11 @@
+[
+  { "name": "Account",                       "label": "Account",                  "custom": false, "keyPrefix": "001" },
+  { "name": "Contact",                       "label": "Contact",                  "custom": false, "keyPrefix": "003" },
+  { "name": "Opportunity",                   "label": "Opportunity",              "custom": false, "keyPrefix": "006" },
+  { "name": "Product2",                      "label": "Product",                  "custom": false, "keyPrefix": "01t" },
+  { "name": "Asset",                         "label": "Asset",                    "custom": false, "keyPrefix": "02i" },
+  { "name": "Case",                          "label": "Case",                     "custom": false, "keyPrefix": "500" },
+  { "name": "RecordType",                    "label": "Record Type",              "custom": false, "keyPrefix": "012" },
+  { "name": "Flight_Assignments__dlm",       "label": "Flight Assignments",       "custom": true,  "keyPrefix": null  },
+  { "name": "Crew_Roster__dlm",              "label": "Crew Roster",              "custom": true,  "keyPrefix": null  }
+]

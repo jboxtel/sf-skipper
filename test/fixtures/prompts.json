@@ -1,0 +1,14 @@
+[
+  {
+    "id": "cancelled-flight-with-assignments",
+    "prompt": "Get me a cancelled flight that has flight assignments",
+    "orgs": ["flights-as-product2"],
+    "expect": {
+      "flights-as-product2": {
+        "object": "Product2",
+        "mustInclude": ["Cancelled"],
+        "mustNotInclude": ["__dlm", "StatusFlight_c__c", "FlightToFlightAssignment_c__c"]
+      }
+    }
+  }
+]
