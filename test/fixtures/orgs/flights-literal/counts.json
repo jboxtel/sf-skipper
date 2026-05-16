@@ -1,0 +1,11 @@
+{
+  "Account": 220,
+  "Contact": 1100,
+  "Opportunity": 600,
+  "Case": 3200,
+  "Product2": 80,
+  "Asset": 45,
+  "User": 95,
+  "Flight__c": 1500,
+  "Flight_Assignment__c": 8000
+}

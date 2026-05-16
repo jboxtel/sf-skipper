@@ -24,14 +24,14 @@ intent, not parser conformance (that's the planner's job in real runs).
 
 | Shape | Example fixture                 | What it tests                                                    |
 |-------|---------------------------------|------------------------------------------------------------------|
-| A     | (not yet)                       | Literal custom object — pure lexical matching.                   |
-| B     | `flights-as-product2/`          | Domain concept lives on a repurposed standard object.            |
-| C     | (not yet)                       | Standard object discriminated by record type.                    |
-| D     | (not yet)                       | Standard object discriminated by picklist value.                 |
+| A     | `flights-literal/`              | Literal custom object — pure lexical matching.                   |
+| B     | `flights-as-product2/`          | Concept lives on a repurposed standard + record type.            |
+| C     | (folded into B)                 | Record-type discriminator (Asset + Flight_Assignment).           |
+| D     | `flights-picklist-only/`        | Picklist-value discriminator (`Product2.Family = 'Flight'`).     |
 | E     | (not yet)                       | Hybrid — one part lexical, one part metadata-grounded.           |
 | F     | `flights-as-product2/` (lure)   | Misleading Data Cloud DMO sibling alongside real object.         |
-| G     | (not yet)                       | Multi-tenant ambiguity — count-grounding tiebreaker.             |
-| H     | (not yet)                       | Missing concept — should fail clean, not hallucinate.            |
+| G     | `two-flight-objects/`           | Multi-tenant ambiguity — count-grounding tiebreaker.             |
+| H     | `no-flight-concept/`            | Missing concept — should fail clean, not hallucinate.            |
 
 ## Adding a fixture
 

@@ -1,0 +1,16 @@
+{
+  "name": "Order",
+  "label": "Order",
+  "fields": [
+    { "name": "Id",            "label": "Order ID",     "type": "id" },
+    { "name": "OrderNumber",   "label": "Order Number", "type": "string" },
+    { "name": "AccountId",     "label": "Account ID",   "type": "reference", "referenceTo": ["Account"] },
+    { "name": "Status",        "label": "Status",       "type": "picklist", "picklistValues": [
+      { "value": "Draft",     "active": true },
+      { "value": "Activated", "active": true },
+      { "value": "Cancelled", "active": true }
+    ] },
+    { "name": "EffectiveDate", "label": "Effective Date","type": "date" },
+    { "name": "CreatedDate",   "label": "Created Date",  "type": "datetime" }
+  ]
+}

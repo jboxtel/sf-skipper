@@ -1,0 +1,5 @@
+{
+  "description": "Aviation org modeled with literal custom objects. Flights are Flight__c records; Flight Assignments are Flight_Assignment__c records linked back via a master-detail. Pure lexical scoring should solve this without record-type or field-label grounding.",
+  "domain": "aviation",
+  "shape": "A-literal-custom-objects"
+}

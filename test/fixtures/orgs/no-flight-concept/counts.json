@@ -1,0 +1,12 @@
+{
+  "Account": 5400,
+  "Contact": 18000,
+  "Lead": 3200,
+  "Opportunity": 4100,
+  "Case": 9800,
+  "Product2": 240,
+  "Pricebook2": 6,
+  "Order": 2100,
+  "OrderItem": 8400,
+  "User": 110
+}

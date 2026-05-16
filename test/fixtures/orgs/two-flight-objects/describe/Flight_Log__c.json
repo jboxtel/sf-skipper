@@ -1,0 +1,14 @@
+{
+  "name": "Flight_Log__c",
+  "label": "Flight Log",
+  "fields": [
+    { "name": "Id",               "label": "Log ID",        "type": "id" },
+    { "name": "Name",             "label": "Log Name",      "type": "string" },
+    { "name": "Flight_Number__c", "label": "Flight Number", "type": "string" },
+    { "name": "Status__c",        "label": "Status",        "type": "picklist", "picklistValues": [
+      { "value": "Logged",    "active": true },
+      { "value": "Cancelled", "active": true }
+    ] },
+    { "name": "CreatedDate",      "label": "Created Date",  "type": "datetime" }
+  ]
+}

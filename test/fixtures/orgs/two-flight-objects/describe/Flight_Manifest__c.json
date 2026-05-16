@@ -1,0 +1,16 @@
+{
+  "name": "Flight_Manifest__c",
+  "label": "Flight Manifest",
+  "fields": [
+    { "name": "Id",               "label": "Manifest ID",   "type": "id" },
+    { "name": "Name",             "label": "Manifest Name", "type": "string" },
+    { "name": "Flight_Number__c", "label": "Flight Number", "type": "string" },
+    { "name": "Status__c",        "label": "Status",        "type": "picklist", "picklistValues": [
+      { "value": "Open",      "active": true },
+      { "value": "Closed",    "active": true },
+      { "value": "Cancelled", "active": true }
+    ] },
+    { "name": "Departure_Time__c","label": "Departure Time","type": "datetime" },
+    { "name": "CreatedDate",      "label": "Created Date",  "type": "datetime" }
+  ]
+}

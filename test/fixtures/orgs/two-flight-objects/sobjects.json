@@ -1,0 +1,10 @@
+[
+  { "name": "Account",            "label": "Account",          "custom": false, "keyPrefix": "001" },
+  { "name": "Contact",            "label": "Contact",          "custom": false, "keyPrefix": "003" },
+  { "name": "Opportunity",        "label": "Opportunity",      "custom": false, "keyPrefix": "006" },
+  { "name": "Case",               "label": "Case",             "custom": false, "keyPrefix": "500" },
+  { "name": "RecordType",         "label": "Record Type",      "custom": false, "keyPrefix": "012" },
+  { "name": "User",               "label": "User",             "custom": false, "keyPrefix": "005" },
+  { "name": "Flight_Manifest__c", "label": "Flight Manifest",  "custom": true,  "keyPrefix": "a01" },
+  { "name": "Flight_Log__c",      "label": "Flight Log",       "custom": true,  "keyPrefix": "a02" }
+]
