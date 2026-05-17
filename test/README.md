@@ -74,22 +74,23 @@ and prints the fixture files in this exact format plus a starter `prompts.json`.
 - `object`: exact-match against `parsed.objectName`.
 - Fields whose names start with `_` are documentation — the runner ignores them.
 
-## Org-shape taxonomy
+## What each fixture tests
 
-Reference for what synthetic fixtures cover. Real-org snapshots in `evals/`
-typically mix several shapes within a single fixture.
+Synthetic fixtures are named by the **grounding signal** they isolate, not by
+the example they happen to use. The aviation theme inside each is just a
+concrete realization of the abstract concept the fixture is testing.
 
-| Shape | Example fixture                 | What it tests                                                    |
-|-------|---------------------------------|------------------------------------------------------------------|
-| A     | `flights-literal/`              | Literal custom object — pure lexical matching.                   |
-| B     | `flights-as-product2/`          | Concept lives on a repurposed standard + record type.            |
-| C     | (folded into B)                 | Record-type discriminator.                                       |
-| D     | `flights-picklist-only/`        | Picklist-value discriminator (`Product2.Family = 'Flight'`).     |
-| E     | (not yet)                       | Hybrid — one part lexical, one part metadata-grounded.           |
-| F     | `flights-as-product2/` (lure)   | Misleading Data Cloud DMO sibling alongside real object.         |
-| G     | `two-flight-objects/`           | Multi-tenant ambiguity — count-grounding tiebreaker.             |
-| H     | `no-flight-concept/`            | Missing concept — should fail clean, not hallucinate.            |
-| real  | `airline-claims-uat/`                   | Real-org snapshot — Service Cloud + claims + custom domain.      |
+| Fixture                          | Concept under test                                                                                  |
+|----------------------------------|-----------------------------------------------------------------------------------------------------|
+| `signal-in-object-name/`         | Domain term lexically matches the object's api name or label.                                       |
+| `signal-in-record-type/`         | Domain term lives on a record type attached to a generic standard object.                           |
+| `signal-in-picklist-value/`      | Domain term lives only as a picklist value — no record type, no api-name match.                     |
+| `signal-via-count-tiebreaker/`   | Two objects score equally on the prompt; record counts disambiguate operational from legacy.        |
+| `signal-absent/`                 | The org has no signal for the prompt — must not hallucinate objects, record types, or filter values.|
+| `airline-claims-uat/`            | Real-org snapshot — mixes most of the above plus label hijack, zero-record traps, multi-record-type discriminators, German legal terminology. |
+
+Real-org snapshots are the primary source of eval coverage as the matrix grows;
+synthetic fixtures isolate single concepts for diagnostic purposes.
 
 ## What's not tested
 
