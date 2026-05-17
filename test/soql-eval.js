@@ -221,7 +221,10 @@ async function runOne(page, org, promptText) {
     console.error('ANTHROPIC_API_KEY must be set to run the eval harness.');
     process.exit(2);
   }
-  const model = process.env.SOQL_EVAL_MODEL || 'claude-sonnet-4-6';
+  // Default to the same model background.js uses in production (sfnavOptions.model
+  // default) so the eval predicts real @soql behavior. Override with SOQL_EVAL_MODEL
+  // for cross-model comparisons.
+  const model = process.env.SOQL_EVAL_MODEL || 'claude-haiku-4-5-20251001';
 
   const orgFilter = process.argv[2] || null;
   const promptFilter = process.argv[3] || null;
