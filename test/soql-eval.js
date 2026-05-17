@@ -18,9 +18,7 @@ const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.resolve(__dirname, '..');
-const FIXTURES_DIR = path.join(__dirname, 'fixtures');
-const ORGS_DIR = path.join(FIXTURES_DIR, 'orgs');
-const PROMPTS_FILE = path.join(FIXTURES_DIR, 'prompts.json');
+const EVALS_DIR = path.join(ROOT, 'evals');
 
 const GREEN = '\x1b[32m';
 const RED = '\x1b[31m';
@@ -36,8 +34,19 @@ function readJsonIfExists(p) {
   try { return readJson(p); } catch (_) { return null; }
 }
 
-function loadOrg(name) {
-  const dir = path.join(ORGS_DIR, name);
+function discoverFixtures() {
+  if (!fs.existsSync(EVALS_DIR)) return {};
+  const found = {};
+  for (const name of fs.readdirSync(EVALS_DIR)) {
+    const dir = path.join(EVALS_DIR, name);
+    if (!fs.statSync(dir).isDirectory()) continue;
+    if (!fs.existsSync(path.join(dir, 'meta.json'))) continue;
+    found[name] = dir;
+  }
+  return found;
+}
+
+function loadOrg(name, dir) {
   const describeDir = path.join(dir, 'describe');
   const describes = {};
   if (fs.existsSync(describeDir)) {
@@ -47,13 +56,16 @@ function loadOrg(name) {
       }
     }
   }
+  const promptsFile = path.join(dir, 'prompts.json');
   return {
     name,
+    dir,
     meta: readJson(path.join(dir, 'meta.json')),
     sobjects: readJson(path.join(dir, 'sobjects.json')),
     counts: readJsonIfExists(path.join(dir, 'counts.json')) || {},
     recordTypes: readJsonIfExists(path.join(dir, 'record-types.json')) || [],
-    describes
+    describes,
+    prompts: readJsonIfExists(promptsFile) || []
   };
 }
 
@@ -206,24 +218,26 @@ async function runOne(page, org, promptText) {
   const orgFilter = process.argv[2] || null;
   const promptFilter = process.argv[3] || null;
 
-  const prompts = readJson(PROMPTS_FILE);
-  const orgNames = fs.readdirSync(ORGS_DIR).filter(
-    n => fs.statSync(path.join(ORGS_DIR, n)).isDirectory()
-  );
-  const orgs = Object.fromEntries(orgNames.map(n => [n, loadOrg(n)]));
+  const fixtureDirs = discoverFixtures();
+  const orgNames = Object.keys(fixtureDirs);
+  const orgs = Object.fromEntries(orgNames.map(n => [n, loadOrg(n, fixtureDirs[n])]));
 
+  // Each fixture ships with its own prompts.json. Prompts default to targeting
+  // the fixture they live in; an explicit `orgs` array overrides.
   const cells = [];
-  for (const p of prompts) {
-    const targets = p.orgs && p.orgs.length ? p.orgs : orgNames;
-    for (const orgName of targets) {
-      if (orgFilter && orgFilter !== orgName) continue;
-      if (promptFilter && promptFilter !== p.id) continue;
-      if (!orgs[orgName]) {
-        console.warn(`skipping ${p.id} × ${orgName}: org fixture missing`);
-        continue;
+  for (const name of orgNames) {
+    for (const p of orgs[name].prompts) {
+      const targets = (p.orgs && p.orgs.length) ? p.orgs : [name];
+      for (const orgName of targets) {
+        if (orgFilter && orgFilter !== orgName) continue;
+        if (promptFilter && promptFilter !== p.id) continue;
+        if (!orgs[orgName]) {
+          console.warn(`skipping ${p.id} × ${orgName}: org fixture missing`);
+          continue;
+        }
+        const expect = (p.expect && p.expect[orgName]) || {};
+        cells.push({ prompt: p, org: orgs[orgName], expect });
       }
-      const expect = (p.expect && p.expect[orgName]) || {};
-      cells.push({ prompt: p, org: orgs[orgName], expect });
     }
   }
   if (cells.length === 0) {
