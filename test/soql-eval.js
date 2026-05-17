@@ -103,6 +103,12 @@ function compilePattern(pat) {
 
 function evaluateResult(r, expect) {
   if (!r.ok) {
+    // When the picker honestly refuses (no known object matches the prompt), some
+    // fixtures consider that the correct behavior — e.g. concepts the grounding
+    // can't yet ground. Honor an explicit acceptRefusal flag in the expect block.
+    if (expect.acceptRefusal && /Picker could not identify|Could not identify object/i.test(r.error)) {
+      return { pass: true, reasons: [], note: 'refused (acceptRefusal=true)' };
+    }
     return { pass: false, reasons: ['generateSoql threw: ' + r.error] };
   }
   const { soql, objectName } = r.result;
