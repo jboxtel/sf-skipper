@@ -93,6 +93,14 @@ async function callAnthropic(apiKey, model, system, user) {
   return block ? block.text : '';
 }
 
+// JS regex doesn't support PCRE inline flags like `(?i)`. Patterns written
+// for portability (compatible with grep/Python) often include them — strip
+// before compiling. We already apply the 'i' flag globally below, so the
+// inline marker is redundant either way.
+function compilePattern(pat) {
+  return new RegExp(pat.replace(/\(\?i\)/g, ''), 'i');
+}
+
 function evaluateResult(r, expect) {
   if (!r.ok) {
     return { pass: false, reasons: ['generateSoql threw: ' + r.error] };
@@ -103,10 +111,10 @@ function evaluateResult(r, expect) {
     reasons.push(`expected object=${expect.object}, got ${objectName}`);
   }
   for (const pat of expect.mustInclude || []) {
-    if (!new RegExp(pat, 'i').test(soql)) reasons.push(`SOQL missing: /${pat}/i`);
+    if (!compilePattern(pat).test(soql)) reasons.push(`SOQL missing: /${pat}/i`);
   }
   for (const pat of expect.mustNotInclude || []) {
-    if (new RegExp(pat, 'i').test(soql)) reasons.push(`SOQL contains forbidden: /${pat}/i`);
+    if (compilePattern(pat).test(soql)) reasons.push(`SOQL contains forbidden: /${pat}/i`);
   }
   return { pass: reasons.length === 0, reasons };
 }
