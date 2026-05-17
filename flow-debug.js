@@ -238,11 +238,234 @@ function flattenValue(v) {
   return JSON.stringify(v).slice(0, 80);
 }
 
+// Every object the flow reads, creates, updates, or deletes — plus the trigger
+// object. Used to drive describe-grounding so the model can reference real
+// fields and picklist values rather than guessing from the compact metadata.
+function flowReferencedObjects(meta) {
+  if (!meta) return [];
+  var seen = {};
+  if (meta.start && meta.start.object) seen[meta.start.object] = true;
+  ['recordLookups', 'recordCreates', 'recordUpdates', 'recordDeletes'].forEach(function (key) {
+    (meta[key] || []).forEach(function (n) { if (n.object) seen[n.object] = true; });
+  });
+  return Object.keys(seen);
+}
+
+// Field-grounding fetch. The compact flow text shows field references like
+// `$Record.Industry = "Tech"`, but doesn't reveal the field's real picklist
+// values, type, or whether it's a reference. With the describe in hand the
+// model can spot a mismatch (e.g. "Technology" is a valid picklist value but
+// "Tech" is not), and the structural validator (validateFlowFix) can reject
+// fix steps that reference fields the trigger object doesn't have.
+// Failures degrade silently — schema absence is better than blocking.
+async function fetchFlowSchema(meta) {
+  var empty = { describesByObject: {}, recordTypesByObject: {} };
+  var names = flowReferencedObjects(meta);
+  if (!names.length) return empty;
+
+  var canFetchDescribe = typeof fetchDescribe === 'function';
+  var canLoadRecordTypes = typeof loadRecordTypes === 'function';
+  var canGetRecordTypes = typeof getRecordTypesFor === 'function';
+
+  if (canLoadRecordTypes) {
+    try { await loadRecordTypes(); } catch (_) {}
+  }
+
+  var pairs = await Promise.all(names.map(function (name) {
+    if (!canFetchDescribe) return Promise.resolve([name, null]);
+    return fetchDescribe(name).then(
+      function (fields) { return [name, fields]; },
+      function () { return [name, null]; }
+    );
+  }));
+
+  var describesByObject = {};
+  pairs.forEach(function (p) { describesByObject[p[0]] = p[1] ? { fields: p[1] } : { fields: null }; });
+
+  var recordTypesByObject = {};
+  if (canGetRecordTypes) {
+    names.forEach(function (n) { recordTypesByObject[n] = getRecordTypesFor(n) || []; });
+  }
+
+  return { describesByObject: describesByObject, recordTypesByObject: recordTypesByObject };
+}
+
+function formatFlowSchemaAppendix(schema) {
+  if (!schema) return '';
+  var names = Object.keys(schema.describesByObject || {});
+  if (!names.length) return '';
+  if (!names.some(function (n) { return schema.describesByObject[n].fields; })) return '';
+
+  var lines = [];
+  lines.push('Schema for objects the flow touches. Use these exact field api names; quote picklist values verbatim; do not invent fields.');
+  names.forEach(function (apiName) {
+    var d = schema.describesByObject[apiName];
+    var rts = (schema.recordTypesByObject && schema.recordTypesByObject[apiName]) || [];
+    var header = apiName;
+    if (rts.length) {
+      header += '  [record types: ' + rts.map(function (r) { return r.developerName; }).join(', ') + ']';
+    }
+    lines.push(header);
+    if (!d.fields) {
+      lines.push('  (describe unavailable)');
+      return;
+    }
+    d.fields.forEach(function (f) {
+      var row = '  - ' + f.name + ' : ' + f.type;
+      if (f.referenceTo && f.referenceTo.length) {
+        row += ' → ' + f.referenceTo.join('|');
+        if (f.relationshipName) row += ' [rel: ' + f.relationshipName + ']';
+      }
+      if (f.values && f.values.length) {
+        row += ' [' + f.values.slice(0, 30).join(',') + ']';
+      }
+      if (f.label && f.label !== f.name) row += '  (' + f.label + ')';
+      lines.push(row);
+    });
+  });
+  return lines.join('\n');
+}
+
+// Collect every name in the flow metadata that the fix may legitimately
+// reference: element names, decision-outcome rule names, wait-event names,
+// screen field names, and resource names (variables, formulas, constants,
+// choices, dynamic choice sets, text templates, stages).
+function collectFlowNames(meta) {
+  var elements = { Start: true };
+  var ruleNames = {};
+  var resources = {};
+  if (!meta) return { names: elements, elements: elements, ruleNames: ruleNames, resources: resources };
+
+  ['decisions', 'assignments', 'recordLookups', 'recordCreates', 'recordUpdates',
+   'recordDeletes', 'actionCalls', 'screens', 'loops', 'subflows', 'waits',
+   'steps', 'collectionProcessors'].forEach(function (k) {
+    (meta[k] || []).forEach(function (n) { if (n && n.name) elements[n.name] = true; });
+  });
+
+  (meta.decisions || []).forEach(function (d) {
+    (d.rules || []).forEach(function (r) { if (r && r.name) ruleNames[r.name] = true; });
+  });
+  (meta.waits || []).forEach(function (w) {
+    (w.waitEvents || []).forEach(function (e) { if (e && e.name) ruleNames[e.name] = true; });
+  });
+  (meta.screens || []).forEach(function (s) {
+    (s.fields || []).forEach(function (f) { if (f && f.name) resources[f.name] = true; });
+  });
+
+  ['variables', 'formulas', 'constants', 'choices', 'dynamicChoiceSets',
+   'textTemplates', 'stages'].forEach(function (k) {
+    (meta[k] || []).forEach(function (n) { if (n && n.name) resources[n.name] = true; });
+  });
+
+  var names = {};
+  [elements, ruleNames, resources].forEach(function (m) {
+    Object.keys(m).forEach(function (k) { names[k] = true; });
+  });
+  return { names: names, elements: elements, ruleNames: ruleNames, resources: resources };
+}
+
+// Structural validator for a parsed flow-debug response. Catches the kinds of
+// hallucination the SOQL planner catches for @soql: references to elements,
+// resources, or fields that simply don't exist in this flow. The fix may
+// also reference siblings the validator can't see (record-type developer
+// names on related objects, action names on standard actions, etc.), so we
+// only fire on the high-confidence cases:
+//
+//   - Backtick-and-single-quoted names like `'Foo'` must be an element,
+//     outcome, or resource defined in the metadata.
+//   - {!$Record.<Field>} must be a field on the trigger object's describe.
+//   - {!<Name>} (no $ prefix) must be a defined resource or element.
+//
+// Anything else passes — false positives here burn retries without improving
+// the answer, and "missed a real error" simply leaves us where we'd be
+// without the validator at all.
+function validateFlowFix(parsed, meta, describesByObject) {
+  if (!parsed || !meta) return { ok: true, errors: [] };
+  var pieces = [];
+  if (Array.isArray(parsed.fix)) {
+    parsed.fix.forEach(function (s) { if (typeof s === 'string') pieces.push(s); });
+  }
+  if (typeof parsed.rootCause === 'string') pieces.push(parsed.rootCause);
+  if (typeof parsed.summary === 'string') pieces.push(parsed.summary);
+  if (!pieces.length) return { ok: true, errors: [] };
+  var allText = pieces.join('\n');
+
+  var nameSets = collectFlowNames(meta);
+  var allKnown = nameSets.names;
+
+  var triggerObject = meta.start && meta.start.object;
+  var triggerFields = {};
+  if (triggerObject && describesByObject && describesByObject[triggerObject] && describesByObject[triggerObject].fields) {
+    describesByObject[triggerObject].fields.forEach(function (f) {
+      if (f && f.name) triggerFields[f.name.toLowerCase()] = f.name;
+    });
+  }
+
+  var errors = [];
+  var reportedName = {};
+  var reportedRef = {};
+
+  var elementRe = /`'([A-Za-z_][A-Za-z0-9_]*)'`/g;
+  var m;
+  while ((m = elementRe.exec(allText)) !== null) {
+    if (reportedName[m[1]]) continue;
+    reportedName[m[1]] = true;
+    if (!allKnown[m[1]]) {
+      var knownList = Object.keys(allKnown);
+      errors.push('"' + m[1] + '" is not the name of any element, outcome, or resource in this flow. Known names: ' + knownList.slice(0, 30).join(', ') + (knownList.length > 30 ? ', …' : '') + '.');
+    }
+  }
+
+  var refRe = /\{!([^}\s]+)\}/g;
+  while ((m = refRe.exec(allText)) !== null) {
+    var ref = m[1];
+    if (reportedRef[ref]) continue;
+    reportedRef[ref] = true;
+
+    if (ref.charAt(0) === '$') {
+      if (ref.indexOf('$Record.') !== 0) continue;
+      if (!triggerObject || !Object.keys(triggerFields).length) continue;
+      var fld = ref.substring('$Record.'.length).split(/[\.\[]/)[0];
+      if (!fld) continue;
+      if (!triggerFields[fld.toLowerCase()]) {
+        var availFields = Object.values(triggerFields);
+        errors.push('{!$Record.' + fld + '} does not exist on ' + triggerObject + '. Available fields include: ' + availFields.slice(0, 30).join(', ') + (availFields.length > 30 ? ', …' : '') + '.');
+      }
+      continue;
+    }
+
+    var topName = ref.split(/[\.\[]/)[0];
+    if (!allKnown[topName]) {
+      var resList = Object.keys(allKnown);
+      errors.push('{!' + topName + '} is not a defined resource or element in this flow. Defined: ' + (resList.length ? resList.slice(0, 30).join(', ') + (resList.length > 30 ? ', …' : '') : '(none)') + '.');
+    }
+  }
+
+  return { ok: errors.length === 0, errors: errors };
+}
+
+function buildFlowDebugRetryMessage(baseMessage, attempts) {
+  var lines = [baseMessage, '', 'Your previous response(s) referenced things that do not exist in this flow. Every prior attempt is rejected — do not repeat any of these mistakes:'];
+  attempts.forEach(function (a, i) {
+    lines.push('');
+    lines.push('Attempt ' + (i + 1) + ' problems:');
+    a.errors.forEach(function (e) { lines.push('  - ' + e); });
+  });
+  lines.push('');
+  lines.push('Re-emit the JSON. Every backtick-and-single-quoted name like `\'Foo\'` must match an existing element, outcome, or resource. Every {!Resource} must be a defined resource; every {!$Record.<Field>} must be a real api name on the trigger object.');
+  return lines.join('\n');
+}
+
 function buildFlowDebugSystemPrompt() {
   return [
     'You are a Salesforce Flow expert helping a consultant fix a flow in the Flow Builder UI.',
-    'You receive: (1) a compact representation of a flow\'s structure, (2) the user\'s Debug-panel output from a debug run, and (3) optionally what the user expected to happen.',
+    'You receive: (1) a compact representation of a flow\'s structure, (2) the user\'s Debug-panel output from a debug run, (3) optionally what the user expected to happen, and (4) the describe schema for every object the flow touches.',
     'Your job: identify the actual execution path, locate where the flow failed or diverged from intent, and produce a fix the consultant can apply directly in Flow Builder.',
+    '',
+    'GROUNDING — when the schema appendix is present:',
+    '- Reference only fields that appear in the schema. Do not invent fields.',
+    '- When suggesting a picklist value, use one of the values listed in the schema verbatim. If the value the flow compares to does not appear in the picklist, that mismatch itself is often the root cause.',
+    '- When pointing at a record-type filter, use a DeveloperName shown in the schema.',
     '',
     'TERMINOLOGY — your fix MUST use Flow Builder vocabulary, not programming terms:',
     '- Element types: "Decision", "Assignment", "Get Records", "Create Records", "Update Records", "Delete Records", "Loop", "Screen", "Action", "Subflow", "Pause/Wait", "Start" (the trigger element). Map metadata internals (recordLookups → "Get Records", recordUpdates → "Update Records", actionCalls → "Action", etc.).',
@@ -263,7 +486,7 @@ function buildFlowDebugSystemPrompt() {
   ].join('\n');
 }
 
-function buildFlowDebugUserMessage(flowLabel, compactFlow, debugText, expectation) {
+function buildFlowDebugUserMessage(flowLabel, compactFlow, debugText, expectation, schemaAppendix) {
   var lines = [];
   lines.push('Flow: ' + (flowLabel || '(unnamed)'));
   lines.push('');
@@ -276,8 +499,14 @@ function buildFlowDebugUserMessage(flowLabel, compactFlow, debugText, expectatio
     lines.push('');
     lines.push('User expected: ' + expectation.trim());
   }
+  if (schemaAppendix && schemaAppendix.trim()) {
+    lines.push('');
+    lines.push(schemaAppendix);
+  }
   return lines.join('\n');
 }
+
+var FLOW_DEBUG_VALIDATE_RETRIES = 2; // additional attempts after the first response
 
 async function analyzeFlowDebug(flowId, debugText, expectation) {
   if (!flowId) throw new Error('No flowId in URL');
@@ -292,14 +521,45 @@ async function analyzeFlowDebug(flowId, debugText, expectation) {
     // Managed package flows often block metadata access — carry on with debug output only
   }
 
+  var schema = { describesByObject: {}, recordTypesByObject: {} };
+  var schemaAppendix = '';
+  if (record && record.Metadata) {
+    try {
+      schema = await fetchFlowSchema(record.Metadata);
+      schemaAppendix = formatFlowSchemaAppendix(schema);
+    } catch (err) {
+      console.warn('sfnav: flow schema grounding failed —', err.message);
+    }
+  }
+
   var flowLabel = record ? record.MasterLabel : flowId.replace(/-\d+$/, '');
   var sysPrompt = buildFlowDebugSystemPrompt();
-  var userMsg = buildFlowDebugUserMessage(flowLabel, compact.text || '(flow structure unavailable — analyze based on debug output only)', debugText, expectation);
+  var baseUserMsg = buildFlowDebugUserMessage(flowLabel, compact.text || '(flow structure unavailable — analyze based on debug output only)', debugText, expectation, schemaAppendix);
 
-  var raw = await callClaude(sysPrompt, userMsg, { cacheSystem: true });
-  var parsed = parseFlowDebugResponse(raw);
+  var userMsg = baseUserMsg;
+  var attempts = [];
+  var parsed = null;
+
+  for (var attempt = 0; attempt <= FLOW_DEBUG_VALIDATE_RETRIES; attempt++) {
+    var raw = await callClaude(sysPrompt, userMsg, { cacheSystem: true });
+    parsed = parseFlowDebugResponse(raw);
+
+    var validation = validateFlowFix(parsed, record && record.Metadata, schema.describesByObject);
+    if (validation.ok) {
+      parsed.flowLabel = flowLabel;
+      parsed.truncated = compact.truncated;
+      return parsed;
+    }
+
+    attempts.push({ fix: parsed.fix, errors: validation.errors });
+    userMsg = buildFlowDebugRetryMessage(baseUserMsg, attempts);
+  }
+
+  // Exhausted retries — return the last response but surface the diagnostics
+  // so the UI (or eval harness) can flag that the model couldn't ground.
   parsed.flowLabel = flowLabel;
   parsed.truncated = compact.truncated;
+  parsed.validationErrors = attempts.length ? attempts[attempts.length - 1].errors : null;
   return parsed;
 }
 

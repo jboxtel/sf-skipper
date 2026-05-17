@@ -98,3 +98,98 @@ synthetic fixtures isolate single concepts for diagnostic purposes.
 - Custom field labels / picklist values as a primary grounding signal — current
   `soql.js` scores object api names, labels, and record-type names. Fixtures
   include the field metadata so future grounding strategies can be measured.
+
+---
+
+# Flow Debug Grounding Eval Harness
+
+Measures whether `@debug` correctly identifies the failing element in a flow
+and produces a Flow-Builder-actionable fix, given the flow's metadata, the
+debug-panel output, the user's expectation, and the describe schema for every
+object the flow touches.
+
+## Run
+
+```
+ANTHROPIC_API_KEY=sk-ant-... npm run eval:flow-debug
+# Filter to one case:
+ANTHROPIC_API_KEY=sk-ant-... node test/flow-debug-eval.js decision-equality-too-narrow
+```
+
+The harness loads `flow-debug.js` + its dependencies into a Playwright page,
+stubs the Tooling API + describe endpoints with fixture data, and routes
+`callClaude` through a real Anthropic call so the model has to ground against
+the fixture's metadata and picklist values.
+
+## Fixtures
+
+Each case is one `(flow, debug output, expectation)` triple under
+`evals/flow-debug/<case-name>/`:
+
+```
+evals/flow-debug/<case-name>/
+  meta.json                { description, signal }
+  flow.json                { Id, MasterLabel, Metadata }  — the Tooling API record
+  debug.txt                pasted Flow Builder Debug-panel output
+  expectation.txt          what the user expected (optional)
+  record-types.json        [{ SobjectType, DeveloperName, Name }] (can be [])
+  describes/
+    <ApiName>.json         describe response for each object the flow touches
+  expect.json              { summaryInclude, rootCauseInclude, fixInclude,
+                             summaryExclude, rootCauseExclude, fixExclude,
+                             fixMinSteps }
+```
+
+Each `*Include` / `*Exclude` is an array of case-insensitive regex patterns
+matched against the corresponding field of the parsed JSON response.
+
+## What each fixture tests
+
+| Fixture                              | Concept under test                                                              |
+|--------------------------------------|---------------------------------------------------------------------------------|
+| `decision-equality-too-narrow/`      | Decision `Equals` against a single picklist value; describe surfaces the real value set so the model can spot that the filter excludes obviously-matching siblings. |
+
+## Structural validator + retry
+
+`analyzeFlowDebug` runs `validateFlowFix(parsed, meta, describesByObject)` on
+the model's response and re-prompts on failure (up to two extra attempts),
+mirroring the SOQL validate-and-retry loop. The validator only fires on the
+high-confidence hallucination cases — false positives here burn retries
+without improving the answer, so it stays conservative:
+
+- Backtick-and-single-quoted names like `` `'Is_Technology'` `` must match an
+  element, outcome, or resource defined in the flow metadata. (String
+  literals must use double quotes per the system prompt convention, so this
+  pattern is reserved for names.)
+- `{!$Record.<Field>}` must be a real api name on the trigger object's
+  describe. Skipped when describe is unavailable.
+- `{!<Name>}` (no `$` prefix) must be a defined resource or element.
+  Other `$`-prefixed system refs (`$User`, `$GlobalConstant`, …) are not
+  validated.
+
+Each retry includes the **cumulative** failure context (same shape as the
+SOQL retry message) so the model cannot regress between attempts. If the
+final attempt still fails, the response carries a `validationErrors` array
+the UI can surface.
+
+## validateFlowFix unit tests
+
+```
+node test/flow-debug-validator-test.js
+```
+
+Pure unit tests for the validator — no model calls, no API key, runs in a
+second. The validator is hard to exercise via the eval (the model usually
+produces clean output for our small fixtures, so the validator stays silent),
+but a misfiring validator silently burns retries in production, so it's worth
+direct coverage. Add a case here whenever you tighten or loosen the rules.
+
+## What's not tested
+
+- Whether the suggested fix actually resolves the bug when applied. The
+  harness asserts on response structure and key references; only a human
+  (or a Salesforce simulator we don't have) can confirm the flow runs
+  correctly after applying the steps.
+- Fields referenced on non-trigger objects (e.g. an Account flow that does
+  a Get Records on Case and the fix mentions `Case.Status`). The validator
+  currently only walks `$Record.<Field>` against the trigger object.
