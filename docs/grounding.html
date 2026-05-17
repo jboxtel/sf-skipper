@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>How @soql grounding works</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --ink: #1a1d24;
+    --ink-soft: #4a4f5b;
+    --rule: #d8dde6;
+    --bg: #fafbfc;
+    --panel: #ffffff;
+    --accent: #2b6cb0;
+    --good: #2f855a;
+    --bad: #c53030;
+    --warn: #c05621;
+    --code-bg: #f3f4f7;
+  }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); }
+  body {
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 56px 28px 96px;
+  }
+  h1 {
+    font-size: 28px;
+    line-height: 1.2;
+    margin: 0 0 4px;
+    letter-spacing: -0.01em;
+  }
+  .lede {
+    font-size: 17px;
+    color: var(--ink-soft);
+    margin: 0 0 40px;
+  }
+  h2 {
+    font-size: 18px;
+    margin: 48px 0 12px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--rule);
+    letter-spacing: -0.005em;
+  }
+  h3 {
+    font-size: 15px;
+    margin: 24px 0 6px;
+    color: var(--ink);
+  }
+  p { margin: 0 0 12px; }
+  ul, ol { padding-left: 22px; margin: 0 0 12px; }
+  li { margin-bottom: 4px; }
+  code {
+    font: 13px/1.4 "SF Mono", Menlo, Consolas, monospace;
+    background: var(--code-bg);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    padding: 12px 14px;
+    overflow-x: auto;
+    font: 13px/1.5 "SF Mono", Menlo, Consolas, monospace;
+    margin: 12px 0;
+  }
+  pre code { background: none; padding: 0; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin: 16px 0;
+  }
+  .flow {
+    background: var(--panel);
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    padding: 18px 20px;
+    font: 12.5px/1.65 "SF Mono", Menlo, Consolas, monospace;
+    white-space: pre;
+    overflow-x: auto;
+    margin: 12px 0;
+  }
+  .tag {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    vertical-align: middle;
+  }
+  .tag-good { background: #e6f4ec; color: var(--good); }
+  .tag-bad  { background: #fdecec; color: var(--bad); }
+  .tag-warn { background: #fdf0e6; color: var(--warn); }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 14px;
+    margin: 8px 0 16px;
+  }
+  th, td {
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--rule);
+    vertical-align: top;
+  }
+  th { font-weight: 600; background: var(--panel); }
+  td code { white-space: nowrap; }
+  .cite { color: var(--ink-soft); font-size: 13px; }
+  .small { font-size: 13px; color: var(--ink-soft); }
+  a { color: var(--accent); }
+  hr { border: none; border-top: 1px solid var(--rule); margin: 32px 0; }
+</style>
+</head>
+<body>
+<main>
+
+<h1>How <code>@soql</code> grounding works</h1>
+<p class="lede">
+  Why "get me a cancelled flight" produces different SOQL in different orgs &mdash;
+  and which signals the model uses to figure that out.
+</p>
+
+<h2>What problem are we solving?</h2>
+<p>
+  The same natural-language prompt should produce different queries against different
+  orgs, because the same business concept gets modeled differently:
+</p>
+<ul>
+  <li>One org calls a flight a <code>Flight__c</code> custom object.</li>
+  <li>Another models it as a <code>Product2</code> record with <code>Family = 'Flight'</code>.</li>
+  <li>A third uses <code>Asset</code> with a <code>Flight_Assignment</code> record type to represent the assignment of a flight to a customer.</li>
+  <li>A Data Cloud install adds <code>Flight_Assignments__dlm</code> alongside, mirroring the operational object &mdash; same words, different system.</li>
+</ul>
+<p>
+  Claude can't guess which of those an org uses from training-data priors. The
+  answer lives in the org's metadata. <em>Grounding</em> is the act of pulling
+  the right slice of that metadata into the prompt so the model has the signal
+  it needs to pick the right object and the right fields.
+</p>
+
+<h2>What signals exist in a Salesforce org?</h2>
+<p>Five sources of grounding signal, each one HTTP call away:</p>
+<table>
+  <tr><th>Signal</th><th>API endpoint</th><th>What it gives you</th></tr>
+  <tr>
+    <td><code>describeGlobal</code></td>
+    <td><code>GET /sobjects</code></td>
+    <td>Every queryable object's api name + label + key prefix. Cheap, cached.</td>
+  </tr>
+  <tr>
+    <td>Per-object describe</td>
+    <td><code>GET /sobjects/&lt;Name&gt;/describe</code></td>
+    <td>Fields, types, references, picklist values, record-type metadata for one object. Moderately expensive per call.</td>
+  </tr>
+  <tr>
+    <td>Record types</td>
+    <td><code>SELECT FROM RecordType</code></td>
+    <td>One row per record type org-wide: <code>SobjectType</code>, <code>DeveloperName</code>, <code>Name</code>. Where business domain terms live on standard objects.</td>
+  </tr>
+  <tr>
+    <td>Custom field metadata</td>
+    <td>Tooling: <code>EntityDefinition</code> / <code>CustomField</code></td>
+    <td>Field labels + help text across the org. Heavier &mdash; thousands of rows in mature orgs.</td>
+  </tr>
+  <tr>
+    <td>Record counts</td>
+    <td><code>SELECT COUNT() FROM &lt;Name&gt;</code></td>
+    <td>Per-object usage. Tiebreaker when objects look similar &mdash; the populated one is usually the operational one.</td>
+  </tr>
+</table>
+
+<h2>What <code>@soql</code> does today</h2>
+<div class="flow">prompt: "cancelled flights with assignments"
+   |
+   v
+[1] describeGlobal (cached)              <-- only api name + label per object
+   |
+   v
+[2] Lexical scoring                       <-- tokenize prompt, regex-match
+   |                                          against each object's label
+   |                                          and api name
+   v
+[3] Top 1-3 candidates
+   |
+   v
+[4] describe + COUNT() in parallel        <-- pulls fields, picklists,
+   |                                          references, record counts
+   v
+[5] Send schema + counts to Claude
+   |
+   v
+[6] Claude returns SOQL JSON
+   |
+   v
+[7] /query?explain validates              <-- planner is ground truth;
+   |                                          on error, retry with
+   |                                          cumulative error context
+   v
+result</div>
+<p>
+  The lexical scorer at step [2] is the bottleneck. It only ever sees api names
+  and labels &mdash; nothing about record types, custom fields, picklist values,
+  or what kind of records the org actually contains.
+</p>
+
+<h2>Where the current approach breaks</h2>
+<h3><span class="tag tag-bad">FAILURE 1</span> &nbsp;Lexical lure</h3>
+<p>
+  Data Cloud objects (<code>__dlm</code>, <code>__dll</code>, <code>__cio</code>, <code>__chn</code>, &hellip;)
+  ride alongside operational objects and frequently carry labels that mirror them
+  exactly. The DMO <code>Flight_Assignments__dlm</code> labeled "Flight Assignments"
+  scores higher on the prompt "flight assignments" than the real <code>Asset</code>
+  object does &mdash; because <code>Asset</code>'s label is just "Asset".
+</p>
+<div class="panel">
+  <strong>Mitigation:</strong> the <code>feature/soql-grounding</code> branch filters
+  Data Cloud suffixes out of the candidate pool entirely. Necessary, but not
+  sufficient &mdash; see Failure 2.
+</div>
+
+<h3><span class="tag tag-bad">FAILURE 2</span> &nbsp;No lexical signal</h3>
+<p>
+  When the prompt's domain terms don't appear in any object's label or api name,
+  scoring returns zero candidates. The code falls back to a "picker" mode where
+  Claude is handed the bare list of every object's api name + label and asked to
+  pick one &mdash; no fields, no record types, no counts. Claude then guesses from
+  abstract pattern alone.
+</p>
+<p>
+  Concrete: in an aviation org where flights are <code>Product2</code> records
+  and assignments are <code>Asset</code> records, the prompt "cancelled flight
+  that has flight assignments" produces this SOQL after we filter out the DMO:
+</p>
+<pre><code>SELECT Id, OrderNumber, Status, (SELECT Id FROM OrderItems)
+FROM Order WHERE Status = 'Cancelled' LIMIT 1</code></pre>
+<p>
+  Well-formed. Wrong object. Claude pattern-matched "cancelled X with sub-items"
+  to <code>Order</code> + <code>OrderItems</code>, because that's the textbook
+  Salesforce shape and nothing in the candidate list told it otherwise.
+</p>
+
+<h2>What richer grounding looks like</h2>
+<p>
+  Three strategies, roughly in increasing cost and power. Each one surfaces a
+  different slice of the org metadata into either scoring or the prompt itself.
+</p>
+
+<h3>1. Record-type-aware scoring &nbsp;<span class="tag tag-good">cheap, broad win</span></h3>
+<p>
+  One additional SOQL query, cached for ~30 min:
+</p>
+<pre><code>SELECT SobjectType, DeveloperName, Name
+FROM RecordType
+WHERE IsActive = true</code></pre>
+<p>
+  Returns a few hundred rows at most. In the aviation fixture above, you'd get:
+</p>
+<pre><code>Asset    / Flight_Assignment / "Flight Assignment"
+Product2 / Flight            / "Flight"
+Product2 / Aircraft          / "Aircraft"
+Case     / Customer_Complaint / "Customer Complaint"
+&hellip;</code></pre>
+<p>
+  In step [2] of the flow, the scorer also iterates over record types and adds
+  their score to the parent object. "Flight" lexically attaches to
+  <code>Product2</code> + <code>Asset</code>; "flight assignment" attaches to
+  <code>Asset</code> specifically. Suddenly both real objects outscore everything
+  else, get their describes fetched, and Claude has the schema it needs.
+</p>
+<p>
+  Bonus: the relevant record-type developer names get included in the prompt's
+  schema dump, so Claude can emit
+  <code>RecordType.DeveloperName = 'Flight_Assignment'</code> as a filter.
+</p>
+
+<h3>2. Picker fallback enrichment &nbsp;<span class="tag tag-warn">additive</span></h3>
+<p>
+  Even when scoring still finds nothing, the picker fallback (step where Claude
+  picks from the bare object list) can be given richer signal &mdash; record types
+  per object, populated picklist values for a curated set of "usually
+  customized" standards (<code>Product2.Family</code>, <code>Case.Type</code>,
+  <code>Account.Industry</code>), top custom field labels per object. Same prompt,
+  better grounding, no new API calls beyond what (1) already fetched.
+</p>
+
+<h3>3. Custom field label scoring &nbsp;<span class="tag tag-warn">expensive, last-resort</span></h3>
+<p>
+  Tooling-API query against <code>EntityDefinition</code> / <code>CustomField</code>
+  for label and help-text per field across the org. Returns thousands of rows in
+  mature orgs &mdash; needs careful caching and probably a relevance filter (skip fields
+  named "Date", "Notes" etc. that have no domain content). Score field labels
+  against the prompt, propagate to their parent objects.
+</p>
+<p>
+  Best signal for orgs where the domain term lives <em>only</em> in field names
+  &mdash; e.g. <code>Product2.Flight_Number__c</code> in an org that never bothered to
+  set up a Flight record type. Add when (1) and (2) leave clear gaps.
+</p>
+
+<h2>Where validation fits in</h2>
+<p>
+  None of the above changes the validator. Step [7] of the flow &mdash; pinging
+  <code>/query?explain=&lt;soql&gt;</code> &mdash; remains the authoritative check.
+  The Salesforce planner refuses to parse invalid SOQL and returns a diagnostic
+  message, which we feed back to Claude for self-correction.
+</p>
+<p>
+  Grounding improves the <em>object choice</em> and the <em>field references</em>
+  &mdash; making the planner's "object 'Foo' is not supported" or "no such column
+  'Bar'" errors much less common. The retry loop catches what slips through.
+</p>
+
+<h2>How we measure it</h2>
+<p>
+  The eval harness in <code>test/soql-eval.js</code> reproduces arbitrary org
+  shapes from fixtures &mdash; <code>sobjects.json</code>, per-object describes,
+  counts, record types &mdash; and runs <code>generateSoql()</code> against real
+  Anthropic calls. Each fixture × prompt cell asserts on the generated SOQL
+  (object name, included/excluded patterns).
+</p>
+<p>
+  The harness is intentionally separate from the grounding work: it gives every
+  proposed strategy a number to be measured against, before and after.
+</p>
+<pre><code>ANTHROPIC_API_KEY=sk-ant-... npm run eval:soql</code></pre>
+<p class="small">
+  Current baseline against <code>main</code>: <strong>0/1 passing</strong> &mdash;
+  Data Cloud DMO wins. With the Data Cloud filter alone (<code>feature/soql-grounding</code>):
+  still <strong>0/1</strong> &mdash; Claude defaults to <code>Order</code> for lack of
+  grounding signal. Record-type scoring is the next experiment.
+</p>
+
+<hr>
+<p class="cite">
+  Sources in code: <code>soql.js</code> (scoring, candidate selection, validate loop),
+  <code>objects.js</code> (<code>getAllObjects</code>, describeGlobal caching),
+  <code>shared.js</code> (<code>sfRestPreamble</code>, <code>sfFetch</code>, <code>callClaude</code>),
+  <code>test/soql-eval.js</code> (harness), <code>test/fixtures/orgs/&lt;name&gt;/</code> (fixtures).
+</p>
+
+</main>
+</body>
+</html>

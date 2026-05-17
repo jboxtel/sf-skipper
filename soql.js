@@ -13,8 +13,66 @@ var SOQL_DESCRIBE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 var SOQL_COUNT_TTL_MS = 5 * 60 * 1000; // 5 minutes — counts drift faster than schema
 var SOQL_VALIDATE_RETRIES = 2; // additional attempts after the first generation
 
-var _describeCache = {}; // apiName → { fields, ts }
-var _countCache = {};    // apiName → { count: number|null, ts }
+var SOQL_RECORDTYPES_TTL_MS = 30 * 60 * 1000;
+
+var _describeCache = {};       // apiName → { fields, ts }
+var _countCache = {};          // apiName → { count: number|null, ts }
+var _recordTypesCache = null;  // { byObject: { apiName: [{developerName, name}] }, ts }
+var _recordTypesPromise = null; // dedupes concurrent loads
+
+// Data Cloud objects (DMOs, DLOs, CIOs, activation channels, streaming data) are
+// queryable so the planner happily validates SOQL against them, but they
+// silently shadow the standard/custom object the user actually meant — e.g.
+// "cancelled flights" matches Flight__c AND Flight_Assignments__dlm. Exclude
+// them from SOQL candidate scoring entirely.
+var DATA_CLOUD_SUFFIX_RE = /__(dlm|dll|cio|chn|sdo|dla|dlr|hdt|ssot|unified)$/i;
+function isDataCloudObject(o) {
+  return DATA_CLOUD_SUFFIX_RE.test(o.apiName);
+}
+function getSoqlObjects() {
+  return getAllObjects().filter(function (o) { return !isDataCloudObject(o); });
+}
+
+// Record types encode business-domain terms onto generic standard objects
+// (e.g. Asset gets a "Flight_Assignment" record type in an aviation org).
+// Without them, lexical scoring on object api names / labels alone can't
+// see "flight" attached to Asset or Product2. One Tooling-free SOQL call
+// surfaces every active record type org-wide; we cache it for 30 min.
+async function loadRecordTypes() {
+  if (_recordTypesCache && (Date.now() - _recordTypesCache.ts) < SOQL_RECORDTYPES_TTL_MS) {
+    return _recordTypesCache.byObject;
+  }
+  if (_recordTypesPromise) return _recordTypesPromise;
+  _recordTypesPromise = (async function () {
+    try {
+      var pre = await sfRestPreamble();
+      var q = 'SELECT SobjectType, DeveloperName, Name FROM RecordType WHERE IsActive = true';
+      var url = pre.apiBase + pre.basePath + '/query/?q=' + encodeURIComponent(q);
+      var resp = await sfFetch(url, { headers: pre.headers });
+      if (!resp.ok) throw new Error('record types fetch failed: ' + resp.status);
+      var data = await resp.json();
+      var byObject = {};
+      var records = data.records || [];
+      for (var i = 0; i < records.length; i++) {
+        var rt = records[i];
+        var s = rt.SobjectType;
+        if (!s) continue;
+        if (!byObject[s]) byObject[s] = [];
+        byObject[s].push({ developerName: rt.DeveloperName, name: rt.Name });
+      }
+      _recordTypesCache = { byObject: byObject, ts: Date.now() };
+      return byObject;
+    } finally {
+      _recordTypesPromise = null;
+    }
+  })();
+  return _recordTypesPromise;
+}
+
+function getRecordTypesFor(apiName) {
+  if (!_recordTypesCache) return [];
+  return _recordTypesCache.byObject[apiName] || [];
+}
 
 function soqlScoreObject(prompt, obj) {
   // Normalize so "e-mails" matches "email", "user's" matches "user"
@@ -51,16 +109,46 @@ function soqlScoreObject(prompt, obj) {
     score += scoreToken(tokens[j]);
   }
 
+  // Record types — score each record type's name + developer name, plus their
+  // tokens. The whole-phrase match on a multi-word record type (e.g. "flight
+  // assignment") is the most valuable signal because it pinpoints the parent
+  // object exactly.
+  var rts = getRecordTypesFor(obj.apiName);
+  for (var k = 0; k < rts.length; k++) {
+    var rtName = (rts[k].name || '').toLowerCase();
+    var rtDev = (rts[k].developerName || '').replace(/_/g, ' ').toLowerCase();
+    score += scoreToken(rtName);
+    if (rtDev && rtDev !== rtName) score += scoreToken(rtDev);
+    var rtTokens = (rtName + ' ' + rtDev).split(/\s+/).filter(function (t) { return t.length >= 4; });
+    var rtSeen = {};
+    for (var m = 0; m < rtTokens.length; m++) {
+      if (rtSeen[rtTokens[m]]) continue;
+      rtSeen[rtTokens[m]] = true;
+      score += scoreToken(rtTokens[m]);
+    }
+  }
+
   return score;
 }
 
 function pickCandidateObjects(prompt, max) {
-  var all = getAllObjects();
+  var all = getSoqlObjects();
   var scored = all
     .map(function (o) { return { obj: o, score: soqlScoreObject(prompt, o) }; })
     .filter(function (x) { return x.score > 0; })
     .sort(function (a, b) { return b.score - a.score; });
   return scored.slice(0, max || 3).map(function (x) { return x.obj; });
+}
+
+// Salesforce convention: a reference field's SOQL relationship name is
+// usually derivable from its api name. Custom `XXX__c` → `XXX__r`; standard
+// `XxxId` → `Xxx` (Account, Owner, CreatedBy, etc.). Salesforce's describe
+// response also returns `relationshipName` authoritatively; prefer that
+// when available, fall back to the derived form for fixtures.
+function deriveRelationshipName(fieldName) {
+  if (/__c$/.test(fieldName)) return fieldName.replace(/__c$/, '__r');
+  if (/Id$/.test(fieldName) && fieldName.length > 2) return fieldName.slice(0, -2);
+  return null;
 }
 
 async function fetchDescribe(apiName) {
@@ -77,7 +165,11 @@ async function fetchDescribe(apiName) {
 
   var fields = (data.fields || []).map(function (f) {
     var compact = { name: f.name, label: f.label, type: f.type };
-    if (f.referenceTo && f.referenceTo.length) compact.referenceTo = f.referenceTo;
+    if (f.referenceTo && f.referenceTo.length) {
+      compact.referenceTo = f.referenceTo;
+      var rel = f.relationshipName || deriveRelationshipName(f.name);
+      if (rel) compact.relationshipName = rel;
+    }
     if (f.picklistValues && f.picklistValues.length) {
       compact.values = f.picklistValues.slice(0, 50).map(function (v) { return v.value; });
     }
@@ -124,12 +216,17 @@ function buildSystemPrompt() {
     'For picklist filters, use the exact picklist value if provided; otherwise a sensible literal in single quotes.',
     '',
     'Grammar invariants (these are the things the planner does not explain well):',
+    '- SOQL has NO JOIN keyword. For parent-with-children, use a child subquery inside the SELECT list: SELECT Id, (SELECT Id FROM ChildRelationshipName) FROM Parent. For filtering a parent by child existence, use a semi-join: SELECT Id FROM Parent WHERE Id IN (SELECT ForeignKeyId FROM Child WHERE ...).',
+    '- For a reference field <Name>__c (custom) or <Name>Id (standard), dot-walk to fields on the referenced object via the relationship name shown in the schema (typically <Name>__r for custom, the field name without "Id" for standard — Account, Owner, CreatedBy, etc.). Example: ClaimLineItem__c.AffectedFlight__r.RevenueEUR__c.',
+    '- When the prompt asks "which X have/did Y" or "X with Y", the answer object is X — return rows of X, not raw foreign-key IDs from the child table.',
     '- SOQL date functions (DAY_IN_WEEK, DAY_IN_MONTH, CALENDAR_YEAR, HOUR_IN_DAY, FISCAL_QUARTER, etc.) return INTEGERS. Compare them to integer literals only — never to another function, never to a name like FRIDAY. (DAY_IN_WEEK: 1=Sun ... 6=Fri ... 7=Sat. HOUR_IN_DAY: 0-23.)',
     '- The valid SOQL date-literal tokens are limited: TODAY, YESTERDAY, TOMORROW, THIS/LAST/NEXT_WEEK, THIS/LAST/NEXT_MONTH, THIS/LAST/NEXT_QUARTER, THIS/LAST/NEXT_YEAR, THIS/LAST/NEXT_FISCAL_QUARTER, THIS/LAST/NEXT_FISCAL_YEAR, LAST_90_DAYS, NEXT_90_DAYS, and the LAST_N_*/NEXT_N_* family (e.g. LAST_N_DAYS:7). There are NO day-of-week literals (no LAST_FRIDAY) and NO time-of-day literals. Use bare tokens, no quotes.',
     '- Absolute datetimes are unquoted ISO-8601 with timezone: 2024-01-15T18:00:00Z.',
     '- Booleans compare unquoted (HasAttachment = true).',
     '',
-    'Semantic preference: for "emails with attachments", use EmailMessage with HasAttachment = true rather than the legacy Attachment object.',
+    'Semantic preferences:',
+    '- For "emails with attachments", use EmailMessage with HasAttachment = true rather than the legacy Attachment object.',
+    '- When a prompt mentions a noun that matches one value of a picklist (e.g. "cards" → Type__c picklist with values [Card, Voucher]), add an explicit filter on that picklist value (Type__c = \'Card\').',
     '',
     'If previous attempts and Salesforce errors are included, the errors are authoritative AND cumulative — every prior attempt failed, so do not repeat any of their approaches. Emit a query that avoids every listed mistake.',
     '',
@@ -154,12 +251,22 @@ function buildUserMessage(prompt, schemaObjects) {
     var o = schemaObjects[i];
     var header = 'Object: ' + o.apiName + (o.label ? ' (' + o.label + ')' : '');
     if (typeof o.count === 'number') header += ' — ' + o.count.toLocaleString('en-US') + ' records';
+    if (o.contextOnly) header += ' [lookup target — use for dot-walks; usually NOT the FROM target]';
     lines.push(header);
+    if (o.recordTypes && o.recordTypes.length) {
+      var rtSummary = o.recordTypes.map(function (rt) {
+        return rt.developerName + (rt.name && rt.name !== rt.developerName ? ' ("' + rt.name + '")' : '');
+      }).join(', ');
+      lines.push('  Record types: ' + rtSummary + '  — filter with RecordType.DeveloperName = \'<DeveloperName>\'');
+    }
     if (o.fields) {
       for (var j = 0; j < o.fields.length; j++) {
         var f = o.fields[j];
         var meta = f.type;
-        if (f.referenceTo) meta += ' → ' + f.referenceTo.join('|');
+        if (f.referenceTo) {
+          meta += ' → ' + f.referenceTo.join('|');
+          if (f.relationshipName) meta += ' [dot-walk: ' + f.relationshipName + '.<field>]';
+        }
         if (f.values) meta += ' [' + f.values.join(',') + ']';
         lines.push('  - ' + f.name + ' : ' + meta + (f.label && f.label !== f.name ? ' (' + f.label + ')' : ''));
       }
@@ -169,13 +276,18 @@ function buildUserMessage(prompt, schemaObjects) {
 }
 
 function buildObjectListMessage(prompt) {
-  var all = getAllObjects();
+  var all = getSoqlObjects();
   var lines = [];
   lines.push('User request: ' + prompt);
   lines.push('');
-  lines.push('I could not match an object from the prompt. Pick the most likely object from this list and reply ONLY with its api name (no JSON, no prose):');
+  lines.push('I could not match an object from the prompt. Pick the most likely object from this list and reply ONLY with its api name (no JSON, no prose). Record types on a generic standard object often encode the real business concept — treat them as a strong signal.');
   for (var i = 0; i < all.length; i++) {
-    lines.push('- ' + all[i].apiName + (all[i].label && all[i].label !== all[i].apiName ? ' (' + all[i].label + ')' : ''));
+    var rts = getRecordTypesFor(all[i].apiName);
+    var line = '- ' + all[i].apiName + (all[i].label && all[i].label !== all[i].apiName ? ' (' + all[i].label + ')' : '');
+    if (rts.length) {
+      line += '  [record types: ' + rts.map(function (r) { return r.name || r.developerName; }).join(', ') + ']';
+    }
+    lines.push(line);
   }
   return lines.join('\n');
 }
@@ -232,8 +344,33 @@ function buildRetryUserMessage(baseMessage, attempts) {
   return lines.join('\n');
 }
 
+// Picker responses are often noisy — Claude may wrap the api name in
+// punctuation, backticks, a sentence, or pick a name with a typo'd
+// case. Scan the response for any known object api name (word-boundary,
+// case-insensitive). Longer names win on ambiguity so Flight_Assignment__c
+// is preferred over Flight__c when both appear.
+function resolvePickedObject(pickerText) {
+  if (!pickerText) return null;
+  var all = getSoqlObjects();
+  var sorted = all.slice().sort(function (a, b) { return b.apiName.length - a.apiName.length; });
+  for (var i = 0; i < sorted.length; i++) {
+    var escaped = sorted[i].apiName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    var re = new RegExp('\\b' + escaped + '\\b', 'i');
+    if (re.test(pickerText)) return sorted[i];
+  }
+  return null;
+}
+
 async function generateSoql(prompt) {
   if (!prompt || !prompt.trim()) throw new Error('Empty prompt');
+
+  // Load record types first so scoring + the picker fallback both see them.
+  // Failure is non-fatal — degrades to label-only scoring.
+  try {
+    await loadRecordTypes();
+  } catch (err) {
+    console.warn('sfnav: record types load failed —', err.message);
+  }
 
   var candidates = pickCandidateObjects(prompt, 3);
 
@@ -243,9 +380,10 @@ async function generateSoql(prompt) {
       'You map natural-language requests to a single Salesforce object api name. Reply with ONLY the api name, nothing else.',
       buildObjectListMessage(prompt)
     );
-    var chosen = pickerText.trim().split(/\s+/)[0].replace(/[`'"]/g, '');
-    var match = getAllObjects().find(function (o) { return o.apiName === chosen; });
-    if (!match) throw new Error('Could not identify object for this prompt');
+    var match = resolvePickedObject(pickerText);
+    if (!match) {
+      throw new Error('Picker could not identify a known object. Response: ' + pickerText.slice(0, 200));
+    }
     candidates = [match];
   }
 
@@ -253,7 +391,13 @@ async function generateSoql(prompt) {
   // Counts give Claude an org-grounded signal for picking between near-synonym
   // objects (e.g. Attachment vs EmailMessage, Note vs ContentNote).
   var schemaObjects = await Promise.all(candidates.map(async function (obj) {
-    var result = { apiName: obj.apiName, label: obj.label, fields: null, count: null };
+    var result = {
+      apiName: obj.apiName,
+      label: obj.label,
+      fields: null,
+      count: null,
+      recordTypes: getRecordTypesFor(obj.apiName)
+    };
     var describePromise = fetchDescribe(obj.apiName).then(
       function (fields) { result.fields = fields; },
       function (err) { console.warn('sfnav: describe failed for', obj.apiName, err.message); }
@@ -265,6 +409,45 @@ async function generateSoql(prompt) {
     await Promise.all([describePromise, countPromise]);
     return result;
   }));
+
+  // Lookup-chain grounding: scan candidates' reference fields and fetch describes
+  // for their lookup targets too, so dot-walks like AffectedFlight__r.RevenueEUR__c
+  // have the parent object's schema in context even when that parent didn't score
+  // independently. Capped to avoid context explosion.
+  var SOQL_MAX_RELATED = 3;
+  var schemaNames = {};
+  schemaObjects.forEach(function (o) { schemaNames[o.apiName] = true; });
+  var allObjects = getSoqlObjects();
+  var nameToObj = {};
+  allObjects.forEach(function (o) { nameToObj[o.apiName] = o; });
+  var relatedQueue = [];
+  schemaObjects.forEach(function (so) {
+    (so.fields || []).forEach(function (f) {
+      (f.referenceTo || []).forEach(function (rn) {
+        if (schemaNames[rn]) return;
+        if (!nameToObj[rn]) return;
+        if (relatedQueue.some(function (q) { return q.apiName === rn; })) return;
+        relatedQueue.push(nameToObj[rn]);
+      });
+    });
+  });
+  var related = relatedQueue.slice(0, SOQL_MAX_RELATED);
+  if (related.length) {
+    var relatedSchemas = await Promise.all(related.map(async function (obj) {
+      var result = {
+        apiName: obj.apiName,
+        label: obj.label,
+        fields: null,
+        count: null,
+        recordTypes: getRecordTypesFor(obj.apiName),
+        contextOnly: true
+      };
+      try { result.fields = await fetchDescribe(obj.apiName); }
+      catch (err) { console.warn('sfnav: related describe failed for', obj.apiName, err.message); }
+      return result;
+    }));
+    schemaObjects = schemaObjects.concat(relatedSchemas);
+  }
 
   var systemPrompt = buildSystemPrompt();
   var baseUserMessage = buildUserMessage(prompt, schemaObjects);
