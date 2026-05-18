@@ -371,35 +371,28 @@ function resolvePickedObject(pickerText) {
   return null;
 }
 
-async function generateSoql(prompt, onProgress) {
-  if (!prompt || !prompt.trim()) throw new Error('Empty prompt');
-  var notify = typeof onProgress === 'function' ? onProgress : function () {};
-
-  notify('Reading record types');
-  try {
-    await loadRecordTypes();
-  } catch (err) {
-    console.warn('sfnav: record types load failed —', err.message);
+async function pickObjectFromFullList(prompt, excludeApiNames) {
+  var excludeNote = '';
+  if (excludeApiNames && excludeApiNames.length) {
+    excludeNote = '\n\nThe following lexically-matching objects are empty in this org and MUST NOT be picked: '
+      + excludeApiNames.join(', ') + '. Pick a different object that is likely to hold the records.';
   }
-
-  var candidates = pickCandidateObjects(prompt, 3);
-
-  // No heuristic match — ask the model to pick from the object list, then re-run with that schema
-  if (candidates.length === 0) {
-    notify('Picking object');
-    var pickerText = await callClaude(
-      'You map natural-language requests to a single Salesforce object api name. Reply with ONLY the api name, nothing else.',
-      buildObjectListMessage(prompt)
-    );
-    var match = resolvePickedObject(pickerText);
-    if (!match) {
-      throw new Error('Picker could not identify a known object. Response: ' + pickerText.slice(0, 200));
-    }
-    candidates = [match];
+  var pickerText = await callClaude(
+    'You map natural-language requests to a single Salesforce object api name. Reply with ONLY the api name, nothing else.',
+    buildObjectListMessage(prompt) + excludeNote
+  );
+  var match = resolvePickedObject(pickerText);
+  if (!match) {
+    throw new Error('Picker could not identify a known object. Response: ' + pickerText.slice(0, 200));
   }
+  if (excludeApiNames && excludeApiNames.indexOf(match.apiName) !== -1) {
+    throw new Error('Picker re-selected an empty object (' + match.apiName + '). Response: ' + pickerText.slice(0, 200));
+  }
+  return match;
+}
 
-  notify('Reading schema for ' + candidates.map(function (c) { return c.apiName; }).join(', '));
-  var schemaObjects = await Promise.all(candidates.map(async function (obj) {
+async function fetchCandidateSchema(candidates) {
+  return Promise.all(candidates.map(async function (obj) {
     var result = {
       apiName: obj.apiName,
       label: obj.label,
@@ -418,6 +411,47 @@ async function generateSoql(prompt, onProgress) {
     await Promise.all([describePromise, countPromise]);
     return result;
   }));
+}
+
+async function generateSoql(prompt, onProgress) {
+  if (!prompt || !prompt.trim()) throw new Error('Empty prompt');
+  var notify = typeof onProgress === 'function' ? onProgress : function () {};
+
+  notify('Reading record types');
+  try {
+    await loadRecordTypes();
+  } catch (err) {
+    console.warn('sfnav: record types load failed —', err.message);
+  }
+
+  var candidates = pickCandidateObjects(prompt, 3);
+
+  // No heuristic match — ask the model to pick from the object list, then re-run with that schema
+  if (candidates.length === 0) {
+    notify('Picking object');
+    candidates = [await pickObjectFromFullList(prompt, null)];
+  }
+
+  notify('Reading schema for ' + candidates.map(function (c) { return c.apiName; }).join(', '));
+  var schemaObjects = await fetchCandidateSchema(candidates);
+
+  // Drop candidates the org isn't actually using. count === 0 is a strong
+  // org-data signal that the lexical match is the wrong object (e.g. an
+  // abandoned Flight__c shadowing the real data on Product2 in this org).
+  // count === null means the count query failed (formula-only object, perm
+  // issue) — keep those, can't distinguish "unused" from "unmeasurable".
+  var emptyApiNames = schemaObjects.filter(function (o) { return o.count === 0; }).map(function (o) { return o.apiName; });
+  var nonEmpty = schemaObjects.filter(function (o) { return o.count !== 0; });
+  if (nonEmpty.length === 0) {
+    notify('Candidates empty in this org; picking from full list');
+    var replacement = await pickObjectFromFullList(prompt, emptyApiNames);
+    candidates = [replacement];
+    notify('Reading schema for ' + replacement.apiName);
+    schemaObjects = await fetchCandidateSchema(candidates);
+  } else if (emptyApiNames.length) {
+    notify('Skipping empty: ' + emptyApiNames.join(', '));
+    schemaObjects = nonEmpty;
+  }
 
   // Lookup-chain grounding: scan candidates' reference fields and fetch describes
   // for their lookup targets too, so dot-walks like AffectedFlight__r.RevenueEUR__c

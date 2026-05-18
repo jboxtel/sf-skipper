@@ -133,7 +133,7 @@
             '<button class="sfnav-ask-copy">Copy answer</button>' +
           '</div>' +
         '</div>' +
-        '<div id="sfnav-footer"><span id="sfnav-brand">Skipper For Salesforce</span><span id="sfnav-footer-hints"></span></div>' +
+        '<div id="sfnav-footer"><span id="sfnav-brand">Skipper For Salesforce<span id="sfnav-brand-help">help</span></span><span id="sfnav-footer-hints"></span></div>' +
       '</div>';
 
     document.body.appendChild(overlay);
@@ -982,6 +982,9 @@
     input.focus();
   }
 
+  // Lets onboarding.js read live shortcut metadata for the cheat sheet.
+  window.__sfnavGetShortcuts = function () { return SHORTCUTS.slice(); };
+
   function hideSoqlPanel() {
     var soqlEl = document.getElementById('sfnav-soql');
     if (soqlEl) soqlEl.style.display = 'none';
@@ -996,6 +999,7 @@
   function hidePalette() {
     var overlay = document.getElementById('sfnav-overlay');
     if (overlay) overlay.style.display = 'none';
+    if (typeof sfnavHideOnboarding === 'function') sfnavHideOnboarding();
     paletteVisible = false;
     selectedIndex = -1;
     searchMode = 'root';
@@ -1051,6 +1055,7 @@
 
       if (result.disabled) {
         li.className = 'sfnav-item sfnav-disabled';
+        if (result.keyword) li.dataset.shortcut = result.keyword;
         li.innerHTML =
           '<span class="sfnav-label">'   + esc(result.label)             + '</span>' +
           '<span class="sfnav-sublabel">'+ esc(result.sublabel || '')    + '</span>' +
@@ -1063,6 +1068,7 @@
       var isSelected = selectableIndex === selectedIndex;
       li.className = 'sfnav-item' + (isSelected ? ' selected' : '');
       li.dataset.url = result.url;
+      if (result.keyword) li.dataset.shortcut = result.keyword;
 
       // Objects in picker mode get a ›  indicator to show they expand
       var shortcutLabel = (result.type === 'object' || result.type === 'cmdt') ? '›' : '↵';
