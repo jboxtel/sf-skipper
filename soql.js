@@ -10,7 +10,8 @@
 var SOQL_HISTORY_KEY = 'sfnavSoqlHistory';
 var SOQL_HISTORY_MAX = 10;
 var SOQL_DESCRIBE_TTL_MS = 30 * 60 * 1000; // 30 minutes
-var SOQL_COUNT_TTL_MS = 5 * 60 * 1000; // 5 minutes — counts drift faster than schema
+var SOQL_COUNT_TTL_MS = 30 * 60 * 1000;    // 30 minutes — grounding signal is magnitude, not exact value
+var SOQL_COUNT_LIMIT = 1000;               // sample cap: cheaper than COUNT() on large orgs; magnitude is enough to tiebreak
 var SOQL_VALIDATE_RETRIES = 2; // additional attempts after the first generation
 
 var SOQL_RECORDTYPES_TTL_MS = 30 * 60 * 1000;
@@ -181,18 +182,22 @@ async function fetchDescribe(apiName) {
   return fields;
 }
 
-// Record count for an object. Used to bias the model toward the object the org
+// Sampled record count. Used to bias the model toward the object the org
 // actually uses when lexical candidates collide (e.g. Attachment vs EmailMessage
-// for "emails with attachments"). Returns null if the object isn't countable —
-// some sobjects reject COUNT() (formula-only, non-queryable, etc.) and we'd
-// rather omit the field than block generation.
+// for "emails with attachments"). We only need magnitude to break the tie —
+// `SELECT Id FROM X LIMIT N` stops at the first N rows it finds via any index,
+// so it's roughly O(N) instead of O(table size). A saturated result (count ===
+// SOQL_COUNT_LIMIT) means "lots" rather than "exactly N". Returns null if the
+// object isn't queryable (formula-only, etc.) so we omit the field instead of
+// blocking generation.
 async function fetchCount(apiName) {
   var cached = _countCache[apiName];
   if (cached && (Date.now() - cached.ts) < SOQL_COUNT_TTL_MS) {
     return cached.count;
   }
   var pre = await sfRestPreamble();
-  var url = pre.apiBase + pre.basePath + '/query/?q=' + encodeURIComponent('SELECT COUNT() FROM ' + apiName);
+  var soql = 'SELECT Id FROM ' + apiName + ' LIMIT ' + SOQL_COUNT_LIMIT;
+  var url = pre.apiBase + pre.basePath + '/query/?q=' + encodeURIComponent(soql);
   var resp = await sfFetch(url, { headers: pre.headers });
   var count = null;
   if (resp.ok) {
@@ -250,7 +255,12 @@ function buildUserMessage(prompt, schemaObjects) {
   for (var i = 0; i < schemaObjects.length; i++) {
     var o = schemaObjects[i];
     var header = 'Object: ' + o.apiName + (o.label ? ' (' + o.label + ')' : '');
-    if (typeof o.count === 'number') header += ' — ' + o.count.toLocaleString('en-US') + ' records';
+    if (typeof o.count === 'number') {
+      var countText = o.count >= SOQL_COUNT_LIMIT
+        ? SOQL_COUNT_LIMIT.toLocaleString('en-US') + '+ records'
+        : o.count.toLocaleString('en-US') + ' records';
+      header += ' — ' + countText;
+    }
     if (o.contextOnly) header += ' [lookup target — use for dot-walks; usually NOT the FROM target]';
     lines.push(header);
     if (o.recordTypes && o.recordTypes.length) {
@@ -361,11 +371,11 @@ function resolvePickedObject(pickerText) {
   return null;
 }
 
-async function generateSoql(prompt) {
+async function generateSoql(prompt, onProgress) {
   if (!prompt || !prompt.trim()) throw new Error('Empty prompt');
+  var notify = typeof onProgress === 'function' ? onProgress : function () {};
 
-  // Load record types first so scoring + the picker fallback both see them.
-  // Failure is non-fatal — degrades to label-only scoring.
+  notify('Reading record types');
   try {
     await loadRecordTypes();
   } catch (err) {
@@ -376,6 +386,7 @@ async function generateSoql(prompt) {
 
   // No heuristic match — ask the model to pick from the object list, then re-run with that schema
   if (candidates.length === 0) {
+    notify('Picking object');
     var pickerText = await callClaude(
       'You map natural-language requests to a single Salesforce object api name. Reply with ONLY the api name, nothing else.',
       buildObjectListMessage(prompt)
@@ -387,9 +398,7 @@ async function generateSoql(prompt) {
     candidates = [match];
   }
 
-  // Fetch describes + record counts in parallel — degrade gracefully if some fail.
-  // Counts give Claude an org-grounded signal for picking between near-synonym
-  // objects (e.g. Attachment vs EmailMessage, Note vs ContentNote).
+  notify('Reading schema for ' + candidates.map(function (c) { return c.apiName; }).join(', '));
   var schemaObjects = await Promise.all(candidates.map(async function (obj) {
     var result = {
       apiName: obj.apiName,
@@ -433,6 +442,7 @@ async function generateSoql(prompt) {
   });
   var related = relatedQueue.slice(0, SOQL_MAX_RELATED);
   if (related.length) {
+    notify('Reading related schema for ' + related.map(function (c) { return c.apiName; }).join(', '));
     var relatedSchemas = await Promise.all(related.map(async function (obj) {
       var result = {
         apiName: obj.apiName,
@@ -456,10 +466,12 @@ async function generateSoql(prompt) {
   var lastParsed = null;
 
   for (var attempt = 0; attempt <= SOQL_VALIDATE_RETRIES; attempt++) {
+    notify(attempt === 0 ? 'Writing query' : 'Retrying (attempt ' + (attempt + 1) + ')');
     var text = await callClaude(systemPrompt, userMessage);
     var parsed = parseSoqlResponse(text);
     lastParsed = parsed;
 
+    notify('Validating');
     var validation;
     try {
       validation = await validateSoql(parsed.soql);
