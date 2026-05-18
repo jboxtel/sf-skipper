@@ -271,14 +271,14 @@
 .sfnav-soql-status-ok      { color: var(--sf-success) !important; }
 .sfnav-soql-status-error   { color: var(--sf-error) !important; }
 
-.sfnav-soql-status-progress::after {
+.sfnav-progress-dots::after {
   content: '';
   display: inline-block;
   width: 0.6em;
   text-align: left;
-  animation: sfnav-soql-dots 1.4s steps(4, end) infinite;
+  animation: sfnav-progress-dots 1.4s steps(4, end) infinite;
 }
-@keyframes sfnav-soql-dots {
+@keyframes sfnav-progress-dots {
   0%   { content: ''; }
   25%  { content: '.'; }
   50%  { content: '..'; }

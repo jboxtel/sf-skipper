@@ -390,7 +390,7 @@
     soqlInFlight = true;
     input.disabled = true;
     statusEl.textContent = 'Generating';
-    statusEl.className = 'sfnav-soql-status-loading sfnav-soql-status-progress';
+    statusEl.className = 'sfnav-soql-status-loading sfnav-progress-dots';
     outputEl.textContent = '';
     actionsEl.style.display = 'none';
 
@@ -656,8 +656,8 @@
     runBtn.disabled = true;
     debugEl.disabled = true;
     expEl.disabled = true;
-    statusEl.textContent = 'Fetching flow + analyzing…';
-    statusEl.className = 'sfnav-flowdebug-status-loading';
+    statusEl.textContent = 'Fetching flow + analyzing';
+    statusEl.className = 'sfnav-flowdebug-status-loading sfnav-progress-dots';
     outputEl.style.display = 'none';
 
     try {
@@ -823,8 +823,8 @@
     askInFlight = true;
     runBtn.disabled = true;
     qEl.disabled = true;
-    statusEl.textContent = 'Capturing screen + loading record…';
-    statusEl.className = 'sfnav-ask-status-loading';
+    statusEl.textContent = 'Capturing screen + loading record';
+    statusEl.className = 'sfnav-ask-status-loading sfnav-progress-dots';
     outputEl.style.display = 'none';
 
     // Hide the palette so it doesn't end up in the screenshot. We restore it as
@@ -855,13 +855,13 @@
           var ctx = event.ctx;
           if (ctx && ctx.recordFields) {
             var n = Object.keys(ctx.recordFields).length;
-            statusEl.textContent = 'Asking Claude (sent ' + n + ' record fields)…';
+            statusEl.textContent = 'Asking Claude (sent ' + n + ' record fields)';
           } else {
-            statusEl.textContent = 'Asking Claude…';
+            statusEl.textContent = 'Asking Claude';
           }
         } else if (event.kind === 'tool_call') {
           appendAskActivity(activityEl, event);
-          statusEl.textContent = 'Claude is investigating…';
+          statusEl.textContent = 'Claude is investigating';
         } else if (event.kind === 'tool_result') {
           updateLastAskActivity(activityEl, event);
         } else if (event.kind === 'interim_text') {
