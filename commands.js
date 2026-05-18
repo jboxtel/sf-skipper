@@ -100,17 +100,28 @@ function toSubPageResult(page, object) {
 // picker). `disabledHint` covers the @debug case that depends on the active
 // page.
 var SHORTCUTS = [
-  { id: 'object',     aliases: 'object objects',         label: '@object',   sublabel: 'All standard & custom objects', group: 'browse',      hint: 'Press Enter to browse all objects' },
-  { id: 'flow',       aliases: 'flow flows',             label: '@flow',     sublabel: 'All org flows',                 group: 'browse',      hint: 'Press Enter to browse all flows' },
-  { id: 'app',        aliases: 'app apps',               label: '@app',      sublabel: 'All installed Lightning apps',  group: 'browse',      hint: 'Press Enter to browse Lightning apps' },
-  { id: 'cmd',        aliases: 'cmd cmdt mdt',           label: '@cmd',      sublabel: 'Custom metadata types',         group: 'browse',      hint: 'Press Enter to browse custom metadata types' },
-  { id: 'label',      aliases: 'label labels',           label: '@label',    sublabel: 'Custom labels',                 group: 'browse',      hint: 'Press Enter to browse custom labels' },
-  { id: 'permset',    aliases: 'permset permsets ps',    label: '@permset',  sublabel: 'Permission sets',               group: 'browse',      hint: 'Press Enter to browse permission sets' },
-  { id: 'setup',      aliases: 'setup',                  label: '@setup',    sublabel: 'All setup quick links',         group: 'browse',      hint: 'Press Enter to browse all setup pages' },
-  { id: 'ask',        aliases: 'ask',                    label: '@ask',      sublabel: 'Ask Claude about this screen',  group: 'ai',          action: 'ask',            hint: 'Press Enter to ask Claude about this screen' },
-  { id: 'soql',       aliases: 'soql',                   label: '@soql',     sublabel: 'Ask a data question',           group: 'ai',          action: 'soql-generator', hint: 'Press Enter to open the SOQL generator' },
-  { id: 'flow-debug', aliases: 'debug flow-debug',       label: '@debug',    sublabel: 'Analyze a flow with Claude',    group: 'ai',          action: 'flow-debug',     hint: 'Press Enter to debug this flow', disabledHint: 'Open a flow first — then press Enter to debug it', disabledSublabel: 'Open a flow first' },
-  { id: 'refresh',    aliases: 'refresh reload',         label: '@refresh',  sublabel: 'Reload cached metadata',        group: 'maintenance', action: 'refresh',        hint: 'Press Enter to refresh the flow + object caches' }
+  { id: 'object',     aliases: 'object objects',         label: '@object',   sublabel: 'All standard & custom objects', group: 'browse',      hint: 'Press Enter to browse all objects',
+    tipTitle: 'Navigate with @object',    tipBody: 'Browse standard and custom objects, drill into fields, layouts, validation rules.', tipExample: '@object Case' },
+  { id: 'flow',       aliases: 'flow flows',             label: '@flow',     sublabel: 'All org flows',                 group: 'browse',      hint: 'Press Enter to browse all flows',
+    tipTitle: 'Navigate with @flow',      tipBody: 'Find any flow in the org by name. Opens straight in Flow Builder.',                  tipExample: '@flow Account Before Save' },
+  { id: 'app',        aliases: 'app apps',               label: '@app',      sublabel: 'All installed Lightning apps',  group: 'browse',      hint: 'Press Enter to browse Lightning apps',
+    tipTitle: 'Navigate with @app',       tipBody: 'Switch Lightning apps without going through the App Launcher.',                       tipExample: '@app sales console' },
+  { id: 'cmd',        aliases: 'cmd cmdt mdt',           label: '@cmd',      sublabel: 'Custom metadata types',         group: 'browse',      hint: 'Press Enter to browse custom metadata types',
+    tipTitle: 'Navigate with @cmd',       tipBody: 'Open a custom metadata type — Manage Records or Object Definition.',                  tipExample: '@cmd AWS Mapping' },
+  { id: 'label',      aliases: 'label labels',           label: '@label',    sublabel: 'Custom labels',                 group: 'browse',      hint: 'Press Enter to browse custom labels',
+    tipTitle: 'Navigate with @label',     tipBody: 'Search custom labels by name or translated value.',                                  tipExample: '@label welcome message' },
+  { id: 'permset',    aliases: 'permset permsets ps',    label: '@permset',  sublabel: 'Permission sets',               group: 'browse',      hint: 'Press Enter to browse permission sets',
+    tipTitle: 'Navigate with @permset',   tipBody: 'Open any permission set in the org by name.',                                        tipExample: '@permset salesforce admin' },
+  { id: 'setup',      aliases: 'setup',                  label: '@setup',    sublabel: 'All setup quick links',         group: 'browse',      hint: 'Press Enter to browse all setup pages',
+    tipTitle: 'Navigate with @setup',     tipBody: 'Search every Setup page directly — no menu clicking.',                               tipExample: '@setup failed flow interviews' },
+  { id: 'ask',        aliases: 'ask',                    label: '@ask',      sublabel: 'Ask Claude about this screen',  group: 'ai',          action: 'ask',            hint: 'Press Enter to ask Claude about this screen',
+    tipTitle: '@ask — Ask about this page', tipBody: 'Captures a screenshot and sends it to Claude alongside your question.',           tipExample: '@ask why is this validation rule failing?' },
+  { id: 'soql',       aliases: 'soql',                   label: '@soql',     sublabel: 'Ask a data question',           group: 'ai',          action: 'soql-generator', hint: 'Press Enter to open the SOQL generator',
+    tipTitle: '@soql — SOQL from plain English', tipBody: 'Describe your query in natural language. Requires Anthropic API key.',       tipExample: '@soql accounts with no opportunity\n  in the last 6 months' },
+  { id: 'flow-debug', aliases: 'debug flow-debug',       label: '@debug',    sublabel: 'Analyze a flow with Claude',    group: 'ai',          action: 'flow-debug',     hint: 'Press Enter to debug this flow', disabledHint: 'Open a flow first — then press Enter to debug it', disabledSublabel: 'Open a flow first',
+    tipTitle: '@debug — Diagnose flow errors', tipBody: 'From Flow Builder after a debug run. Paste the debug log; Claude finds the root cause.', tipExample: '@debug\n[paste full debug log]' },
+  { id: 'refresh',    aliases: 'refresh reload',         label: '@refresh',  sublabel: 'Reload cached metadata',        group: 'maintenance', action: 'refresh',        hint: 'Press Enter to refresh the flow + object caches',
+    tipTitle: '@refresh',                 tipBody: 'Reload the flow, object, app, label and permission set caches.',                    tipExample: '@refresh' }
 ];
 
 function sfnavFindShortcut(value) {

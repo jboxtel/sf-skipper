@@ -222,21 +222,29 @@ chrome.runtime.onMessage.addListener(function (req, sender, sendResponse) {
     sendResponse({ ok: true });
     return false;
   }
+  if (req.type === 'openPalette') {
+    const resolveTab = req.tabId
+      ? new Promise((resolve) => chrome.tabs.get(req.tabId, (t) => resolve(chrome.runtime.lastError ? null : t)))
+      : Promise.resolve(null);
+    resolveTab.then((tab) => openPaletteInTab(tab)).then(
+      (status) => sendResponse({ ok: true, status }),
+      (err) => sendResponse({ ok: false, error: err && err.message })
+    );
+    return true;
+  }
   sendResponse({ ok: false, error: 'Unknown message type: ' + req.type });
   return false;
 });
 
 const SF_HOST_RE = /^https:\/\/[^/]+\.(lightning\.force\.com|salesforce\.com|salesforce-setup\.com|force\.com)\//;
 
-chrome.commands.onCommand.addListener(async (command, tab) => {
-  if (command !== 'open-palette') return;
-
+async function openPaletteInTab(tab) {
   if (!tab) {
     const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
     tab = tabs[0];
   }
-  if (!tab) return;
-  if (!tab.url || !SF_HOST_RE.test(tab.url)) return;
+  if (!tab) return 'no_tab';
+  if (!tab.url || !SF_HOST_RE.test(tab.url)) return 'not_salesforce';
 
   try {
     const [{ result }] = await chrome.scripting.executeScript({
@@ -251,13 +259,13 @@ chrome.commands.onCommand.addListener(async (command, tab) => {
       },
     });
 
-    if (result === 'ok') return;
+    if (result === 'ok') return 'toggled';
 
     await chrome.scripting.insertCSS({ target: { tabId: tab.id }, files: ['content.css'] });
     await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       world: 'ISOLATED',
-      files: ['salesforce-urls.js', 'shared.js', 'cache-factory.js', 'objects.js', 'cmdt.js', 'flows.js', 'apps.js', 'labels.js', 'permsets.js', 'flow-debug.js', 'commands.js', 'soql.js', 'ask.js', 'markdown.js', 'content.js'],
+      files: ['salesforce-urls.js', 'shared.js', 'cache-factory.js', 'objects.js', 'cmdt.js', 'flows.js', 'apps.js', 'labels.js', 'permsets.js', 'flow-debug.js', 'commands.js', 'soql.js', 'ask.js', 'markdown.js', 'onboarding.js', 'content.js'],
     });
     await new Promise(r => setTimeout(r, 80));
     await chrome.scripting.executeScript({
@@ -265,7 +273,14 @@ chrome.commands.onCommand.addListener(async (command, tab) => {
       world: 'ISOLATED',
       func: () => { if (typeof window.__sfnavToggle === 'function') window.__sfnavToggle(); },
     });
+    return 'injected';
   } catch (err) {
     console.error('sfnav:', err.message);
+    return 'error';
   }
+}
+
+chrome.commands.onCommand.addListener((command, tab) => {
+  if (command !== 'open-palette') return;
+  openPaletteInTab(tab);
 });

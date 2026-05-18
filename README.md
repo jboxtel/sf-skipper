@@ -92,10 +92,14 @@ Skipper fetches the flow's metadata from the Tooling API, sends it together with
 
 ### Privacy and credentials
 
-- Your Anthropic API key is stored in `chrome.storage.local` — local to this browser profile, not synced.
-- The Anthropic API call happens in the extension's service worker, not in the page. Your key never enters page context where a third-party script could see it.
-- The only outbound network calls are to your Salesforce org and to `api.anthropic.com`.
-- No telemetry. No analytics.
+**There is no backend.** No server, no analytics, no telemetry — nothing about your usage is shared with me or anyone else. Your data stays in your browser. The only outbound traffic this extension produces is:
+
+- Calls to your own Salesforce org (the same REST and Tooling APIs the UI you're using already calls).
+- Calls to `api.anthropic.com`, but **only** when you actively use an AI feature (`@soql`, `@debug`, `@ask`) and **only** if you've configured your own Anthropic API key. If you never set a key, no data ever leaves your browser to Anthropic.
+
+When you do use an AI feature, the prompt — and for `@debug` the flow metadata, for `@ask` the page screenshot plus any tool-call results — is sent to Anthropic under your own API key, subject to Anthropic's terms. It does not pass through any infrastructure I control.
+
+Your Anthropic API key is stored in `chrome.storage.local` (local to this browser profile, not synced) and is read by the extension's service worker, not by page scripts — so it never lands in a context where a third-party script on the Salesforce page could see it.
 
 ## Permissions
 
