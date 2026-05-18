@@ -17,17 +17,21 @@ After changing any source file, click the reload icon for the extension on `chro
 
 ## Features
 
-- **Universal search** — Fuzzy-match across every standard object, every custom object in your org, every Setup quick-link, and every Flow.
-- **Custom metadata picker** — Browse every custom metadata type in your org and jump directly to its records or its Object Manager definition. Skips the four clicks through Setup → Custom Metadata Types → row → Manage Records. 
-- **Object drill-down** — Pick an object and jump straight to Fields & Relationships, Validation Rules, Page Layouts, Triggers, Record Types, Sharing Rules, and more.
-- **Flow picker** — Browse every active and inactive flow with one keystroke.
-- **Lightning app picker** — Type `@app` to fuzzy-search every Lightning app in the org and jump straight to it (`/lightning/app/<DurableId>`).
-- **Custom label picker** — Type `@label` to fuzzy-search every Custom Label in the org (across `MasterLabel`, API name, and value) and jump straight to its Setup page.
-- **Setup quick-link picker** — Type `@setup` to filter the full registry of Setup pages without leaving the palette.
-- **Inline filter** — Type `@cmd account`, `@flow opportunity`, `@object case`, `@app sales`, `@label welcome`, or `@setup profiles` and the picker opens already filtered. No need to press Enter first.
-- **Manual refresh** — Caches refresh automatically every 30 minutes. Type `@refresh` to force-refresh the flow, app, and object caches immediately (handy after creating a new flow or installing a managed package).
-- **SOQL Generator** — Describe what you want; get a `SELECT` query that uses real field names from the object's describe (no hallucinated fields). The query is copied to your clipboard — execution stays in your hands.
-- **Flow Debug Assistant** — Open a flow in the Flow Builder, run a debug session, paste the Debug-panel output into Skipper, and Claude tells you which path the flow took, what went wrong, and how to fix it.
+### AI assistants (requires an Anthropic API key)
+
+- **SOQL Generator (`@soql`)** — Describe what you want in plain English; Claude returns a `SELECT` query that uses real field names from the object's describe (no hallucinated fields), validated against the Salesforce planner. The query is copied to your clipboard — execution stays in your hands.
+- **Flow Debug Assistant (`@debug`)** — Open a flow in the Flow Builder, run a debug session, paste the Debug-panel output into Skipper, and Claude tells you which path the flow took, what went wrong, and how to fix it. Read-only — no changes are made to the flow.
+- **Page assistant (`@ask`)** — Take a screenshot of any Salesforce page and ask Claude what's going on — why a validation rule is firing, what a permission setting means, where a custom field gets populated. Claude grounds its answer by running read-only SOQL, describing sObjects, searching Apex and Flow source, and reading field history in your org. Strictly read-only — no DML, no anonymous Apex, no metadata writes.
+
+### Navigation
+
+- **Universal search** — Fuzzy-match across every standard object, every custom object in your org, every Setup quick-link, and every Flow. Scoped pickers narrow the search:
+  - **`@object`** — Drill into any object's Fields & Relationships, Validation Rules, Page Layouts, Triggers, Record Types, Sharing Rules, and more.
+  - **`@flow`** — Browse every active and inactive flow with one keystroke.
+  - **`@app`** — Fuzzy-search every Lightning app and jump straight to it (`/lightning/app/<DurableId>`).
+  - **`@cmd`** — Browse every Custom Metadata Type and jump directly to its records or its Object Manager definition. Skips the four clicks through Setup → Custom Metadata Types → row → Manage Records.
+  - **`@label`** — Fuzzy-search every Custom Label across `MasterLabel`, API name, and value, and jump straight to its Setup page.
+  - **`@setup`** — Filter the full registry of Setup pages without leaving the palette.
 - **Works in production and sandboxes** — `*.lightning.force.com`, `*.my.salesforce.com`, `*.salesforce-setup.com`, and `*.force.com`.
 
   
