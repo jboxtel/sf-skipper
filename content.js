@@ -133,7 +133,7 @@
             '<button class="sfnav-ask-copy">Copy answer</button>' +
           '</div>' +
         '</div>' +
-        '<div id="sfnav-footer"><span id="sfnav-brand">Salesforce Commander</span><span id="sfnav-footer-hints"></span></div>' +
+        '<div id="sfnav-footer"><span id="sfnav-brand">Skipper For Salesforce</span><span id="sfnav-footer-hints"></span></div>' +
       '</div>';
 
     document.body.appendChild(overlay);
@@ -389,13 +389,15 @@
 
     soqlInFlight = true;
     input.disabled = true;
-    statusEl.textContent = 'Generating…';
-    statusEl.className = 'sfnav-soql-status-loading';
+    statusEl.textContent = 'Generating';
+    statusEl.className = 'sfnav-soql-status-loading sfnav-soql-status-progress';
     outputEl.textContent = '';
     actionsEl.style.display = 'none';
 
     try {
-      var result = await generateSoql(prompt);
+      var result = await generateSoql(prompt, function (phase) {
+        statusEl.textContent = phase;
+      });
       outputEl.textContent = result.soql;
       if (result.validationError) {
         statusEl.textContent = 'Salesforce rejected this query: ' + result.validationError;

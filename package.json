@@ -1,5 +1,5 @@
 {
-  "name": "salesforce-commander",
+  "name": "skipper-for-salesforce",
   "version": "1.1.0",
   "description": "Command palette for instant Salesforce Setup navigation",
   "private": true,

@@ -1,4 +1,4 @@
-# Salesforce Commander
+# Skipper For Salesforce
 
 A keyboard-first command palette for Salesforce. Press `⌘⇧K` (Mac) or `Ctrl+Shift+K` (Windows/Linux) on any Salesforce page and jump to any object, field, flow, or setup page in seconds. 
 
@@ -27,7 +27,7 @@ After changing any source file, click the reload icon for the extension on `chro
 - **Inline filter** — Type `@cmd account`, `@flow opportunity`, `@object case`, `@app sales`, `@label welcome`, or `@setup profiles` and the picker opens already filtered. No need to press Enter first.
 - **Manual refresh** — Caches refresh automatically every 30 minutes. Type `@refresh` to force-refresh the flow, app, and object caches immediately (handy after creating a new flow or installing a managed package).
 - **SOQL Generator** — Describe what you want; get a `SELECT` query that uses real field names from the object's describe (no hallucinated fields). The query is copied to your clipboard — execution stays in your hands.
-- **Flow Debug Assistant** — Open a flow in the Flow Builder, run a debug session, paste the Debug-panel output into Commander, and Claude tells you which path the flow took, what went wrong, and how to fix it.
+- **Flow Debug Assistant** — Open a flow in the Flow Builder, run a debug session, paste the Debug-panel output into Skipper, and Claude tells you which path the flow took, what went wrong, and how to fix it.
 - **Works in production and sandboxes** — `*.lightning.force.com`, `*.my.salesforce.com`, `*.salesforce-setup.com`, and `*.force.com`.
 
   
@@ -84,7 +84,7 @@ When something in a flow doesn't behave as expected:
 3. Press `⌘⇧K` and select **"Debug this flow"** (it appears at the top of the menu when a flow is open).
 4. Paste the debug output, optionally add a sentence about what you expected, and click **Analyze**.
 
-Commander fetches the flow's metadata from the Tooling API, sends it together with your debug output to Claude, and returns a **summary**, **root cause**, **suggested fix**, and the **execution path**. Like the SOQL Generator, it's read-only — no changes are made to the flow.
+Skipper fetches the flow's metadata from the Tooling API, sends it together with your debug output to Claude, and returns a **summary**, **root cause**, **suggested fix**, and the **execution path**. Like the SOQL Generator, it's read-only — no changes are made to the flow.
 
 ### Privacy and credentials
 

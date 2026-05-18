@@ -1,7 +1,7 @@
 (function () {
   var STEPS = [
     {
-      title: 'Welcome to Salesforce Commander',
+      title: 'Welcome to Skipper For Salesforce',
       body: 'Press ⌘⇧K (Ctrl+Shift+K on Windows) from any Salesforce page to open this. Start typing to find Setup pages, objects, flows, apps — and press Enter to go there instantly.',
       example: null
     },

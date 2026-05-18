@@ -55,7 +55,7 @@ function section(title) { console.log(`\n${BOLD}${title}${RESET}`); }
     process.exit(1);
   }
 
-  console.log(`${BOLD}Salesforce Commander — end-to-end tests${RESET}\n${DIM}Org: ${url}${RESET}`);
+  console.log(`${BOLD}Skipper For Salesforce — end-to-end tests${RESET}\n${DIM}Org: ${url}${RESET}`);
 
   const ctx = await launchContext();
   const page = ctx.pages()[0] || await ctx.newPage();
