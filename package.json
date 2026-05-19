@@ -4,9 +4,9 @@
   "description": "Command palette for instant Salesforce Setup navigation",
   "private": true,
   "scripts": {
-    "test": "node test.js",
-    "e2e": "node e2e.js",
-    "debug": "node debug.js",
+    "test": "node test/test.js",
+    "e2e": "node test/e2e.js",
+    "debug": "node test/debug.js",
     "eval:soql": "node test/soql-eval.js",
     "eval:flow-debug": "node test/flow-debug-eval.js",
     "test:flow-debug-validator": "node test/flow-debug-validator-test.js"

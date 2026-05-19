@@ -23,15 +23,26 @@ function handleGetSession(req, sendResponse) {
 
 // Generic Anthropic call. `userContent` may be a plain string (legacy) or an
 // array of content blocks ({type:'text',...} / {type:'image',...}).
-async function callAnthropic(opts, system, userContent, maxTokens) {
+// Returns { text, toolInput } — text is the first text block (may be empty),
+// toolInput is the parsed input object from the first tool_use block (or null).
+async function callAnthropic(opts, system, userContent, maxTokens, tools, toolChoice) {
   const model = opts.model || 'claude-haiku-4-5-20251001';
   if (opts.debug) {
     const blocks = Array.isArray(userContent) ? userContent.length : 1;
-    console.log('sfnav: calling Anthropic', { model: model, systemLen: (system || '').length, userBlocks: blocks });
+    console.log('sfnav: calling Anthropic', { model: model, systemLen: (system || '').length, userBlocks: blocks, tools: tools ? tools.length : 0 });
   }
 
   const controller = new AbortController();
   const timer = setTimeout(function () { controller.abort(); }, ANTHROPIC_TIMEOUT_MS);
+
+  const reqBody = {
+    model: model,
+    max_tokens: maxTokens || 1024,
+    system: system,
+    messages: [{ role: 'user', content: userContent }]
+  };
+  if (tools && tools.length) reqBody.tools = tools;
+  if (toolChoice) reqBody.tool_choice = toolChoice;
 
   let res;
   try {
@@ -43,12 +54,7 @@ async function callAnthropic(opts, system, userContent, maxTokens) {
         'anthropic-version': '2023-06-01',
         'anthropic-dangerous-direct-browser-access': 'true'
       },
-      body: JSON.stringify({
-        model: model,
-        max_tokens: maxTokens || 1024,
-        system: system,
-        messages: [{ role: 'user', content: userContent }]
-      }),
+      body: JSON.stringify(reqBody),
       signal: controller.signal
     });
   } finally {
@@ -60,12 +66,20 @@ async function callAnthropic(opts, system, userContent, maxTokens) {
   try { body = JSON.parse(raw); } catch (_) { body = null; }
   if (!res.ok) {
     if (opts.debug) console.warn('sfnav: Anthropic error', res.status, raw);
-    const msg = (body && body.error && body.error.message) || raw || ('HTTP ' + res.status);
+    const errorType = body && body.error && body.error.type;
+    const rawMsg = (body && body.error && body.error.message) || raw || ('HTTP ' + res.status);
+    const msg = (res.status === 529 || errorType === 'overloaded_error')
+      ? 'Anthropic API is overloaded — please try again in a moment'
+      : rawMsg;
     throw new Error(msg);
   }
-  const text = (body && body.content && body.content[0] && body.content[0].text) || '';
-  if (opts.debug) console.log('sfnav: Anthropic ok', { textLen: text.length });
-  return text;
+  const respBlocks = (body && body.content) || [];
+  const textBlock = respBlocks.find(function (b) { return b.type === 'text'; });
+  const toolBlock = respBlocks.find(function (b) { return b.type === 'tool_use'; });
+  const text = (textBlock && textBlock.text) || '';
+  const toolInput = (toolBlock && toolBlock.input) || null;
+  if (opts.debug) console.log('sfnav: Anthropic ok', { textLen: text.length, toolUse: !!toolBlock });
+  return { text: text, toolInput: toolInput };
 }
 
 async function handleSoqlGenerate(req, sendResponse) {
@@ -80,8 +94,8 @@ async function handleSoqlGenerate(req, sendResponse) {
     if (req.cacheSystem && typeof system === 'string') {
       system = [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }];
     }
-    const text = await callAnthropic(opts, system, req.user, 1024);
-    sendResponse({ ok: true, text: text });
+    const result = await callAnthropic(opts, system, req.user, 1024, req.tools, req.toolChoice);
+    sendResponse({ ok: true, text: result.text, toolInput: result.toolInput });
   } catch (err) {
     if (err.name === 'AbortError') {
       sendResponse({ ok: false, error: 'Request timed out after ' + (ANTHROPIC_TIMEOUT_MS / 1000) + 's' });

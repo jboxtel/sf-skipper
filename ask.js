@@ -11,6 +11,8 @@ var ASK_TOOL_RESULT_BYTE_CAP = 12000;  // per-tool-result JSON soft cap
 var ASK_APEX_SNIPPET_PAD = 160;
 var ASK_APEX_MAX_SNIPPETS_PER_HIT = 3;
 var ASK_APEX_FULL_BODY_CAP = 9000;
+var ASK_HISTORY_KEY = 'sfnavAskHistory';
+var ASK_HISTORY_MAX = 5;
 
 // HARD safety gate: every Salesforce request issued by @ask MUST go through
 // askFetch, which only permits GET against a small allowlist of read endpoints.
@@ -169,7 +171,7 @@ async function enrichAskContext(ctx) {
 // failing the whole enrichment.
 async function fetchObjectAutomations(sObject) {
   var pre = await sfRestPreamble();
-  var safe = String(sObject).replace(/'/g, "\\'");
+  var safe = escapeSoqlLiteral(sObject);
 
   var triggerSoql = "SELECT Name, Status, UsageBeforeInsert, UsageAfterInsert, "
     + "UsageBeforeUpdate, UsageAfterUpdate, UsageBeforeDelete, UsageAfterDelete "
@@ -460,7 +462,7 @@ function trimResultJson(value) {
 async function lookupKeyPrefix(recordId) {
   var pre = await sfRestPreamble();
   var prefix = recordId.substring(0, 3);
-  var soql = "SELECT QualifiedApiName FROM EntityDefinition WHERE KeyPrefix = '" + prefix.replace(/'/g, "\\'") + "' LIMIT 1";
+  var soql = "SELECT QualifiedApiName FROM EntityDefinition WHERE KeyPrefix = '" + escapeSoqlLiteral(prefix) + "' LIMIT 1";
   var url = pre.apiBase + pre.basePath + '/tooling/query/?q=' + encodeURIComponent(soql);
   var resp = await askFetch(url, { headers: pre.headers });
   if (!resp.ok) throw new Error('Tooling query for key prefix failed: ' + resp.status);
@@ -510,7 +512,7 @@ async function toolGetFieldHistory(input) {
   var table = historyTableFor(apiName);
   var idField = apiName.endsWith('__c') ? 'ParentId' : apiName + 'Id';
   var soql = 'SELECT ' + idField + ', Field, OldValue, NewValue, CreatedDate, CreatedById '
-    + 'FROM ' + table + " WHERE " + idField + " = '" + recordId.replace(/'/g, "\\'") + "' "
+    + 'FROM ' + table + " WHERE " + idField + " = '" + escapeSoqlLiteral(recordId) + "' "
     + 'ORDER BY CreatedDate DESC LIMIT ' + maxRows;
   var pre = await sfRestPreamble();
   var url = pre.apiBase + pre.basePath + '/query/?q=' + encodeURIComponent(soql);
@@ -526,10 +528,6 @@ async function toolGetFieldHistory(input) {
   }
   var data = JSON.parse(body);
   return { table: table, parentId: recordId, totalSize: data.totalSize, records: capRowsForPrompt(data.records) };
-}
-
-function escapeSoqlLiteral(s) {
-  return String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 }
 
 // SOSL reserved characters that must be backslash-escaped inside FIND {…}.
@@ -871,6 +869,36 @@ async function runAsk(question, onActivity) {
   }
 
   return { text: finalText, context: enrichedCtx, toolCallCount: toolCallCount, escalate: escalate };
+}
+
+function getAskHistory() {
+  return new Promise(function (resolve) {
+    if (typeof chrome === 'undefined' || !chrome.storage) { resolve([]); return; }
+    var key = getOrgCacheKey(ASK_HISTORY_KEY);
+    chrome.storage.local.get(key, function (data) {
+      resolve(data[key] || []);
+    });
+  });
+}
+
+function addToAskHistory(entry) {
+  return new Promise(function (resolve) {
+    if (typeof chrome === 'undefined' || !chrome.storage) { resolve(); return; }
+    var key = getOrgCacheKey(ASK_HISTORY_KEY);
+    chrome.storage.local.get(key, function (data) {
+      var list = data[key] || [];
+      list.unshift({
+        question: entry.question,
+        answer: entry.answer,
+        contextLine: entry.contextLine || '',
+        timestamp: Date.now()
+      });
+      list = list.slice(0, ASK_HISTORY_MAX);
+      var payload = {};
+      payload[key] = list;
+      chrome.storage.local.set(payload, function () { resolve(list); });
+    });
+  });
 }
 
 function summarizeToolResult(name, result) {

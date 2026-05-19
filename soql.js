@@ -196,6 +196,10 @@ async function fetchCount(apiName) {
     return cached.count;
   }
   var pre = await sfRestPreamble();
+  // apiName is an identifier (the FROM target), not a literal, so we validate
+  // its shape instead of quoting. Salesforce sObject names are limited to
+  // [A-Za-z0-9_]; anything else means a bad cache entry and should not be sent.
+  if (!/^[A-Za-z0-9_]+$/.test(apiName)) throw new Error('Invalid sObject name: ' + apiName);
   var soql = 'SELECT Id FROM ' + apiName + ' LIMIT ' + SOQL_COUNT_LIMIT;
   var url = pre.apiBase + pre.basePath + '/query/?q=' + encodeURIComponent(soql);
   var resp = await sfFetch(url, { headers: pre.headers });
@@ -531,8 +535,9 @@ async function generateSoql(prompt, onProgress) {
 function getSoqlHistory() {
   return new Promise(function (resolve) {
     if (typeof chrome === 'undefined' || !chrome.storage) { resolve([]); return; }
-    chrome.storage.local.get(SOQL_HISTORY_KEY, function (data) {
-      resolve(data[SOQL_HISTORY_KEY] || []);
+    var key = getOrgCacheKey(SOQL_HISTORY_KEY);
+    chrome.storage.local.get(key, function (data) {
+      resolve(data[key] || []);
     });
   });
 }
@@ -540,8 +545,9 @@ function getSoqlHistory() {
 function addToSoqlHistory(entry) {
   return new Promise(function (resolve) {
     if (typeof chrome === 'undefined' || !chrome.storage) { resolve(); return; }
-    chrome.storage.local.get(SOQL_HISTORY_KEY, function (data) {
-      var list = data[SOQL_HISTORY_KEY] || [];
+    var key = getOrgCacheKey(SOQL_HISTORY_KEY);
+    chrome.storage.local.get(key, function (data) {
+      var list = data[key] || [];
       // Drop any prior entry with the same prompt
       list = list.filter(function (e) { return e.prompt !== entry.prompt; });
       list.unshift({
@@ -552,7 +558,7 @@ function addToSoqlHistory(entry) {
       });
       list = list.slice(0, SOQL_HISTORY_MAX);
       var payload = {};
-      payload[SOQL_HISTORY_KEY] = list;
+      payload[key] = list;
       chrome.storage.local.set(payload, resolve);
     });
   });

@@ -6,7 +6,7 @@
 //      SF_TEST_URL=https://yourorg.lightning.force.com/lightning/setup/SetupOneHome/home
 //   2. Run: npm run e2e
 //
-// Override URL: node e2e.js <url>
+// Override URL: node test/e2e.js <url>
 
 const {
   loadCreds,

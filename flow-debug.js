@@ -34,22 +34,21 @@ async function fetchFlowMetadata(flowId) {
     return cached.record;
   }
   var pre = await sfRestPreamble();
-  var safe = flowId.replace(/'/g, "\\'");
   // Salesforce record IDs are 15 or 18 alphanumeric chars starting with a
   // 3-char key prefix. Anything else (e.g. "MyFlow-1") is a version name/slug
   // that comes from the URL and needs a different query strategy.
   var isSfId = /^[a-zA-Z0-9]{15}([a-zA-Z0-9]{3})?$/.test(flowId);
   var soql;
   if (isSfId) {
-    soql = "SELECT Id, DefinitionId, MasterLabel, Metadata FROM Flow WHERE Id = '" + safe + "'";
+    soql = "SELECT Id, DefinitionId, MasterLabel, Metadata FROM Flow WHERE Id = '" + escapeSoqlLiteral(flowId) + "'";
   } else {
     // The URL slug is typically "Namespace__DeveloperName-versionNumber".
     // Strip the trailing version suffix, then split namespace from name.
     var slug = flowId.replace(/-\d+$/, '');
     var nsParts = slug.match(/^(.+?)__(.+)$/);
-    var devName = (nsParts ? nsParts[2] : slug).replace(/'/g, "\\'");
+    var devName = escapeSoqlLiteral(nsParts ? nsParts[2] : slug);
     var nsFilter = nsParts
-      ? " AND Definition.NamespacePrefix = '" + nsParts[1].replace(/'/g, "\\'") + "'"
+      ? " AND Definition.NamespacePrefix = '" + escapeSoqlLiteral(nsParts[1]) + "'"
       : "";
     soql = "SELECT Id, DefinitionId, MasterLabel, Metadata FROM Flow WHERE Definition.DeveloperName = '" + devName + "'" + nsFilter + " AND Status = 'Active' ORDER BY VersionNumber DESC LIMIT 1";
   }
@@ -452,7 +451,7 @@ function buildFlowDebugRetryMessage(baseMessage, attempts) {
     a.errors.forEach(function (e) { lines.push('  - ' + e); });
   });
   lines.push('');
-  lines.push('Re-emit the JSON. Every backtick-and-single-quoted name like `\'Foo\'` must match an existing element, outcome, or resource. Every {!Resource} must be a defined resource; every {!$Record.<Field>} must be a real api name on the trigger object.');
+  lines.push('Call `report_flow_diagnosis` again. Every backtick-and-single-quoted name like `\'Foo\'` must match an existing element, outcome, or resource. Every {!Resource} must be a defined resource; every {!$Record.<Field>} must be a real api name on the trigger object.');
   return lines.join('\n');
 }
 
@@ -481,10 +480,33 @@ function buildFlowDebugSystemPrompt() {
     '["Open the `\'Set Segment\'` Decision element.", "Click `+ New Outcome` and label it `Has Industry`.", "Set `Resource` = `{!$Record.Industry}`, `Operator` = `Is Null`, `Value` = `{!$GlobalConstant.False}`.", "Drag this Outcome above the existing `Tier1` outcome.", "Connect this Outcome to the `\'Assign Tier1\'` Assignment element."]',
     'Reference real element names from the flow structure provided — do not invent names. Do NOT include numbering inside the strings; the UI numbers them.',
     '',
-    'Reply with ONLY a JSON object on a single line, no prose, no code fences:',
-    '{"summary":"one short sentence describing what happened","rootCause":"the specific Flow Builder element and condition that caused the issue","fix":["step1","step2","..."]}'
+    'Call the `report_flow_diagnosis` tool with your diagnosis. Do not emit prose, code fences, or JSON in a text response — use the tool.'
   ].join('\n');
 }
+
+var FLOW_DEBUG_TOOL = {
+  name: 'report_flow_diagnosis',
+  description: 'Report the root cause of a Flow Builder failure and the steps the consultant should take to fix it.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      summary: {
+        type: 'string',
+        description: 'One short sentence describing what happened during the flow run.'
+      },
+      rootCause: {
+        type: 'string',
+        description: 'The specific Flow Builder element and condition that caused the issue.'
+      },
+      fix: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Ordered list of short Flow Builder actions the consultant should perform. Each item is one step; do not number them inside the strings.'
+      }
+    },
+    required: ['summary', 'rootCause', 'fix']
+  }
+};
 
 function buildFlowDebugUserMessage(flowLabel, compactFlow, debugText, expectation, schemaAppendix) {
   var lines = [];
@@ -541,8 +563,12 @@ async function analyzeFlowDebug(flowId, debugText, expectation) {
   var parsed = null;
 
   for (var attempt = 0; attempt <= FLOW_DEBUG_VALIDATE_RETRIES; attempt++) {
-    var raw = await callClaude(sysPrompt, userMsg, { cacheSystem: true });
-    parsed = parseFlowDebugResponse(raw);
+    parsed = await callClaude(sysPrompt, userMsg, {
+      cacheSystem: true,
+      tools: [FLOW_DEBUG_TOOL],
+      toolChoice: { type: 'tool', name: FLOW_DEBUG_TOOL.name }
+    });
+    if (!Array.isArray(parsed.fix)) parsed.fix = [];
 
     var validation = validateFlowFix(parsed, record && record.Metadata, schema.describesByObject);
     if (validation.ok) {
@@ -563,32 +589,3 @@ async function analyzeFlowDebug(flowId, debugText, expectation) {
   return parsed;
 }
 
-function parseFlowDebugResponse(text) {
-  if (!text) throw new Error('Empty response');
-  var cleaned = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
-  var start = cleaned.indexOf('{');
-  var end = cleaned.lastIndexOf('}');
-  if (start === -1 || end === -1) throw new Error('Could not parse response: ' + text.slice(0, 120));
-  var json = cleaned.slice(start, end + 1);
-  try {
-    var obj = JSON.parse(json);
-    if (!obj.summary && !obj.rootCause && !obj.fix) throw new Error('Response missing required fields');
-    // Normalize fix → array of strings. Older / fallback responses may return a single string.
-    if (typeof obj.fix === 'string') {
-      var s = obj.fix.trim();
-      if (s) {
-        // Split on patterns like "1. ", "2. " at the start or after whitespace.
-        var parts = s.split(/\s*(?:\n|^)\s*\d+\.\s+/).filter(Boolean);
-        if (parts.length <= 1) parts = s.split(/(?:^|\s)\d+\.\s+/).filter(Boolean);
-        obj.fix = parts.length ? parts.map(function (p) { return p.trim(); }) : [s];
-      } else {
-        obj.fix = [];
-      }
-    } else if (!Array.isArray(obj.fix)) {
-      obj.fix = [];
-    }
-    return obj;
-  } catch (e) {
-    throw new Error('Invalid JSON in response: ' + e.message);
-  }
-}

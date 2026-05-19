@@ -26,6 +26,13 @@ function getOrgCacheKey(base) {
   return host ? base + ':' + host : base;
 }
 
+// SOQL string-literal escape. Both backslash and single quote must be escaped;
+// escape backslash first so the second pass doesn't double-escape its output.
+// Use this anywhere a value is interpolated into a SOQL/SOSL string literal.
+function escapeSoqlLiteral(s) {
+  return String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
 var _basePathCache = null; // { basePath, ts }
 var BASEPATH_TTL_MS = 60 * 60 * 1000; // 1 hour
 
@@ -73,18 +80,33 @@ async function sfRestPreamble() {
 }
 
 // Send a system+user prompt to the background, which proxies to Anthropic.
-// Returns the raw text from the model. Pass { cacheSystem: true } to mark the
-// system prompt as an ephemeral cache breakpoint — worth it when the same
-// system prompt is reused across calls within ~5 minutes (e.g. @debug runs).
+// By default returns the raw text from the model. Options:
+//   - cacheSystem: mark system prompt as an ephemeral cache breakpoint
+//   - tools + toolChoice: force structured output via tool_use. When set,
+//     resolves to the tool's parsed input object (already a JS object) instead
+//     of a string. Use this whenever you need a JSON-shaped response — far
+//     more robust than asking the model to emit JSON and then JSON.parse-ing.
 function callClaude(systemPrompt, userMessage, opts) {
   opts = opts || {};
   return new Promise(function (resolve, reject) {
     chrome.runtime.sendMessage(
-      { type: 'soql.generate', system: systemPrompt, user: userMessage, cacheSystem: !!opts.cacheSystem },
+      {
+        type: 'soql.generate',
+        system: systemPrompt,
+        user: userMessage,
+        cacheSystem: !!opts.cacheSystem,
+        tools: opts.tools || null,
+        toolChoice: opts.toolChoice || null
+      },
       function (resp) {
         if (chrome.runtime.lastError) { reject(new Error(chrome.runtime.lastError.message)); return; }
         if (!resp) { reject(new Error('No response from background')); return; }
         if (!resp.ok) { reject(new Error(resp.error || 'Unknown error')); return; }
+        if (opts.tools && opts.tools.length) {
+          if (!resp.toolInput) { reject(new Error('Model did not call the requested tool')); return; }
+          resolve(resp.toolInput);
+          return;
+        }
         resolve(resp.text);
       }
     );

@@ -25,6 +25,33 @@
   var soqlInFlight = false;
   var flowDebugInFlight = false;
   var askInFlight = false;
+  var askHistoryEntries = [];
+  var askHistoryIndex = 0;
+  var openInNewTabPref = true;
+
+  if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+    chrome.storage.local.get('sfnavOptions', function (data) {
+      var opts = (data && data.sfnavOptions) || {};
+      if (opts.openInNewTab === false) openInNewTabPref = false;
+    });
+    if (chrome.storage.onChanged && chrome.storage.onChanged.addListener) {
+      chrome.storage.onChanged.addListener(function (changes, area) {
+        if (area !== 'local' || !changes.sfnavOptions) return;
+        var next = changes.sfnavOptions.newValue || {};
+        openInNewTabPref = next.openInNewTab !== false;
+      });
+    }
+  }
+
+  function openUrl(url) {
+    hidePalette();
+    if (openInNewTabPref) {
+      var win = window.open(url, '_blank');
+      if (win) return;
+      // Popup blocked — fall through to same-tab navigation rather than do nothing.
+    }
+    window.location.href = url;
+  }
 
   // ─── Mode dispatch tables ────────────────────────────────────────────────
   // The @keyword catalogue lives in commands.js (SHORTCUTS). Use
@@ -47,8 +74,8 @@
 
   var FOOTER_HINTS = {
     'soql':       'Enter to generate · Esc to go back',
-    'flow-debug': 'Cmd+Enter to analyze · Esc to go back',
-    'ask':        'Cmd+Enter to ask · Esc to go back'
+    'flow-debug': 'Enter to analyze · Shift+Enter for newline · Esc to go back',
+    'ask':        'Enter to ask · Shift+Enter for newline · Esc to go back'
   };
   var DEFAULT_FOOTER_HINT = '↑↓ navigate · Enter to select · Esc to close';
 
@@ -109,7 +136,7 @@
           '<textarea id="sfnav-flowdebug-debug" placeholder="Paste the Debug panel output here…" spellcheck="false"></textarea>' +
           '<input id="sfnav-flowdebug-expectation" type="text" placeholder="Optional: what did you expect to happen?" autocomplete="off" />' +
           '<div id="sfnav-flowdebug-actions">' +
-            '<button id="sfnav-flowdebug-run" class="sfnav-soql-btn-primary">Analyze <span class="sfnav-kbd">⌘↵</span></button>' +
+            '<button id="sfnav-flowdebug-run" class="sfnav-soql-btn-primary">Analyze <span class="sfnav-kbd">↵</span></button>' +
             '<span id="sfnav-flowdebug-apistat" class="sfnav-apistat"></span>' +
           '</div>' +
           '<div id="sfnav-flowdebug-status"></div>' +
@@ -123,12 +150,23 @@
           '<div id="sfnav-ask-meta"></div>' +
           '<textarea id="sfnav-ask-question" placeholder="What’s happening here? Why this error? Anything you want to know about the current screen…" spellcheck="false"></textarea>' +
           '<div id="sfnav-ask-actions">' +
-            '<button id="sfnav-ask-run" class="sfnav-soql-btn-primary">Ask <span class="sfnav-kbd">⌘↵</span></button>' +
+            '<button id="sfnav-ask-run" class="sfnav-soql-btn-primary">Ask <span class="sfnav-kbd">↵</span></button>' +
             '<span id="sfnav-ask-apistat" class="sfnav-apistat"></span>' +
           '</div>' +
           '<div id="sfnav-ask-status"></div>' +
           '<ul id="sfnav-ask-activity" style="display:none"></ul>' +
           '<div id="sfnav-ask-output" style="display:none">' +
+            '<div class="sfnav-ask-history-header" style="display:none">' +
+              '<div class="sfnav-ask-history-q"></div>' +
+              '<div class="sfnav-ask-history-meta-row">' +
+                '<span class="sfnav-ask-history-meta"></span>' +
+                '<span class="sfnav-ask-history-pager" style="display:none">' +
+                  '<button class="sfnav-ask-history-prev" aria-label="Older answer">‹</button>' +
+                  '<span class="sfnav-ask-history-pos"></span>' +
+                  '<button class="sfnav-ask-history-next" aria-label="Newer answer">›</button>' +
+                '</span>' +
+              '</div>' +
+            '</div>' +
             '<div class="sfnav-ask-answer"></div>' +
             '<button class="sfnav-ask-copy">Copy answer</button>' +
           '</div>' +
@@ -594,11 +632,11 @@
 
     document.getElementById('sfnav-flowdebug-run').onclick = runFlowDebugAnalysis;
 
-    // Submit on Cmd/Ctrl+Enter from inside the textarea (plain Enter keeps newline);
-    // Escape steps back to root.
+    // Enter submits, Shift+Enter inserts a newline (matches @ask). Escape steps
+    // back to root.
     var debugEl = document.getElementById('sfnav-flowdebug-debug');
     debugEl.addEventListener('keydown', function (e) {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+      if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         runFlowDebugAnalysis();
       } else if (e.key === 'Escape') {
@@ -745,10 +783,20 @@
     document.getElementById('sfnav-ask-status').textContent = '';
     document.getElementById('sfnav-ask-status').className = '';
     document.getElementById('sfnav-ask-output').style.display = 'none';
+    var histHeader = document.querySelector('#sfnav-ask-output .sfnav-ask-history-header');
+    if (histHeader) histHeader.style.display = 'none';
     var actEl = document.getElementById('sfnav-ask-activity');
     actEl.innerHTML = '';
     actEl.style.display = 'none';
     document.getElementById('sfnav-ask-question').value = initialQuestion || '';
+
+    if (!initialQuestion && typeof getAskHistory === 'function') {
+      getAskHistory().then(function (entries) {
+        askHistoryEntries = entries || [];
+        askHistoryIndex = 0;
+        if (askHistoryEntries.length) renderAskHistoryEntry();
+      });
+    }
 
     var metaEl = document.getElementById('sfnav-ask-meta');
     var ctx = (typeof getAskOrgContext === 'function') ? getAskOrgContext() : null;
@@ -782,16 +830,31 @@
 
     document.getElementById('sfnav-ask-run').onclick = runAskQuery;
 
+    var prevBtn = document.querySelector('#sfnav-ask-output .sfnav-ask-history-prev');
+    var nextBtn = document.querySelector('#sfnav-ask-output .sfnav-ask-history-next');
+    if (prevBtn) prevBtn.onclick = function () {
+      if (askHistoryIndex < askHistoryEntries.length - 1) {
+        askHistoryIndex++;
+        renderAskHistoryEntry();
+      }
+    };
+    if (nextBtn) nextBtn.onclick = function () {
+      if (askHistoryIndex > 0) {
+        askHistoryIndex--;
+        renderAskHistoryEntry();
+      }
+    };
+
     var qEl = document.getElementById('sfnav-ask-question');
-    qEl.addEventListener('keydown', function (e) {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+    qEl.onkeydown = function (e) {
+      if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         runAskQuery();
       } else if (e.key === 'Escape') {
         e.preventDefault();
         handleBack();
       }
-    });
+    };
 
     qEl.focus();
   }
@@ -871,7 +934,24 @@
         }
       });
       restoreOverlay();
-      renderAskResult(result);
+      var ctxForEntry = result.context || {};
+      var ctxBits = [];
+      if (ctxForEntry.pageType)  ctxBits.push(ctxForEntry.pageType);
+      if (ctxForEntry.sObject)   ctxBits.push(ctxForEntry.sObject);
+      if (ctxForEntry.setupNode) ctxBits.push(ctxForEntry.setupNode);
+      var contextLineForEntry = ctxBits.join(' · ');
+      if (typeof addToAskHistory === 'function' && result.text) {
+        var updated = await addToAskHistory({
+          question: question,
+          answer: result.text,
+          contextLine: contextLineForEntry
+        });
+        if (updated) askHistoryEntries = updated;
+        askHistoryIndex = 0;
+        renderAskHistoryEntry();
+      } else {
+        renderAskResult(result);
+      }
       statusEl.textContent = result.toolCallCount
         ? 'Done · ' + result.toolCallCount + ' tool call' + (result.toolCallCount === 1 ? '' : 's')
         : 'Done';
@@ -942,12 +1022,59 @@
 
   function renderAskResult(result) {
     var outputEl = document.getElementById('sfnav-ask-output');
+    var headerEl = outputEl.querySelector('.sfnav-ask-history-header');
     var answerEl = outputEl.querySelector('.sfnav-ask-answer');
     var copyBtn  = outputEl.querySelector('.sfnav-ask-copy');
     var text = (result && result.text) || '';
+    if (headerEl) headerEl.style.display = 'none';
     answerEl.innerHTML = renderAskMarkdown(text);
     copyBtn.onclick = function () {
       navigator.clipboard.writeText(text).then(function () {
+        var prev = copyBtn.textContent;
+        copyBtn.textContent = 'Copied!';
+        setTimeout(function () { copyBtn.textContent = prev; }, 1500);
+      });
+    };
+    outputEl.style.display = 'block';
+  }
+
+  function formatAskTimeAgo(ts) {
+    var diff = Date.now() - (ts || 0);
+    if (diff < 0) diff = 0;
+    var min = Math.floor(diff / 60000);
+    if (min < 1) return 'just now';
+    if (min < 60) return min + 'm ago';
+    var hr = Math.floor(min / 60);
+    if (hr < 24) return hr + 'h ago';
+    var day = Math.floor(hr / 24);
+    return day + 'd ago';
+  }
+
+  function renderAskHistoryEntry() {
+    var entry = askHistoryEntries[askHistoryIndex];
+    if (!entry) return;
+    var outputEl = document.getElementById('sfnav-ask-output');
+    var headerEl = outputEl.querySelector('.sfnav-ask-history-header');
+    var answerEl = outputEl.querySelector('.sfnav-ask-answer');
+    var copyBtn  = outputEl.querySelector('.sfnav-ask-copy');
+    headerEl.style.display = 'block';
+    headerEl.querySelector('.sfnav-ask-history-q').textContent = entry.question || '';
+    var metaBits = [formatAskTimeAgo(entry.timestamp)];
+    if (entry.contextLine) metaBits.push(entry.contextLine);
+    headerEl.querySelector('.sfnav-ask-history-meta').textContent = metaBits.join(' · ');
+    var pagerEl = headerEl.querySelector('.sfnav-ask-history-pager');
+    if (askHistoryEntries.length > 1) {
+      pagerEl.style.display = 'inline-flex';
+      headerEl.querySelector('.sfnav-ask-history-pos').textContent =
+        (askHistoryIndex + 1) + '/' + askHistoryEntries.length;
+      headerEl.querySelector('.sfnav-ask-history-prev').disabled = askHistoryIndex >= askHistoryEntries.length - 1;
+      headerEl.querySelector('.sfnav-ask-history-next').disabled = askHistoryIndex <= 0;
+    } else {
+      pagerEl.style.display = 'none';
+    }
+    answerEl.innerHTML = renderAskMarkdown(entry.answer || '');
+    copyBtn.onclick = function () {
+      navigator.clipboard.writeText(entry.answer || '').then(function () {
         var prev = copyBtn.textContent;
         copyBtn.textContent = 'Copied!';
         setTimeout(function () { copyBtn.textContent = prev; }, 1500);
@@ -1136,8 +1263,7 @@
       return;
     }
 
-    hidePalette();
-    window.location.href = url;
+    openUrl(url);
   }
 
   function executeShortcut(keyword) {
@@ -1175,8 +1301,7 @@
       if (hintEl) hintEl.textContent = 'Resolving entity ID…';
       getEntityIdForCmdt(result.cmdt.apiName)
         .then(function (entityId) {
-          hidePalette();
-          window.location.href = buildCmdtObjectDefinitionUrl(entityId);
+          openUrl(buildCmdtObjectDefinitionUrl(entityId));
         })
         .catch(function (err) {
           if (hintEl) hintEl.textContent = 'Error: ' + err.message;
@@ -1188,15 +1313,13 @@
       // keyPrefix is usually already on the cached object (from describeGlobal); only
       // hits the network on a cache miss for older entries.
       if (result.cmdt.keyPrefix) {
-        hidePalette();
-        window.location.href = buildCmdtManageRecordsUrl(result.cmdt.keyPrefix);
+        openUrl(buildCmdtManageRecordsUrl(result.cmdt.keyPrefix));
         return;
       }
       if (hintEl) hintEl.textContent = 'Resolving key prefix…';
       getKeyPrefixForCmdt(result.cmdt.apiName)
         .then(function (prefix) {
-          hidePalette();
-          window.location.href = buildCmdtManageRecordsUrl(prefix);
+          openUrl(buildCmdtManageRecordsUrl(prefix));
         })
         .catch(function (err) {
           if (hintEl) hintEl.textContent = 'Error: ' + err.message;

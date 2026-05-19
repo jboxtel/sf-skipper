@@ -770,6 +770,73 @@ ol.sfnav-flowdebug-steps li::before {
   border-color: var(--sf-ink);
 }
 
+.sfnav-ask-history-header {
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--sf-rule);
+}
+
+.sfnav-ask-history-q {
+  font-family: var(--sf-sans);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--sf-ink);
+  margin-bottom: 4px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.sfnav-ask-history-meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sfnav-ask-history-meta {
+  font-family: var(--sf-sans);
+  font-size: 11px;
+  color: var(--sf-ink-soft);
+}
+
+.sfnav-ask-history-pager {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--sf-sans);
+  font-size: 11px;
+  color: var(--sf-ink-soft);
+}
+
+.sfnav-ask-history-pager button {
+  background: var(--sf-surface);
+  color: var(--sf-ink-soft);
+  border: 1px solid var(--sf-rule);
+  border-radius: var(--sf-radius);
+  font-family: var(--sf-sans);
+  font-size: 12px;
+  line-height: 1;
+  padding: 2px 8px;
+  cursor: pointer;
+  transition: background var(--sf-transition), color var(--sf-transition);
+}
+
+.sfnav-ask-history-pager button:hover:not(:disabled) {
+  background: var(--sf-ink);
+  color: #ffffff;
+  border-color: var(--sf-ink);
+}
+
+.sfnav-ask-history-pager button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.sfnav-ask-history-pos {
+  min-width: 28px;
+  text-align: center;
+}
+
 /* ─── Ask Activity (tool-use trace) ────────────────── */
 
 #sfnav-ask-activity {
