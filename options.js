@@ -1,5 +1,6 @@
 var apiKeyEl = document.getElementById('apiKey');
 var modelEl = document.getElementById('model');
+var openInEl = document.getElementById('openIn');
 var saveEl = document.getElementById('save');
 var testEl = document.getElementById('test');
 var statusEl = document.getElementById('status');
@@ -12,6 +13,7 @@ chrome.storage.local.get('sfnavOptions', function (data) {
   var opts = data.sfnavOptions || {};
   if (opts.anthropicApiKey) apiKeyEl.value = opts.anthropicApiKey;
   if (opts.model) modelEl.value = opts.model;
+  openInEl.value = opts.openInNewTab === false ? 'same' : 'new';
 });
 
 function setStatus(text, kind) {
@@ -36,7 +38,8 @@ function mergeOptions(patch) {
 saveEl.addEventListener('click', function () {
   mergeOptions({
     anthropicApiKey: apiKeyEl.value.trim(),
-    model: modelEl.value
+    model: modelEl.value,
+    openInNewTab: openInEl.value !== 'same'
   }).then(function () {
     setStatus('Saved', 'ok');
     setTimeout(function () { setStatus(''); }, 1800);

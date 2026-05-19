@@ -14,7 +14,7 @@ async function getEntityIdForCmdt(apiName) {
   if (match && match.entityId) return match.entityId;
 
   var pre = await sfRestPreamble();
-  var soql = "SELECT Id FROM CustomObject WHERE DeveloperName = '" + apiName.replace(/__mdt$/i, '').replace(/'/g, "\\'") + "' AND ManageableState != 'deleted'";
+  var soql = "SELECT Id FROM CustomObject WHERE DeveloperName = '" + escapeSoqlLiteral(apiName.replace(/__mdt$/i, '')) + "' AND ManageableState != 'deleted'";
   var resp = await sfFetch(pre.apiBase + pre.basePath + '/tooling/query/?q=' + encodeURIComponent(soql), { headers: pre.headers });
   if (!resp.ok) throw new Error('Tooling query failed for ' + apiName + ': ' + resp.status);
   var data = await resp.json();

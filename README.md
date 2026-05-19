@@ -21,7 +21,7 @@ After changing any source file, click the reload icon for the extension on `chro
 
 - **SOQL Generator (`@soql`)** — Describe what you want in plain English; Claude returns a `SELECT` query that uses real field names from the object's describe (no hallucinated fields), validated against the Salesforce planner. The query is copied to your clipboard — execution stays in your hands.
 - **Flow Debug Assistant (`@debug`)** — Open a flow in the Flow Builder, run a debug session, paste the Debug-panel output into Skipper, and Claude tells you which path the flow took, what went wrong, and how to fix it. Read-only — no changes are made to the flow.
-- **Page assistant (`@ask`)** — Take a screenshot of any Salesforce page and ask Claude what's going on — why a validation rule is firing, what a permission setting means, where a custom field gets populated. Claude grounds its answer by running read-only SOQL, describing sObjects, searching Apex and Flow source, and reading field history in your org. Strictly read-only — no DML, no anonymous Apex, no metadata writes.
+- **Page assistant (`@ask`)** — Take a screenshot of any Salesforce page and ask Claude what's going on — why a validation rule is firing, what a permission setting means, where a custom field gets populated. Claude grounds its answer by running read-only SOQL, describing sObjects, searching Apex and Flow source, and reading field history in your org. Your last 5 questions and answers are kept per org, so you can reopen `@ask` and page back through previous answers. Strictly read-only — no DML, no anonymous Apex, no metadata writes.
 
 ### Navigation
 

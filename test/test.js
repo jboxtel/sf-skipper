@@ -2,7 +2,7 @@ const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 
-const EXT = path.resolve(__dirname);
+const EXT = path.resolve(__dirname, '..');
 const GREEN = '\x1b[32m';
 const RED = '\x1b[31m';
 const RESET = '\x1b[0m';

@@ -1,17 +1,17 @@
 // Drive the unpacked extension in a real Chromium against a real Salesforce org.
 //
 // Login (interactive — only needed if you don't have .sf-credentials):
-//   node debug.js login <salesforce-url>
+//   node test/debug.js login <salesforce-url>
 //     Opens Chromium with the extension loaded. Log into Salesforce manually,
 //     then close the window. Session persists in ./.playwright-profile/.
 //
 // Probe a single command:
-//   node debug.js probe <salesforce-url> [--keyword=label]
+//   node test/debug.js probe <salesforce-url> [--keyword=label]
 //     Auto-logs in via .sf-credentials, opens the palette, types @<keyword>,
 //     presses Enter, and dumps the resulting palette state as JSON.
 //
 // Stay open for manual poking:
-//   node debug.js shell <salesforce-url>
+//   node test/debug.js shell <salesforce-url>
 //     Auto-logs in, then leaves the browser open. Ctrl+C / close window to exit.
 
 const {
@@ -33,7 +33,7 @@ const flags = Object.fromEntries(
 );
 
 if (!cmd || !url) {
-  console.error('Usage: node debug.js <login|probe|shell> <salesforce-url> [--keyword=label]');
+  console.error('Usage: node test/debug.js <login|probe|shell> <salesforce-url> [--keyword=label]');
   process.exit(1);
 }
 

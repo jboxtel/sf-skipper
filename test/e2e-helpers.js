@@ -6,7 +6,7 @@ const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 
-const EXT = path.resolve(__dirname);
+const EXT = path.resolve(__dirname, '..');
 const PROFILE = path.join(EXT, '.playwright-profile');
 const CREDS_FILE = path.join(EXT, '.sf-credentials');
 
