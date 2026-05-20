@@ -26,7 +26,6 @@
   var flowDebugInFlight = false;
   var askInFlight = false;
   var askHistoryEntries = [];
-  var askHistoryIndex = 0;
   var openInNewTabPref = true;
 
   if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
@@ -71,6 +70,13 @@
     'object-scoped': function () { enterObjectPickerMode(objectPickerFilter); },
     'cmd-scoped':    function () { enterCmdPickerMode(cmdtPickerFilter); }
   };
+
+  // Where to bounce focus when the user clicks dead space inside a panel mode.
+  var PANEL_PRIMARY_INPUTS = [
+    { panelId: 'sfnav-soql',      inputId: 'sfnav-input' },
+    { panelId: 'sfnav-flowdebug', inputId: 'sfnav-flowdebug-debug' },
+    { panelId: 'sfnav-ask',       inputId: 'sfnav-ask-question' }
+  ];
 
   var FOOTER_HINTS = {
     'soql':       'Enter to generate · Esc to go back',
@@ -156,20 +162,12 @@
           '<div id="sfnav-ask-status"></div>' +
           '<ul id="sfnav-ask-activity" style="display:none"></ul>' +
           '<div id="sfnav-ask-output" style="display:none">' +
-            '<div class="sfnav-ask-history-header" style="display:none">' +
-              '<div class="sfnav-ask-history-q"></div>' +
-              '<div class="sfnav-ask-history-meta-row">' +
-                '<span class="sfnav-ask-history-meta"></span>' +
-                '<span class="sfnav-ask-history-pager" style="display:none">' +
-                  '<button class="sfnav-ask-history-prev" aria-label="Older answer">‹</button>' +
-                  '<span class="sfnav-ask-history-pos"></span>' +
-                  '<button class="sfnav-ask-history-next" aria-label="Newer answer">›</button>' +
-                '</span>' +
-              '</div>' +
-            '</div>' +
+            '<div class="sfnav-ask-output-question" style="display:none"></div>' +
             '<div class="sfnav-ask-answer"></div>' +
             '<button class="sfnav-ask-copy">Copy answer</button>' +
           '</div>' +
+          '<div id="sfnav-ask-history-label" class="sfnav-section-header" style="display:none">Recent</div>' +
+          '<ul id="sfnav-ask-history"></ul>' +
         '</div>' +
         '<div id="sfnav-footer"><span id="sfnav-brand">Skipper For Salesforce<span id="sfnav-brand-help">help</span></span><span id="sfnav-footer-hints"></span></div>' +
       '</div>';
@@ -178,6 +176,20 @@
 
     overlay.addEventListener('click', function (e) {
       if (e.target === overlay) hidePalette();
+    });
+
+    // Clicking dead space inside a panel mode (the breadcrumb, meta line,
+    // status, rendered answer, etc.) used to leave focus on a non-handler
+    // element — Esc then went nowhere because only the panel's primary
+    // input/textarea carries the keydown listener. Bounce focus back to it.
+    PANEL_PRIMARY_INPUTS.forEach(function (entry) {
+      var panel = document.getElementById(entry.panelId);
+      if (!panel) return;
+      panel.addEventListener('click', function (e) {
+        if (e.target.closest('button, a, textarea, input, [contenteditable="true"]')) return;
+        var target = document.getElementById(entry.inputId);
+        if (target && !target.disabled) target.focus();
+      });
     });
 
     var input = document.getElementById('sfnav-input');
@@ -783,18 +795,15 @@
     document.getElementById('sfnav-ask-status').textContent = '';
     document.getElementById('sfnav-ask-status').className = '';
     document.getElementById('sfnav-ask-output').style.display = 'none';
-    var histHeader = document.querySelector('#sfnav-ask-output .sfnav-ask-history-header');
-    if (histHeader) histHeader.style.display = 'none';
     var actEl = document.getElementById('sfnav-ask-activity');
     actEl.innerHTML = '';
     actEl.style.display = 'none';
     document.getElementById('sfnav-ask-question').value = initialQuestion || '';
 
-    if (!initialQuestion && typeof getAskHistory === 'function') {
+    if (typeof getAskHistory === 'function') {
       getAskHistory().then(function (entries) {
         askHistoryEntries = entries || [];
-        askHistoryIndex = 0;
-        if (askHistoryEntries.length) renderAskHistoryEntry();
+        renderAskHistoryList();
       });
     }
 
@@ -829,21 +838,6 @@
     });
 
     document.getElementById('sfnav-ask-run').onclick = runAskQuery;
-
-    var prevBtn = document.querySelector('#sfnav-ask-output .sfnav-ask-history-prev');
-    var nextBtn = document.querySelector('#sfnav-ask-output .sfnav-ask-history-next');
-    if (prevBtn) prevBtn.onclick = function () {
-      if (askHistoryIndex < askHistoryEntries.length - 1) {
-        askHistoryIndex++;
-        renderAskHistoryEntry();
-      }
-    };
-    if (nextBtn) nextBtn.onclick = function () {
-      if (askHistoryIndex > 0) {
-        askHistoryIndex--;
-        renderAskHistoryEntry();
-      }
-    };
 
     var qEl = document.getElementById('sfnav-ask-question');
     qEl.onkeydown = function (e) {
@@ -940,6 +934,7 @@
       if (ctxForEntry.sObject)   ctxBits.push(ctxForEntry.sObject);
       if (ctxForEntry.setupNode) ctxBits.push(ctxForEntry.setupNode);
       var contextLineForEntry = ctxBits.join(' · ');
+      renderAskOutput({ question: question, answer: result.text || '' });
       if (typeof addToAskHistory === 'function' && result.text) {
         var updated = await addToAskHistory({
           question: question,
@@ -947,10 +942,7 @@
           contextLine: contextLineForEntry
         });
         if (updated) askHistoryEntries = updated;
-        askHistoryIndex = 0;
-        renderAskHistoryEntry();
-      } else {
-        renderAskResult(result);
+        renderAskHistoryList();
       }
       statusEl.textContent = result.toolCallCount
         ? 'Done · ' + result.toolCallCount + ' tool call' + (result.toolCallCount === 1 ? '' : 's')
@@ -1020,16 +1012,22 @@
     activityEl.appendChild(li);
   }
 
-  function renderAskResult(result) {
+  function renderAskOutput(entry) {
     var outputEl = document.getElementById('sfnav-ask-output');
-    var headerEl = outputEl.querySelector('.sfnav-ask-history-header');
+    var questionEl = outputEl.querySelector('.sfnav-ask-output-question');
     var answerEl = outputEl.querySelector('.sfnav-ask-answer');
     var copyBtn  = outputEl.querySelector('.sfnav-ask-copy');
-    var text = (result && result.text) || '';
-    if (headerEl) headerEl.style.display = 'none';
-    answerEl.innerHTML = renderAskMarkdown(text);
+    var question = (entry && entry.question) || '';
+    var answer = (entry && entry.answer) || '';
+    if (question) {
+      questionEl.textContent = question;
+      questionEl.style.display = 'block';
+    } else {
+      questionEl.style.display = 'none';
+    }
+    answerEl.innerHTML = renderAskMarkdown(answer);
     copyBtn.onclick = function () {
-      navigator.clipboard.writeText(text).then(function () {
+      navigator.clipboard.writeText(answer).then(function () {
         var prev = copyBtn.textContent;
         copyBtn.textContent = 'Copied!';
         setTimeout(function () { copyBtn.textContent = prev; }, 1500);
@@ -1050,37 +1048,49 @@
     return day + 'd ago';
   }
 
-  function renderAskHistoryEntry() {
-    var entry = askHistoryEntries[askHistoryIndex];
-    if (!entry) return;
-    var outputEl = document.getElementById('sfnav-ask-output');
-    var headerEl = outputEl.querySelector('.sfnav-ask-history-header');
-    var answerEl = outputEl.querySelector('.sfnav-ask-answer');
-    var copyBtn  = outputEl.querySelector('.sfnav-ask-copy');
-    headerEl.style.display = 'block';
-    headerEl.querySelector('.sfnav-ask-history-q').textContent = entry.question || '';
-    var metaBits = [formatAskTimeAgo(entry.timestamp)];
-    if (entry.contextLine) metaBits.push(entry.contextLine);
-    headerEl.querySelector('.sfnav-ask-history-meta').textContent = metaBits.join(' · ');
-    var pagerEl = headerEl.querySelector('.sfnav-ask-history-pager');
-    if (askHistoryEntries.length > 1) {
-      pagerEl.style.display = 'inline-flex';
-      headerEl.querySelector('.sfnav-ask-history-pos').textContent =
-        (askHistoryIndex + 1) + '/' + askHistoryEntries.length;
-      headerEl.querySelector('.sfnav-ask-history-prev').disabled = askHistoryIndex >= askHistoryEntries.length - 1;
-      headerEl.querySelector('.sfnav-ask-history-next').disabled = askHistoryIndex <= 0;
-    } else {
-      pagerEl.style.display = 'none';
+  var askHistoryExpanded = false;
+
+  function renderAskHistoryList() {
+    var listEl = document.getElementById('sfnav-ask-history');
+    var labelEl = document.getElementById('sfnav-ask-history-label');
+    if (!listEl || !labelEl) return;
+    if (!askHistoryEntries.length) {
+      labelEl.style.display = 'none';
+      listEl.style.display = 'none';
+      listEl.innerHTML = '';
+      return;
     }
-    answerEl.innerHTML = renderAskMarkdown(entry.answer || '');
-    copyBtn.onclick = function () {
-      navigator.clipboard.writeText(entry.answer || '').then(function () {
-        var prev = copyBtn.textContent;
-        copyBtn.textContent = 'Copied!';
-        setTimeout(function () { copyBtn.textContent = prev; }, 1500);
+    labelEl.style.display = 'flex';
+    listEl.style.display = 'block';
+    listEl.innerHTML = '';
+
+    var COLLAPSED = 3;
+    var visible = askHistoryExpanded ? askHistoryEntries : askHistoryEntries.slice(0, COLLAPSED);
+
+    visible.forEach(function (entry) {
+      var li = document.createElement('li');
+      li.className = 'sfnav-ask-history-item';
+      li.innerHTML =
+        '<span class="sfnav-ask-history-q">' + esc(entry.question || '') + '</span>' +
+        '<span class="sfnav-ask-history-meta">' + esc(formatAskTimeAgo(entry.timestamp)) + '</span>';
+      li.addEventListener('click', function () {
+        renderAskOutput(entry);
       });
-    };
-    outputEl.style.display = 'block';
+      listEl.appendChild(li);
+    });
+
+    if (askHistoryEntries.length > COLLAPSED) {
+      var moreLi = document.createElement('li');
+      moreLi.className = 'sfnav-ask-history-more';
+      moreLi.textContent = askHistoryExpanded
+        ? 'Show less'
+        : '… ' + (askHistoryEntries.length - COLLAPSED) + ' more';
+      moreLi.addEventListener('click', function () {
+        askHistoryExpanded = !askHistoryExpanded;
+        renderAskHistoryList();
+      });
+      listEl.appendChild(moreLi);
+    }
   }
 
   // Minimal Markdown-ish renderer: paragraphs, bullets, inline code, bold.
@@ -1375,6 +1385,15 @@
       e.preventDefault();
       e.stopPropagation();
       togglePalette();
+      return;
+    }
+    // Esc must always escape the palette, even when focus has drifted to a
+    // non-handler element (rendered answer, breadcrumb, status line, etc.).
+    // Inner inputs/textareas call preventDefault on their own Esc handling, so
+    // defaultPrevented guards against double-firing.
+    if (e.key === 'Escape' && paletteVisible && !e.defaultPrevented) {
+      e.preventDefault();
+      handleBack();
     }
   });
 

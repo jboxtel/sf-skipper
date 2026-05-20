@@ -148,6 +148,7 @@
     coachmark.style.display = 'none';
     coachmark.innerHTML =
       '<div class="sfnav-cm-bar"><div class="sfnav-cm-fill" id="sfnav-cm-fill"></div></div>' +
+      '<button class="sfnav-cm-btn sfnav-cm-skip" type="button">Skip tour</button>' +
       '<div class="sfnav-cm-wrap">' +
         '<div class="sfnav-cm-left">' +
           '<div>' +
@@ -159,7 +160,6 @@
           '<div class="sfnav-cm-footer">' +
             '<div class="sfnav-cm-dots" id="sfnav-cm-dots"></div>' +
             '<div class="sfnav-cm-btns">' +
-              '<button class="sfnav-cm-btn sfnav-cm-skip" type="button">Skip tour</button>' +
               '<button class="sfnav-cm-btn sfnav-cm-prev" type="button" style="display:none">Back</button>' +
               '<button class="sfnav-cm-btn sfnav-cm-primary sfnav-cm-next" type="button">Next</button>' +
             '</div>' +
