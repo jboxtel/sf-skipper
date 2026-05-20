@@ -770,71 +770,68 @@ ol.sfnav-flowdebug-steps li::before {
   border-color: var(--sf-ink);
 }
 
-.sfnav-ask-history-header {
-  margin-bottom: 10px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--sf-rule);
-}
-
-.sfnav-ask-history-q {
+.sfnav-ask-output-question {
   font-family: var(--sf-sans);
   font-size: 12px;
   font-weight: 600;
   color: var(--sf-ink);
-  margin-bottom: 4px;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--sf-rule);
   white-space: pre-wrap;
   word-break: break-word;
 }
 
-.sfnav-ask-history-meta-row {
+#sfnav-ask-history {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.sfnav-ask-history-item {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: var(--sf-radius);
+  cursor: pointer;
+  transition: background var(--sf-transition);
+}
+
+.sfnav-ask-history-item:hover {
+  background: var(--sf-rule-soft);
+}
+
+.sfnav-ask-history-q {
+  flex: 1;
+  font-family: var(--sf-sans);
+  font-size: 13px;
+  color: var(--sf-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 400;
 }
 
 .sfnav-ask-history-meta {
-  font-family: var(--sf-sans);
   font-size: 11px;
-  color: var(--sf-ink-soft);
+  color: var(--sf-ink-faint);
+  font-family: var(--sf-sans);
+  flex-shrink: 0;
 }
 
-.sfnav-ask-history-pager {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-family: var(--sf-sans);
-  font-size: 11px;
-  color: var(--sf-ink-soft);
-}
-
-.sfnav-ask-history-pager button {
-  background: var(--sf-surface);
-  color: var(--sf-ink-soft);
-  border: 1px solid var(--sf-rule);
-  border-radius: var(--sf-radius);
+.sfnav-ask-history-more {
+  padding: 8px 12px;
   font-family: var(--sf-sans);
   font-size: 12px;
-  line-height: 1;
-  padding: 2px 8px;
+  color: var(--sf-ink-soft);
   cursor: pointer;
-  transition: background var(--sf-transition), color var(--sf-transition);
-}
-
-.sfnav-ask-history-pager button:hover:not(:disabled) {
-  background: var(--sf-ink);
-  color: #ffffff;
-  border-color: var(--sf-ink);
-}
-
-.sfnav-ask-history-pager button:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
-.sfnav-ask-history-pos {
-  min-width: 28px;
   text-align: center;
+  transition: color var(--sf-transition);
+}
+
+.sfnav-ask-history-more:hover {
+  color: var(--sf-ink);
 }
 
 /* ─── Ask Activity (tool-use trace) ────────────────── */
@@ -974,6 +971,14 @@ ol.sfnav-flowdebug-steps li::before {
   border-bottom: 1px solid var(--sf-coach-border);
   border-left: 3px solid var(--sf-accent);
   flex-shrink: 0;
+  position: relative;
+}
+
+#sfnav-coachmark > .sfnav-cm-skip {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  z-index: 1;
 }
 
 .sfnav-cm-bar {
