@@ -1,107 +1,81 @@
-var ANTHROPIC_TIMEOUT_MS = 60000;
+// LLM provider adapters — translation between Anthropic-shaped requests and
+// OpenAI/Gemini. Loaded as a classic worker so importScripts is available.
+importScripts('providers.js');
 
-// Look up the `sid` cookie for the requested Salesforce host. Cookie is HttpOnly,
-// so the page can't read it directly. Falls back to scanning *.salesforce.com
-// for a cookie sharing the same orgId prefix (first 15 chars of the sid value).
+// Look up the `sid` cookie for the requested Salesforce host. Cookie is
+// HttpOnly so the page can't read it directly. If the exact host has no
+// cookie, fall back to a sibling host with the same MyDomain prefix (e.g.
+// caller asked about foo.lightning.force.com but the sid is on
+// foo.my.salesforce.com). The fallback is constrained to the leftmost
+// subdomain so a user logged into multiple orgs/sandboxes can never have
+// Org A's sid returned for a request scoped to Org B.
 function handleGetSession(req, sendResponse) {
   chrome.cookies.get({ url: 'https://' + req.sfHost, name: 'sid' }, function (primary) {
     if (primary && primary.value) {
       sendResponse({ sid: primary.value, hostname: primary.domain });
       return;
     }
-    chrome.cookies.getAll({ name: 'sid', domain: 'salesforce.com', secure: true }, function (cookies) {
-      var list = (cookies || []).filter(function (c) {
-        return c.domain && c.domain !== 'help.salesforce.com';
+    var wanted = leftmostSubdomain(req.sfHost);
+    if (!wanted) { sendResponse(null); return; }
+    chrome.cookies.getAll({ name: 'sid', secure: true }, function (cookies) {
+      var match = (cookies || []).find(function (c) {
+        if (!c.domain) return false;
+        return leftmostSubdomain(c.domain.replace(/^\./, '')) === wanted;
       });
-      // Prefer a cookie whose orgId prefix matches a primary cookie on any related host.
-      // Without that signal, fall back to the first non-help cookie (single-org users).
-      var match = list[0] || null;
       sendResponse(match ? { sid: match.value, hostname: match.domain } : null);
     });
   });
 }
 
-// Generic Anthropic call. `userContent` may be a plain string (legacy) or an
-// array of content blocks ({type:'text',...} / {type:'image',...}).
-// Returns { text, toolInput } — text is the first text block (may be empty),
-// toolInput is the parsed input object from the first tool_use block (or null).
-async function callAnthropic(opts, system, userContent, maxTokens, tools, toolChoice) {
-  const model = opts.model || 'claude-haiku-4-5-20251001';
-  if (opts.debug) {
-    const blocks = Array.isArray(userContent) ? userContent.length : 1;
-    console.log('sfnav: calling Anthropic', { model: model, systemLen: (system || '').length, userBlocks: blocks, tools: tools ? tools.length : 0 });
-  }
-
-  const controller = new AbortController();
-  const timer = setTimeout(function () { controller.abort(); }, ANTHROPIC_TIMEOUT_MS);
-
-  const reqBody = {
-    model: model,
-    max_tokens: maxTokens || 1024,
-    system: system,
-    messages: [{ role: 'user', content: userContent }]
-  };
-  if (tools && tools.length) reqBody.tools = tools;
-  if (toolChoice) reqBody.tool_choice = toolChoice;
-
-  let res;
-  try {
-    res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': opts.anthropicApiKey,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true'
-      },
-      body: JSON.stringify(reqBody),
-      signal: controller.signal
-    });
-  } finally {
-    clearTimeout(timer);
-  }
-
-  const raw = await res.text();
-  let body;
-  try { body = JSON.parse(raw); } catch (_) { body = null; }
-  if (!res.ok) {
-    if (opts.debug) console.warn('sfnav: Anthropic error', res.status, raw);
-    const errorType = body && body.error && body.error.type;
-    const rawMsg = (body && body.error && body.error.message) || raw || ('HTTP ' + res.status);
-    const msg = (res.status === 529 || errorType === 'overloaded_error')
-      ? 'Anthropic API is overloaded — please try again in a moment'
-      : rawMsg;
-    throw new Error(msg);
-  }
-  const respBlocks = (body && body.content) || [];
-  const textBlock = respBlocks.find(function (b) { return b.type === 'text'; });
-  const toolBlock = respBlocks.find(function (b) { return b.type === 'tool_use'; });
-  const text = (textBlock && textBlock.text) || '';
-  const toolInput = (toolBlock && toolBlock.input) || null;
-  if (opts.debug) console.log('sfnav: Anthropic ok', { textLen: text.length, toolUse: !!toolBlock });
-  return { text: text, toolInput: toolInput };
+// Leftmost subdomain identifies the org+environment uniquely on Salesforce:
+// production "foo.my.salesforce.com" and its Lightning host
+// "foo.lightning.force.com" share "foo"; sandbox "foo--qa.my.salesforce.com"
+// is treated as a different MyDomain ("foo--qa") and never matches "foo".
+function leftmostSubdomain(host) {
+  var parts = String(host || '').toLowerCase().split('.');
+  if (parts.length < 3) return null;
+  var sub = parts[0];
+  if (!sub || sub === 'help' || sub === 'login' || sub === 'www') return null;
+  return sub;
 }
 
+async function loadOpts() {
+  var data = await chrome.storage.local.get('sfnavOptions');
+  return data.sfnavOptions || {};
+}
+
+// Single-shot helper preserving the existing soql.generate contract: caller
+// sends system + user text (optional tools + toolChoice for structured output);
+// background returns { text, toolInput }.
 async function handleSoqlGenerate(req, sendResponse) {
   try {
-    const { sfnavOptions } = await chrome.storage.local.get('sfnavOptions');
-    const opts = sfnavOptions || {};
-    if (!opts.anthropicApiKey) {
-      sendResponse({ ok: false, error: 'No API key configured. Open the extension Options and paste your Anthropic key.' });
-      return;
-    }
-    let system = req.system;
+    var opts = await loadOpts();
+    var system = req.system;
     if (req.cacheSystem && typeof system === 'string') {
       system = [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }];
     }
-    const result = await callAnthropic(opts, system, req.user, 1024, req.tools, req.toolChoice);
-    sendResponse({ ok: true, text: result.text, toolInput: result.toolInput });
+    var body = {
+      system: system,
+      messages: [{ role: 'user', content: req.user }],
+      max_tokens: 1024
+    };
+    if (req.tools && req.tools.length) body.tools = req.tools;
+    if (req.toolChoice) body.tool_choice = req.toolChoice;
+
+    var resp = await providerMessageStep(opts, body);
+    var textBlock = (resp.content || []).find(function (b) { return b.type === 'text'; });
+    var toolBlock = (resp.content || []).find(function (b) { return b.type === 'tool_use'; });
+    sendResponse({
+      ok: true,
+      text: (textBlock && textBlock.text) || '',
+      toolInput: (toolBlock && toolBlock.input) || null
+    });
   } catch (err) {
-    if (err.name === 'AbortError') {
-      sendResponse({ ok: false, error: 'Request timed out after ' + (ANTHROPIC_TIMEOUT_MS / 1000) + 's' });
+    if (err && err.name === 'AbortError') {
+      sendResponse({ ok: false, error: 'Request timed out' });
       return;
     }
-    console.error('sfnav: Anthropic call threw', err);
+    console.error('sfnav: provider call threw', err);
     sendResponse({ ok: false, error: err.message });
   }
 }
@@ -138,74 +112,36 @@ function handleCaptureVisibleTab(sender, sendResponse) {
   }
 }
 
-// Generic Anthropic Messages API transport. The content script supplies the
-// full request body (system, messages, tools, max_tokens, model override) so
-// it can drive a multi-turn tool-use loop locally. We only inject the API key
-// and apply a request timeout.
+// Generic Messages API transport for the agentic @ask loop. The content script
+// supplies the full Anthropic-shaped request body (system, messages, tools,
+// max_tokens, optional model override); providers.js translates to the active
+// backend and normalizes the response back to Anthropic shape so ask.js stays
+// provider-agnostic.
 async function handleAskMessageStep(req, sendResponse) {
   try {
-    const { sfnavOptions } = await chrome.storage.local.get('sfnavOptions');
-    const opts = sfnavOptions || {};
-    if (!opts.anthropicApiKey) {
-      sendResponse({ ok: false, error: 'No API key configured. Open the extension Options and paste your Anthropic key.' });
-      return;
-    }
-    const body = Object.assign({}, req.body || {});
-    if (!body.model) body.model = opts.model || 'claude-haiku-4-5-20251001';
-    if (!body.max_tokens) body.max_tokens = 2048;
-
-    if (opts.debug) {
-      console.log('sfnav: ask step', {
-        model: body.model,
-        messages: (body.messages || []).length,
-        tools: (body.tools || []).length
-      });
-    }
-
-    const controller = new AbortController();
-    const timer = setTimeout(function () { controller.abort(); }, ANTHROPIC_TIMEOUT_MS);
-
-    let res;
-    try {
-      res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': opts.anthropicApiKey,
-          'anthropic-version': '2023-06-01',
-          'anthropic-dangerous-direct-browser-access': 'true'
-        },
-        body: JSON.stringify(body),
-        signal: controller.signal
-      });
-    } catch (err) {
-      if (err.name === 'AbortError') {
-        sendResponse({ ok: false, error: 'Request timed out after ' + (ANTHROPIC_TIMEOUT_MS / 1000) + 's' });
-      } else {
-        sendResponse({ ok: false, error: err.message });
-      }
-      return;
-    } finally {
-      clearTimeout(timer);
-    }
-
-    const raw = await res.text();
-    let parsed;
-    try { parsed = JSON.parse(raw); } catch (_) { parsed = null; }
-    if (!res.ok) {
-      if (opts.debug) console.warn('sfnav: Anthropic error', res.status, raw);
-      const msg = (parsed && parsed.error && parsed.error.message) || raw || ('HTTP ' + res.status);
-      sendResponse({ ok: false, error: msg });
-      return;
-    }
-    if (opts.debug) {
-      const blocks = (parsed && parsed.content) || [];
-      const toolCalls = blocks.filter(function (b) { return b.type === 'tool_use'; }).length;
-      console.log('sfnav: ask step ok', { stop: parsed && parsed.stop_reason, blocks: blocks.length, toolCalls: toolCalls });
-    }
-    sendResponse({ ok: true, response: parsed });
+    var opts = await loadOpts();
+    var body = Object.assign({}, req.body || {});
+    var resp = await providerMessageStep(opts, body);
+    // ask.js expects { content, stop_reason } under .response
+    sendResponse({ ok: true, response: resp });
   } catch (err) {
-    console.error('sfnav: Anthropic call threw', err);
+    if (err && err.name === 'AbortError') {
+      sendResponse({ ok: false, error: 'Request timed out' });
+      return;
+    }
+    console.error('sfnav: provider call threw', err);
+    sendResponse({ ok: false, error: err.message });
+  }
+}
+
+async function handleProviderTest(req, sendResponse) {
+  try {
+    // Caller may pass a transient opts override so the user can test without
+    // having to Save first. Fall back to stored options.
+    var opts = req.opts || (await loadOpts());
+    var result = await providerTestCall(opts);
+    sendResponse({ ok: true, provider: result.provider, model: result.model, text: result.text });
+  } catch (err) {
     sendResponse({ ok: false, error: err.message });
   }
 }
@@ -229,6 +165,10 @@ chrome.runtime.onMessage.addListener(function (req, sender, sendResponse) {
   }
   if (req.type === 'ask.messageStep') {
     handleAskMessageStep(req, sendResponse);
+    return true;
+  }
+  if (req.type === 'provider.test') {
+    handleProviderTest(req, sendResponse);
     return true;
   }
   if (req.type === 'openOptions') {

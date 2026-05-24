@@ -912,13 +912,13 @@
           var ctx = event.ctx;
           if (ctx && ctx.recordFields) {
             var n = Object.keys(ctx.recordFields).length;
-            statusEl.textContent = 'Asking Claude (sent ' + n + ' record fields)';
+            statusEl.textContent = 'Asking the assistant (sent ' + n + ' record fields)';
           } else {
-            statusEl.textContent = 'Asking Claude';
+            statusEl.textContent = 'Asking the assistant';
           }
         } else if (event.kind === 'tool_call') {
           appendAskActivity(activityEl, event);
-          statusEl.textContent = 'Claude is investigating';
+          statusEl.textContent = 'Investigating';
         } else if (event.kind === 'tool_result') {
           updateLastAskActivity(activityEl, event);
         } else if (event.kind === 'interim_text') {

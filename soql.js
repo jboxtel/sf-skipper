@@ -569,7 +569,12 @@ function hasSoqlApiKey() {
     if (typeof chrome === 'undefined' || !chrome.storage) { resolve(false); return; }
     chrome.storage.local.get('sfnavOptions', function (data) {
       var opts = data.sfnavOptions || {};
-      resolve(!!opts.anthropicApiKey);
+      // Legacy single-provider shape (top-level anthropicApiKey) still counts —
+      // those users haven't migrated until they next open the Options page.
+      if (opts.anthropicApiKey) { resolve(true); return; }
+      var active = opts.provider || 'gemini';
+      var p = (opts.providers && opts.providers[active]) || {};
+      resolve(!!p.apiKey);
     });
   });
 }
