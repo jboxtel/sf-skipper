@@ -11,28 +11,46 @@
       <p class="subtitle">Configuration</p>
 
       <section>
-        <h2>SOQL Generator</h2>
+        <h2>AI Provider</h2>
         <p class="desc">
-          Generates SOQL from natural language using the Anthropic Claude API.
-          Your key is stored locally in this browser only.
+          Powers @soql, @debug, and @ask. Your key is stored locally in this
+          browser only — never sent anywhere except the provider you choose.
         </p>
 
-        <label for="apiKey">Anthropic API Key</label>
-        <input id="apiKey" type="password" placeholder="sk-ant-..." autocomplete="off" spellcheck="false" />
+        <div class="provider-cards" role="radiogroup" aria-label="AI provider">
+          <button type="button" class="provider-card" data-provider="gemini" role="radio" aria-checked="false">
+            <span class="provider-name">Gemini</span>
+            <span class="provider-by">Google</span>
+          </button>
+          <button type="button" class="provider-card" data-provider="anthropic" role="radio" aria-checked="false">
+            <span class="provider-name">Claude</span>
+            <span class="provider-by">Anthropic</span>
+          </button>
+          <button type="button" class="provider-card" data-provider="openai" role="radio" aria-checked="false">
+            <span class="provider-name">GPT</span>
+            <span class="provider-by">OpenAI</span>
+          </button>
+        </div>
 
-        <label for="model">Model</label>
-        <select id="model">
-          <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5 (fast, recommended)</option>
-          <option value="claude-sonnet-4-6">Claude Sonnet 4.6 (more accurate)</option>
-          <option value="claude-opus-4-7">Claude Opus 4.7 (most accurate)</option>
-        </select>
+        <div class="provider-note" id="subscriptionNote" hidden></div>
+
+        <div class="provider-steps" id="providerSteps"></div>
+
+        <label for="apiKey" id="apiKeyLabel">API Key</label>
+        <input id="apiKey" type="password" placeholder="" autocomplete="off" spellcheck="false" />
+        <p class="field-warn" id="keyFormatWarn" hidden></p>
+
+        <div class="actions">
+          <button id="save" class="primary">Save and test</button>
+          <span id="status"></span>
+        </div>
+
+        <details class="advanced">
+          <summary>Advanced — pick a specific model</summary>
+          <label for="model">Model</label>
+          <select id="model"></select>
+        </details>
       </section>
-
-      <div class="actions">
-        <button id="save" class="primary">Save</button>
-        <button id="test" class="secondary">Test Connection</button>
-        <span id="status"></span>
-      </div>
 
       <section>
         <h2>Navigation</h2>

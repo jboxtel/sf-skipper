@@ -56,8 +56,8 @@
     {
       eyebrow: 'AI — Query',
       title: 'Find records by describing them',
-      desc: 'Type what you’re looking for in plain English — Claude turns it into a Salesforce data query (SOQL) for you.',
-      note: 'Requires an Anthropic API key in Options.',
+      desc: 'Type what you’re looking for in plain English — the assistant turns it into a Salesforce data query (SOQL) for you.',
+      note: 'Requires an AI provider key in Options (free Gemini tier supported).',
       rows: ['soql'],
       right: 'examples',
       examples: [
@@ -68,7 +68,7 @@
     {
       eyebrow: 'AI — Ask',
       title: 'Ask about what you’re looking at',
-      desc: 'Skipper takes a screenshot of your current page and asks Claude to explain it — useful for understanding settings, errors, or anything that looks wrong.',
+      desc: 'Skipper takes a screenshot of your current page and asks the AI to explain it — useful for understanding settings, errors, or anything that looks wrong.',
       note: null,
       rows: ['ask'],
       right: 'examples',
@@ -80,7 +80,7 @@
     {
       eyebrow: 'AI — Debug',
       title: 'Get help when a flow stops working',
-      desc: 'When a flow fails during a test run in Flow Builder, paste the error output here. Claude reads it and tells you exactly what went wrong and where.',
+      desc: 'When a flow fails during a test run in Flow Builder, paste the error output here. The AI reads it and tells you exactly what went wrong and where.',
       note: null,
       rows: ['flow-debug'],
       right: 'context+examples',
