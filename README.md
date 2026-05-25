@@ -1,4 +1,6 @@
-# Skipper For Salesforce
+# Skipper for Salesforce
+
+**Grounding and guardrails for AI in Salesforce.**
 
 A keyboard-first command palette for Salesforce. Press `⌘⇧K` (Mac) or `Ctrl+Shift+K` (Windows/Linux) on any Salesforce page and jump to any object, field, flow, or setup page in seconds. 
 
@@ -90,6 +92,8 @@ When something in a flow doesn't behave as expected:
 Skipper fetches the flow's metadata from the Tooling API, sends it together with your debug output to your chosen AI provider, and returns a **summary**, **root cause**, **suggested fix**, and the **execution path**. Like the SOQL Generator, it's read-only — no changes are made to the flow.
 
 ### Privacy and credentials
+
+Full policy in [PRIVACY.md](PRIVACY.md). Short version:
 
 **There is no backend.** No server, no analytics, no telemetry — nothing about your usage is shared with me or anyone else. Your data stays in your browser. The only outbound traffic this extension produces is:
 
