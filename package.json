@@ -9,7 +9,8 @@
     "debug": "node test/debug.js",
     "eval:soql": "node test/soql-eval.js",
     "eval:flow-debug": "node test/flow-debug-eval.js",
-    "test:flow-debug-validator": "node test/flow-debug-validator-test.js"
+    "test:flow-debug-validator": "node test/flow-debug-validator-test.js",
+    "test:org-glossary": "node test/org-glossary-test.js"
   },
   "devDependencies": {
     "playwright": "^1.59.1"

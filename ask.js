@@ -838,6 +838,14 @@ async function runAsk(question, onActivity) {
         }
         resultContent = trimResultJson(result);
         emit({ kind: 'tool_result', name: tu.name, ok: true, summary: summarizeToolResult(tu.name, result), iteration: iter + 1 });
+        // Phase-1 glossary observation: when runSoql returns rows, treat the
+        // (question, soql) pair as a positive signal that the chosen object
+        // matches the user's vocabulary. Fire-and-forget; the extractor and
+        // glossary write are best-effort and must never break the tool loop.
+        if (tu.name === 'runSoql' && result && result.totalSize > 0) {
+          try { _observeAskSoqlSuccess(question, tu.input && tu.input.query); }
+          catch (_glossErr) { console.warn('sfnav: glossary observe failed', _glossErr.message); }
+        }
       } catch (err) {
         resultContent = 'Error: ' + err.message;
         isError = true;
@@ -923,4 +931,53 @@ function summarizeToolResult(name, result) {
     return (result.totalLines || 0) + ' lines' + (result.truncated ? ' (truncated)' : '');
   }
   return 'ok';
+}
+
+// Phase-1 glossary observation hook from the @ask agentic loop. Fires on
+// runSoql tool calls that returned rows. We don't have the full describe
+// schema in scope here (the model may have called describeSObject earlier,
+// but threading that back is more coupling than it's worth for Phase 1) —
+// the extractor degrades gracefully without a schema, leaning on apiName +
+// label + the generic-noun stoplist to filter noise. Write-only; no caller
+// reads from these entries yet.
+function _observeAskSoqlSuccess(question, soql) {
+  if (typeof glossaryObserveBatch !== 'function') return;
+  if (typeof extractObjectAliasCandidates !== 'function') return;
+  if (!question || !soql) return;
+
+  var fromObject = extractFromObject(soql);
+  if (!fromObject) return;
+
+  // Resolve label from the shared object cache if available so the surface-
+  // token check has something to compare against. Falls back to api-name-only
+  // when the object isn't in the cache (managed-package or rare object).
+  var label = null;
+  if (typeof getAllObjects === 'function') {
+    var all = getAllObjects();
+    for (var i = 0; i < all.length; i++) {
+      if (all[i].apiName === fromObject) { label = all[i].label; break; }
+    }
+  }
+  var recordTypes = (typeof getRecordTypesFor === 'function')
+    ? getRecordTypesFor(fromObject) : [];
+
+  var candidates = extractObjectAliasCandidates(
+    question,
+    { apiName: fromObject, label: label },
+    null,         // no field schema in this path
+    recordTypes
+  );
+  if (!candidates.length) return;
+  var observations = candidates.map(function (c) {
+    return {
+      type: c.type,
+      feature: 'ask',
+      term: c.term,
+      target: c.target,
+      evidence: c.evidence
+    };
+  });
+  glossaryObserveBatch(observations).catch(function (err) {
+    console.warn('sfnav: glossary persist failed', err.message);
+  });
 }
