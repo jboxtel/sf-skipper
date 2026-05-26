@@ -8,8 +8,9 @@ var PROVIDERS = {
   gemini: {
     label: 'Google',
     productName: 'Gemini',
+    badge: 'GEMINI',
     keyLabel: 'Google API key',
-    keyPlaceholder: 'AIza...',
+    keyPlaceholder: 'AIza…',
     validate: function (k) {
       if (!k) return null;
       if (!/^AIza[0-9A-Za-z_\-]{30,}$/.test(k)) {
@@ -17,8 +18,6 @@ var PROVIDERS = {
       }
       return null;
     },
-    consoleLabel: 'aistudio.google.com/apikey',
-    consoleUrl: 'https://aistudio.google.com/apikey',
     steps: function (a) {
       return [
         'Open ' + a('aistudio.google.com/apikey', 'https://aistudio.google.com/apikey') + ' and sign in with any Google account.',
@@ -36,8 +35,9 @@ var PROVIDERS = {
   anthropic: {
     label: 'Anthropic',
     productName: 'Claude',
+    badge: 'CLAUDE',
     keyLabel: 'Anthropic API key',
-    keyPlaceholder: 'sk-ant-...',
+    keyPlaceholder: 'sk-ant-…',
     validate: function (k) {
       if (!k) return null;
       if (!/^sk-ant-/.test(k)) {
@@ -45,8 +45,6 @@ var PROVIDERS = {
       }
       return null;
     },
-    consoleLabel: 'console.anthropic.com',
-    consoleUrl: 'https://console.anthropic.com/settings/keys',
     steps: function (a) {
       return [
         'Open ' + a('console.anthropic.com/settings/keys', 'https://console.anthropic.com/settings/keys') + ' and sign in (create an account if you don’t have one).',
@@ -65,8 +63,9 @@ var PROVIDERS = {
   openai: {
     label: 'OpenAI',
     productName: 'GPT',
+    badge: 'GPT',
     keyLabel: 'OpenAI API key',
-    keyPlaceholder: 'sk-...',
+    keyPlaceholder: 'sk-…',
     validate: function (k) {
       if (!k) return null;
       if (!/^sk-/.test(k)) {
@@ -77,8 +76,6 @@ var PROVIDERS = {
       }
       return null;
     },
-    consoleLabel: 'platform.openai.com/api-keys',
-    consoleUrl: 'https://platform.openai.com/api-keys',
     steps: function (a) {
       return [
         'Open ' + a('platform.openai.com/api-keys', 'https://platform.openai.com/api-keys') + ' and sign in (create an account if you don’t have one).',
@@ -98,24 +95,42 @@ var PROVIDERS = {
 
 // ─── DOM refs ───────────────────────────────────────────────────────────────
 
-var cardsEl       = document.querySelector('.provider-cards');
+var navEl         = document.getElementById('nav');
+var cardsEl       = document.getElementById('providerCards');
 var stepsEl       = document.getElementById('providerSteps');
-var noteEl        = document.getElementById('subscriptionNote');
+var noteEl        = document.getElementById('providerNote');
 var keyLabelEl    = document.getElementById('apiKeyLabel');
 var apiKeyEl      = document.getElementById('apiKey');
 var keyWarnEl     = document.getElementById('keyFormatWarn');
+var revealEl      = document.getElementById('revealKey');
+var eyeShowEl     = document.getElementById('eyeShow');
+var eyeHideEl     = document.getElementById('eyeHide');
 var modelEl       = document.getElementById('model');
 var saveEl        = document.getElementById('save');
 var statusEl      = document.getElementById('status');
 var openInEl      = document.getElementById('openIn');
-var replayEl     = document.getElementById('replayWalkthrough');
-var walkStatusEl = document.getElementById('walkthroughStatus');
+var replayEl      = document.getElementById('replayWalkthrough');
+var walkStatusEl  = document.getElementById('walkthroughStatus');
+var versionEl     = document.getElementById('version');
+var aboutVerEl    = document.getElementById('aboutVersion');
+var connectedEl   = document.getElementById('connectedStatus');
+var csProviderEl  = document.getElementById('csProvider');
+var csKeyEl       = document.getElementById('csKey');
+var csStateEl     = document.getElementById('csState');
 
 var state = {
   provider: 'gemini',
   providers: { gemini: {}, anthropic: {}, openai: {} },
   openInNewTab: true
 };
+
+// ─── Version stamp ──────────────────────────────────────────────────────────
+
+try {
+  var version = chrome.runtime.getManifest().version;
+  if (versionEl)  versionEl.textContent = 'v' + version;
+  if (aboutVerEl) aboutVerEl.textContent = version;
+} catch (e) { /* non-extension preview */ }
 
 // ─── Load + migrate stored options ──────────────────────────────────────────
 
@@ -144,28 +159,46 @@ chrome.storage.local.get('sfnavOptions', function (data) {
   renderProvider();
 });
 
+// ─── Pane switching ─────────────────────────────────────────────────────────
+
+navEl.addEventListener('click', function (e) {
+  var item = e.target.closest('.ni');
+  if (!item) return;
+  var pane = item.getAttribute('data-pane');
+  if (!pane) return;
+  Array.prototype.forEach.call(navEl.querySelectorAll('.ni'), function (n) {
+    n.classList.toggle('on', n === item);
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('.pane'), function (p) {
+    p.classList.toggle('on', p.id === 'pane-' + pane);
+  });
+});
+
 // ─── Rendering ──────────────────────────────────────────────────────────────
 
 function esc(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-// Link helper used inside provider step templates so URLs stay declarative in
-// the catalogue while still being escaped here.
 function linkHtml(label, url) {
   return '<a href="' + esc(url) + '" target="_blank" rel="noopener">' + esc(label) + ' &nearr;</a>';
 }
 
+function maskKey(key) {
+  if (!key) return '';
+  if (key.length <= 8) return '••••' + key.slice(-2);
+  return key.slice(0, 8) + '••••••••••••' + key.slice(-4);
+}
+
 function renderProvider() {
-  // Card selection state
-  Array.prototype.forEach.call(cardsEl.querySelectorAll('.provider-card'), function (el) {
+  Array.prototype.forEach.call(cardsEl.querySelectorAll('.pc'), function (el) {
     var match = el.getAttribute('data-provider') === state.provider;
     el.setAttribute('aria-checked', match ? 'true' : 'false');
   });
 
   var p = PROVIDERS[state.provider];
 
-  // Subscription warning (Anthropic / OpenAI only)
+  // Subscription warning (anthropic / openai only)
   if (p.note) {
     noteEl.textContent = p.note;
     noteEl.hidden = false;
@@ -173,21 +206,27 @@ function renderProvider() {
     noteEl.hidden = true;
   }
 
-  // 3-step "how to get a key" — always visible, deep-links to provider
-  var stepsHtml = '<p class="provider-steps-title">How to get a key</p><ol>';
+  // 3-step "how to get a key"
+  stepsEl.innerHTML = '';
   p.steps(linkHtml).forEach(function (line) {
-    stepsHtml += '<li>' + line + '</li>';
+    var li = document.createElement('li');
+    var span = document.createElement('span');
+    span.innerHTML = line;
+    li.appendChild(span);
+    stepsEl.appendChild(li);
   });
-  stepsHtml += '</ol>';
-  stepsEl.innerHTML = stepsHtml;
 
   // Key field rebinding
   keyLabelEl.textContent = p.keyLabel;
   apiKeyEl.placeholder = p.keyPlaceholder;
   apiKeyEl.value = (state.providers[state.provider] && state.providers[state.provider].apiKey) || '';
+  // Reset reveal to masked on provider switch
+  apiKeyEl.type = 'password';
+  eyeShowEl.hidden = false;
+  eyeHideEl.hidden = true;
   validateKeyFormat();
 
-  // Model dropdown — repopulated per provider
+  // Model dropdown
   modelEl.innerHTML = '';
   p.models.forEach(function (m) {
     var opt = document.createElement('option');
@@ -198,7 +237,21 @@ function renderProvider() {
   var savedModel = (state.providers[state.provider] && state.providers[state.provider].model) || p.defaultModel;
   modelEl.value = savedModel;
 
+  renderConnectedStatus();
   setStatus('');
+}
+
+function renderConnectedStatus() {
+  var p = PROVIDERS[state.provider];
+  var key = state.providers[state.provider] && state.providers[state.provider].apiKey;
+  if (!key) {
+    connectedEl.hidden = true;
+    return;
+  }
+  connectedEl.hidden = false;
+  csProviderEl.textContent = p.badge;
+  csKeyEl.textContent = maskKey(key);
+  csStateEl.textContent = 'Saved';
 }
 
 function validateKeyFormat() {
@@ -219,13 +272,13 @@ function setStatus(text, kind) {
 
 function setWalkStatus(text, kind) {
   walkStatusEl.textContent = text;
-  walkStatusEl.className = kind || '';
+  walkStatusEl.className = 'walk-status' + (kind ? ' ' + kind : '');
 }
 
 // ─── Event handlers ─────────────────────────────────────────────────────────
 
 cardsEl.addEventListener('click', function (e) {
-  var card = e.target.closest('.provider-card');
+  var card = e.target.closest('.pc');
   if (!card) return;
   var name = card.getAttribute('data-provider');
   if (!name || name === state.provider) return;
@@ -240,12 +293,17 @@ cardsEl.addEventListener('click', function (e) {
 
 apiKeyEl.addEventListener('input', validateKeyFormat);
 
+revealEl.addEventListener('click', function () {
+  var hidden = apiKeyEl.type === 'password';
+  apiKeyEl.type = hidden ? 'text' : 'password';
+  eyeShowEl.hidden = hidden;
+  eyeHideEl.hidden = !hidden;
+});
+
 saveEl.addEventListener('click', async function () {
   var key = apiKeyEl.value.trim();
   if (!key) { setStatus('Enter an API key first', 'err'); return; }
 
-  // Persist the active provider + key + model, then call provider.test so the
-  // user gets a green/red verdict before they close the tab.
   state.providers[state.provider] = state.providers[state.provider] || {};
   state.providers[state.provider].apiKey = key;
   state.providers[state.provider].model = modelEl.value;
@@ -267,6 +325,7 @@ saveEl.addEventListener('click', async function () {
     if (!resp.ok) { setStatus('Failed: ' + resp.error, 'err'); return; }
     var p = PROVIDERS[state.provider];
     setStatus('Connected to ' + p.productName + ' (' + (resp.model || '—') + ')', 'ok');
+    renderConnectedStatus();
   });
 });
 

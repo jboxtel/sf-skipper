@@ -169,7 +169,7 @@
           '<div id="sfnav-ask-history-label" class="sfnav-section-header" style="display:none">Recent</div>' +
           '<ul id="sfnav-ask-history"></ul>' +
         '</div>' +
-        '<div id="sfnav-footer"><span id="sfnav-brand">Skipper For Salesforce<span id="sfnav-brand-help">help</span></span><span id="sfnav-footer-hints"></span></div>' +
+        '<div id="sfnav-footer"><span id="sfnav-brand">Skipper for Salesforce<span id="sfnav-brand-help">help</span></span><span id="sfnav-footer-hints"></span></div>' +
       '</div>';
 
     document.body.appendChild(overlay);

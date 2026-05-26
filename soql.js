@@ -519,7 +519,13 @@ async function generateSoql(prompt, onProgress) {
       return parsed;
     }
 
-    if (validation.ok) return parsed;
+    if (validation.ok) {
+      // Phase-1 glossary observation: fire-and-forget so a buggy extractor or
+      // storage hiccup never blocks returning a valid query to the user.
+      try { _observeSoqlSuccess(prompt, parsed, schemaObjects); }
+      catch (_observeErr) { console.warn('sfnav: glossary observe failed', _observeErr.message); }
+      return parsed;
+    }
     attempts.push({ soql: parsed.soql, error: validation.error });
     userMessage = buildRetryUserMessage(baseUserMessage, attempts);
   }
@@ -530,6 +536,48 @@ async function generateSoql(prompt, onProgress) {
     return lastParsed;
   }
   throw new Error('Failed to generate a valid SOQL query');
+}
+
+// Run extractors and fan out observations to the org glossary. Phase 1 is
+// write-only — nothing reads these entries yet, the v1.1 read-side will. By
+// the time the inspector + reads ship, early users already have populated
+// glossaries from organic v1.0 use.
+function _observeSoqlSuccess(prompt, parsed, schemaObjects) {
+  if (typeof glossaryObserveBatch !== 'function') return;
+  if (typeof extractObjectAliasCandidates !== 'function') return;
+
+  // Pick the schema entry that matches the SOQL's FROM clause. Prefer the
+  // model-reported objectName as a hint, but the FROM clause is authoritative.
+  var fromObject = extractFromObject(parsed.soql) || parsed.objectName || null;
+  if (!fromObject) return;
+
+  var schemaEntry = null;
+  for (var i = 0; i < schemaObjects.length; i++) {
+    if (schemaObjects[i].apiName === fromObject) { schemaEntry = schemaObjects[i]; break; }
+  }
+  // Even if the chosen object isn't in our candidate set (rare — model picked
+  // something we didn't suggest), we still observe with a minimal stub. Surface
+  // tokens degrade gracefully without a schema.
+  var chosenObject = schemaEntry
+    ? { apiName: schemaEntry.apiName, label: schemaEntry.label }
+    : { apiName: fromObject, label: null };
+  var recordTypes = schemaEntry ? (schemaEntry.recordTypes || []) : [];
+
+  var candidates = extractObjectAliasCandidates(prompt, chosenObject, schemaEntry, recordTypes);
+  if (!candidates.length) return;
+  var observations = candidates.map(function (c) {
+    return {
+      type: c.type,
+      feature: 'soql',
+      term: c.term,
+      target: c.target,
+      evidence: c.evidence
+    };
+  });
+  // Fire-and-forget; we don't await to avoid blocking the caller.
+  glossaryObserveBatch(observations).catch(function (err) {
+    console.warn('sfnav: glossary persist failed', err.message);
+  });
 }
 
 function getSoqlHistory() {

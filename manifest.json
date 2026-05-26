@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Skipper For Salesforce",
-  "version": "1.1.0",
-  "description": "Command palette for instant Salesforce Setup navigation",
+  "name": "Skipper for Salesforce",
+  "version": "1.0.0",
+  "description": "Grounding and guardrails for AI in Salesforce.",
   "permissions": ["activeTab", "scripting", "storage", "cookies"],
   "host_permissions": [
     "https://*.lightning.force.com/*",
@@ -20,7 +20,7 @@
   },
   "options_page": "options.html",
   "action": {
-    "default_title": "Skipper For Salesforce",
+    "default_title": "Skipper for Salesforce",
     "default_popup": "popup.html",
     "default_icon": { "16": "icons/icon16.png", "48": "icons/icon48.png", "128": "icons/icon128.png" }
   },
@@ -33,7 +33,7 @@
         "https://*.my.salesforce-setup.com/*",
         "https://*.force.com/*"
       ],
-      "js": ["salesforce-urls.js", "shared.js", "cache-factory.js", "objects.js", "cmdt.js", "flows.js", "apps.js", "labels.js", "permsets.js", "flow-debug.js", "commands.js", "soql.js", "ask.js", "markdown.js", "onboarding.js", "content.js"],
+      "js": ["salesforce-urls.js", "shared.js", "cache-factory.js", "objects.js", "cmdt.js", "flows.js", "apps.js", "labels.js", "permsets.js", "flow-debug.js", "commands.js", "org-glossary.js", "org-glossary-extractors.js", "soql.js", "ask.js", "markdown.js", "onboarding.js", "content.js"],
       "css": ["content.css"],
       "run_at": "document_idle"
     }

@@ -1,82 +1,202 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Skipper For Salesforce — Settings</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Skipper for Salesforce — Settings</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="options.css" />
   </head>
   <body>
-    <main>
-      <h1>Skipper For Salesforce</h1>
-      <p class="subtitle">Configuration</p>
+    <div class="shell">
+      <aside class="sb">
+        <div class="sb-brand">
+          <div class="wm">Skipper</div>
+          <div class="ws">for Salesforce</div>
+        </div>
+        <nav class="nav" id="nav">
+          <div class="ni on" data-pane="provider">
+            <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="4" width="4" height="4" rx="1"/><rect x="9" y="4" width="4" height="4" rx="1"/><line x1="5" y1="6" x2="9" y2="6"/></svg>
+            Provider
+          </div>
+          <div class="ni" data-pane="navigation">
+            <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><path d="M2 3.5h10M2 7h10M2 10.5h6"/></svg>
+            Navigation
+          </div>
+          <div class="ni" data-pane="walkthrough">
+            <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><circle cx="7" cy="7" r="2"/><path d="M7 1v2M7 11v2M1 7h2M11 7h2"/></svg>
+            Walkthrough
+          </div>
+          <div class="ndiv"></div>
+          <div class="ni" data-pane="about">
+            <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2"><circle cx="7" cy="7" r="5.5"/><line x1="7" y1="6" x2="7" y2="10" stroke-linecap="round" stroke-width="1.3"/><circle cx="7" cy="4.2" r=".7" fill="currentColor" stroke="none"/></svg>
+            About
+          </div>
+        </nav>
+        <div class="sb-foot"><div class="ver" id="version">v1.1.0</div></div>
+      </aside>
 
-      <section>
-        <h2>AI Provider</h2>
-        <p class="desc">
-          Powers @soql, @debug, and @ask. Your key is stored locally in this
-          browser only — never sent anywhere except the provider you choose.
-        </p>
+      <main class="main">
+        <!-- PROVIDER -->
+        <div class="pane on" id="pane-provider">
+          <div class="ph">
+            <h1>AI Provider</h1>
+            <p>Powers @soql, @debug, and @ask. Your key is stored locally in this browser only — never sent anywhere except the provider you choose.</p>
+          </div>
 
-        <div class="provider-cards" role="radiogroup" aria-label="AI provider">
-          <button type="button" class="provider-card" data-provider="gemini" role="radio" aria-checked="false">
-            <span class="provider-name">Gemini</span>
-            <span class="provider-by">Google</span>
-          </button>
-          <button type="button" class="provider-card" data-provider="anthropic" role="radio" aria-checked="false">
-            <span class="provider-name">Claude</span>
-            <span class="provider-by">Anthropic</span>
-          </button>
-          <button type="button" class="provider-card" data-provider="openai" role="radio" aria-checked="false">
-            <span class="provider-name">GPT</span>
-            <span class="provider-by">OpenAI</span>
-          </button>
+          <div class="cs" id="connectedStatus" hidden>
+            <div class="cs-b" id="csProvider">—</div>
+            <div class="cs-k" id="csKey">—</div>
+            <div class="cs-s"><div class="dot g"></div><span id="csState">Saved</span></div>
+          </div>
+
+          <div class="sec">
+            <div class="sl">Choose provider</div>
+            <div class="pg" id="providerCards" role="radiogroup" aria-label="AI provider">
+              <button type="button" class="pc" data-provider="gemini" role="radio" aria-checked="false">
+                <span class="sdot"></span>
+                <span class="pn">Gemini</span>
+                <span class="ps">Google</span>
+              </button>
+              <button type="button" class="pc" data-provider="anthropic" role="radio" aria-checked="false">
+                <span class="sdot"></span>
+                <span class="pn">Claude</span>
+                <span class="ps">Anthropic</span>
+              </button>
+              <button type="button" class="pc" data-provider="openai" role="radio" aria-checked="false">
+                <span class="sdot"></span>
+                <span class="pn">GPT</span>
+                <span class="ps">OpenAI</span>
+              </button>
+            </div>
+
+            <div class="callout a" id="providerNote" hidden></div>
+
+            <div class="how">
+              <div class="hw-lbl">How to get a key</div>
+              <ol class="hs" id="providerSteps"></ol>
+            </div>
+
+            <div class="fg">
+              <div>
+                <label class="fl" id="apiKeyLabel" for="apiKey">API key</label>
+                <div class="iw">
+                  <input id="apiKey" type="password" placeholder="" autocomplete="off" spellcheck="false" />
+                  <button class="ir" id="revealKey" type="button" aria-label="Show key">
+                    <svg id="eyeShow" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M1 7s2.2-4.5 6-4.5S13 7 13 7s-2.2 4.5-6 4.5S1 7 1 7z"/><circle cx="7" cy="7" r="1.7"/></svg>
+                    <svg id="eyeHide" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2" hidden><path d="M2 2l10 10M5.5 5.8A1.8 1.8 0 0 0 8.2 8.5M3.5 4C2.2 5 1 7 1 7s2.2 4.5 6 4.5c1.3 0 2.5-.4 3.4-1M5.5 2.8C6 2.6 6.5 2.5 7 2.5c3.8 0 6 4.5 6 4.5s-.6 1.2-1.7 2.3" stroke-linecap="round"/></svg>
+                  </button>
+                </div>
+                <p class="field-warn" id="keyFormatWarn" hidden></p>
+              </div>
+
+              <div>
+                <label class="fl" for="model">Model</label>
+                <select id="model"></select>
+              </div>
+
+              <div class="actions">
+                <button id="save" class="btn bp" type="button">Save and test</button>
+                <span id="status"></span>
+              </div>
+            </div>
+          </div>
         </div>
 
-        <div class="provider-note" id="subscriptionNote" hidden></div>
-
-        <div class="provider-steps" id="providerSteps"></div>
-
-        <label for="apiKey" id="apiKeyLabel">API Key</label>
-        <input id="apiKey" type="password" placeholder="" autocomplete="off" spellcheck="false" />
-        <p class="field-warn" id="keyFormatWarn" hidden></p>
-
-        <div class="actions">
-          <button id="save" class="primary">Save and test</button>
-          <span id="status"></span>
+        <!-- NAVIGATION -->
+        <div class="pane" id="pane-navigation">
+          <div class="ph">
+            <h1>Navigation</h1>
+            <p>How Skipper opens destinations when you pick a result from the palette.</p>
+          </div>
+          <div class="sec">
+            <div class="card">
+              <div class="cr">
+                <div class="crt">
+                  <div class="rl">Open links in</div>
+                  <div class="rd">New tab keeps Setup on screen. Same tab is faster if you live in the palette.</div>
+                </div>
+                <div class="crc">
+                  <select id="openIn">
+                    <option value="new">New tab</option>
+                    <option value="same">Same tab</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="sec">
+            <div class="sl">Keyboard shortcut</div>
+            <div class="card">
+              <div class="cr">
+                <div class="crt">
+                  <div class="rl">Open palette</div>
+                  <div class="rd">Chrome controls shortcut bindings. To change it, visit <code>chrome://extensions/shortcuts</code>.</div>
+                </div>
+                <div class="crc shortcut-col">
+                  <div><kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>K</kbd></div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
 
-        <details class="advanced">
-          <summary>Advanced — pick a specific model</summary>
-          <label for="model">Model</label>
-          <select id="model"></select>
-        </details>
-      </section>
-
-      <section>
-        <h2>Navigation</h2>
-        <p class="desc">
-          Choose where Skipper opens a destination when you pick a result from the palette.
-        </p>
-
-        <label for="openIn">Open links in</label>
-        <select id="openIn">
-          <option value="new">New tab</option>
-          <option value="same">Same tab</option>
-        </select>
-      </section>
-
-      <section>
-        <h2>Walkthrough</h2>
-        <p class="desc">
-          Replay the first-run coachmarks. Open a Salesforce tab, then click below —
-          the palette will open with the walkthrough card visible.
-        </p>
-        <div class="actions">
-          <button id="replayWalkthrough" class="secondary">Show walkthrough</button>
-          <span id="walkthroughStatus"></span>
+        <!-- WALKTHROUGH -->
+        <div class="pane" id="pane-walkthrough">
+          <div class="ph">
+            <h1>Walkthrough</h1>
+            <p>Replay the first-run coachmarks. Open a Salesforce tab, then click below — the palette opens with the walkthrough card visible.</p>
+          </div>
+          <div class="sec">
+            <div class="card">
+              <div class="cr">
+                <div class="crt">
+                  <div class="rl">Replay first-run tour</div>
+                  <div class="rd">Resets the seen-flags and reopens the palette on your active Salesforce tab.</div>
+                </div>
+                <div class="crc">
+                  <button id="replayWalkthrough" class="btn bs bsm" type="button">Show walkthrough</button>
+                </div>
+              </div>
+            </div>
+            <div id="walkthroughStatus" class="walk-status"></div>
+          </div>
         </div>
-      </section>
-    </main>
+
+        <!-- ABOUT -->
+        <div class="pane" id="pane-about">
+          <div class="ph">
+            <h1>About</h1>
+            <p>Skipper for Salesforce is a command palette and AI helper for Salesforce admins.</p>
+          </div>
+          <div class="sec">
+            <div class="ag">
+              <div class="ab">
+                <div class="abl">Version</div>
+                <div class="abv" id="aboutVersion">1.1.0</div>
+              </div>
+              <div class="ab">
+                <div class="abl">Manifest</div>
+                <div class="abv">MV3</div>
+                <div class="abs">Chrome 109+</div>
+              </div>
+            </div>
+          </div>
+          <div class="sec">
+            <div class="sl">Privacy</div>
+            <div class="card">
+              <div class="cr">
+                <div class="crt">
+                  <div class="rl">Where your data lives</div>
+                  <div class="rd">API keys and preferences are stored in <code>chrome.storage.local</code> on this device only — never synced. Page screenshots taken by @ask are sent to the AI provider you chose and are not stored by Skipper.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
     <script src="options.js"></script>
   </body>
 </html>

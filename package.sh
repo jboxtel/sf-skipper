@@ -44,6 +44,8 @@ FILES=(
   permsets.js
   flow-debug.js
   commands.js
+  org-glossary.js
+  org-glossary-extractors.js
   soql.js
   ask.js
   markdown.js
