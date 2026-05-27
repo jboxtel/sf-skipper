@@ -2,6 +2,9 @@
 // OpenAI/Gemini. Loaded as a classic worker so importScripts is available.
 importScripts('providers.js');
 
+// Skipper backend base URL. Same constant exists in shared.js / options.js.
+var SKIPPER_BACKEND_URL = 'http://localhost:3000';
+
 // Look up the `sid` cookie for the requested Salesforce host. Cookie is
 // HttpOnly so the page can't read it directly. If the exact host has no
 // cookie, fall back to a sibling host with the same MyDomain prefix (e.g.
@@ -134,6 +137,45 @@ async function handleAskMessageStep(req, sendResponse) {
   }
 }
 
+// Phase 2 stub: forward the system+user prompt to the Skipper backend's
+// /api/echo endpoint, just to prove the JWT-authenticated pipe works end to
+// end. In Phase 4 this is replaced by feature-specific routes (/ai/soql,
+// /ai/debug, /ai/ask).
+async function handleSkipperRoutedClaude(req, sendResponse) {
+  try {
+    var opts = await loadOpts();
+    if (!opts.skipperJwt) {
+      sendResponse({ ok: false, error: 'Not signed in to Skipper' });
+      return;
+    }
+    var resp = await fetch(SKIPPER_BACKEND_URL + '/api/echo', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + opts.skipperJwt,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        system: req.system,
+        user: req.user,
+        feature: req.feature
+      })
+    });
+    if (resp.status === 401) {
+      sendResponse({ ok: false, error: 'Skipper session expired — sign in again', authExpired: true });
+      return;
+    }
+    if (!resp.ok) {
+      var errText = await resp.text();
+      sendResponse({ ok: false, error: 'Skipper backend ' + resp.status + ': ' + errText });
+      return;
+    }
+    var data = await resp.json();
+    sendResponse({ ok: true, echoed: data.echoed, userId: data.userId, email: data.email });
+  } catch (err) {
+    sendResponse({ ok: false, error: err.message });
+  }
+}
+
 async function handleProviderTest(req, sendResponse) {
   try {
     // Caller may pass a transient opts override so the user can test without
@@ -169,6 +211,10 @@ chrome.runtime.onMessage.addListener(function (req, sender, sendResponse) {
   }
   if (req.type === 'provider.test') {
     handleProviderTest(req, sendResponse);
+    return true;
+  }
+  if (req.type === 'skipper.routedClaude') {
+    handleSkipperRoutedClaude(req, sendResponse);
     return true;
   }
   if (req.type === 'openOptions') {
