@@ -159,6 +159,21 @@
                 </div>
               </div>
             </div>
+
+            <div class="sl" style="margin-top:22px">Connected Salesforce orgs</div>
+            <div class="card" id="orgsCard">
+              <div class="cr" id="orgsEmpty">
+                <div class="crt">
+                  <div class="rl">No orgs connected yet</div>
+                  <div class="rd">Connect an org so Skipper can read metadata (describes, Flow XML, validation rules) as the integration user. Requires Salesforce admin rights.</div>
+                </div>
+                <div class="crc">
+                  <button id="connectOrgBtn" class="btn bp" type="button">Connect a Salesforce org</button>
+                </div>
+              </div>
+            </div>
+            <p id="connectOrgStatus" class="walk-status" style="margin-top:10px"></p>
+
             <div class="callout a" style="margin-top:14px">
               When signed in, Skipper routes AI calls through the backend so it can ground prompts with metadata read by the integration user. Power-user (BYO key) mode still works — clear this session if you want to go back to it.
             </div>
