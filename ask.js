@@ -680,11 +680,18 @@ async function toolSearchFlows(input) {
   });
   if (!defs.length) return { query: input.query, scanned: 0, totalHits: 0, hits: [] };
 
-  var ids = defs.map(function (d) { return "'" + escapeSoqlLiteral(d.ActiveVersionId) + "'"; }).join(',');
-  var flowQuery = 'SELECT Id, MasterLabel, Metadata FROM Flow WHERE Id IN (' + ids + ')';
-  var flowResp = await toolingQueryRaw(flowQuery);
+  // Tooling API restricts Metadata/FullName queries to a single-row
+  // qualification — `WHERE Id IN (...)` 400s as soon as more than one Flow
+  // matches. Fetch each Flow individually (in parallel) instead.
+  var flowResps = await Promise.all(defs.map(function (d) {
+    var q = "SELECT Id, MasterLabel, Metadata FROM Flow WHERE Id = '"
+      + escapeSoqlLiteral(d.ActiveVersionId) + "'";
+    return toolingQueryRaw(q).catch(function () { return { records: [] }; });
+  }));
   var byId = {};
-  (flowResp.records || []).forEach(function (f) { byId[f.Id] = f; });
+  flowResps.forEach(function (resp) {
+    (resp.records || []).forEach(function (f) { byId[f.Id] = f; });
+  });
 
   var q = String(input.query).toLowerCase();
   var sObjFilter = input.sObject ? String(input.sObject).toLowerCase() : null;
