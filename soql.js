@@ -132,6 +132,57 @@ function soqlScoreObject(prompt, obj) {
   return score;
 }
 
+// Field-name token scoring. The lexical scorer (`soqlScoreObject`) only looks
+// at object api name, label, and record-type names. That misses objects whose
+// "what they're about" lives in their field names — e.g. Product2 with
+// FlightLegFrom__c / FlightTimeFrom__c / FlightCanceled__c / DepartureDateScheduled__c
+// in an airline org where Product2 is repurposed as the flight catalog. The
+// object name "Product" matches nothing in "show me flights from Frankfurt",
+// so Product2 never makes the candidate list, even though its fields are the
+// canonical home of the concept.
+//
+// Strategy: after schemas are loaded (candidates + lookup-target relateds),
+// score each loaded schema's field names + labels against the prompt. If a
+// contextOnly schema's field-name score beats every candidate's field-name
+// score AND clears a minimum threshold, promote it to a real candidate (drop
+// the "usually NOT FROM" hint, add a FIELD-MATCH PROMOTED marker in the user
+// message). The model still picks FROM — we just stop discouraging the
+// semantically-right object.
+//
+// Token weight is lower than the object-name scorer's (c.length, not c.length
+// * 3) because field-name signal is noisier — common tokens like "date" /
+// "name" / "type" appear in most schemas. The threshold filters those out:
+// SOQL_FIELD_PROMOTE_MIN_SCORE = 6 requires at least one substantive whole-
+// word match (e.g. "flight"=6, "carrier"=7, "departure"=9) — two length-4
+// generics like "name"+"date" (total 8) also clear, which is fine when the
+// prompt is that vague.
+function scoreFieldNameMatch(prompt, fields) {
+  if (!prompt || !fields || !fields.length) return 0;
+  var p = prompt.toLowerCase().replace(/[-']/g, '');
+
+  // De-dupe tokens across the whole field list — a field repeated 20 times
+  // with "flight" in its name shouldn't score 20x more than a single field.
+  var tokens = {};
+  for (var i = 0; i < fields.length; i++) {
+    var f = fields[i];
+    var nameSource = (f.name || '').replace(/__c$/, '').replace(/_/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase();
+    var labelSource = (f.label || '').toLowerCase();
+    (nameSource + ' ' + labelSource).split(/\s+/).forEach(function (t) {
+      if (t && t.length >= 4) tokens[t] = true;
+    });
+  }
+
+  var score = 0;
+  Object.keys(tokens).forEach(function (t) {
+    var esc = t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    var re = new RegExp('\\b' + esc + '(?:e?s)?\\b', 'i');
+    if (re.test(p)) score += t.length;
+  });
+  return score;
+}
+
+var SOQL_FIELD_PROMOTE_MIN_SCORE = 6;
+
 function pickCandidateObjects(prompt, max) {
   var all = getSoqlObjects();
   var scored = all
@@ -244,6 +295,59 @@ function buildSystemPrompt() {
   ].join('\n');
 }
 
+// Reverse picklist index: literal → [{ apiName, fieldName, value }]. Lets us
+// detect when a token in the user's prompt is a valid picklist value somewhere
+// in the candidate schema — strong signal for which field to filter on, and
+// the main grounding gap behind "flights with status CR" where the model picks
+// a lexically-similar but semantically-wrong field. Case-insensitive lookup
+// (Salesforce picklist filters are case-sensitive, but user prompts aren't),
+// preserves the exact case from the picklist value so the hint says 'CR'
+// even if the user wrote 'cr'.
+function buildPicklistValueIndex(schemaObjects) {
+  var idx = {};
+  (schemaObjects || []).forEach(function (o) {
+    if (!o.fields) return;
+    o.fields.forEach(function (f) {
+      if (f.type !== 'picklist' || !f.values || !f.values.length) return;
+      f.values.forEach(function (v) {
+        if (v == null) return;
+        var key = String(v).toLowerCase();
+        if (!idx[key]) idx[key] = [];
+        idx[key].push({ apiName: o.apiName, fieldName: f.name, value: v });
+      });
+    });
+  });
+  return idx;
+}
+
+// Find tokens in the prompt that exactly match a picklist value somewhere in
+// the schema. Filtering rules (chosen to maximize signal/noise):
+//   - token length >= 2
+//   - exclude pure-numeric tokens (record IDs, years, counts)
+//   - dedupe by token (case-insensitive)
+//   - drop hits with > MAX_LOCATIONS matches (generic words like "Active"
+//     would otherwise dominate); rare codes like 'CR' / 'CL' stay
+var SOQL_PICKLIST_HINT_MAX_LOCATIONS = 3;
+function findPicklistMatchesInPrompt(prompt, index) {
+  if (!prompt || !index) return [];
+  var tokens = String(prompt).match(/[A-Za-z0-9_]+/g) || [];
+  var seen = {};
+  var hits = [];
+  for (var i = 0; i < tokens.length; i++) {
+    var t = tokens[i];
+    if (t.length < 2) continue;
+    if (/^\d+$/.test(t)) continue;
+    var key = t.toLowerCase();
+    if (seen[key]) continue;
+    seen[key] = true;
+    var locs = index[key];
+    if (!locs || !locs.length) continue;
+    if (locs.length > SOQL_PICKLIST_HINT_MAX_LOCATIONS) continue;
+    hits.push({ token: t, locations: locs });
+  }
+  return hits;
+}
+
 function buildUserMessage(prompt, schemaObjects) {
   var lines = [];
   lines.push('User request: ' + prompt);
@@ -266,6 +370,7 @@ function buildUserMessage(prompt, schemaObjects) {
       header += ' — ' + countText;
     }
     if (o.contextOnly) header += ' [lookup target — use for dot-walks; usually NOT the FROM target]';
+    else if (o.fieldPromoted) header += " [FIELD-MATCH PROMOTED — multiple fields on this object match the prompt's terminology, even though the object's name does not. This is a strong candidate for FROM if the user's row-shape is one row per " + (o.label || o.apiName) + ".]";
     lines.push(header);
     if (o.recordTypes && o.recordTypes.length) {
       var rtSummary = o.recordTypes.map(function (rt) {
@@ -282,10 +387,30 @@ function buildUserMessage(prompt, schemaObjects) {
           if (f.relationshipName) meta += ' [dot-walk: ' + f.relationshipName + '.<field>]';
         }
         if (f.values) meta += ' [' + f.values.join(',') + ']';
-        lines.push('  - ' + f.name + ' : ' + meta + (f.label && f.label !== f.name ? ' (' + f.label + ')' : ''));
+        var line = '  - ' + f.name + ' : ' + meta + (f.label && f.label !== f.name ? ' (' + f.label + ')' : '');
+        if (f.helpText) {
+          var help = String(f.helpText).replace(/\s+/g, ' ').trim();
+          if (help.length > 120) help = help.slice(0, 117) + '...';
+          if (help) line += ' — help: ' + help;
+        }
+        lines.push(line);
       }
     }
   }
+
+  var pvIndex = buildPicklistValueIndex(schemaObjects);
+  var pvHits = findPicklistMatchesInPrompt(prompt, pvIndex);
+  if (pvHits.length) {
+    lines.push('');
+    lines.push("Picklist value matches in the prompt. Each line says where a token in the user's request lives as a picklist value. Use this to pick the right field — but if your FROM object differs from the object that holds the field, you MUST reach the field via a relationship dot-walk (find a reference field on FROM whose referenceTo matches), not by referencing the field directly on FROM:");
+    pvHits.forEach(function (h) {
+      var locs = h.locations.map(function (l) {
+        return "object=" + l.apiName + " field=" + l.fieldName + " value='" + l.value + "'";
+      }).join(' OR ');
+      lines.push("  - token '" + h.token + "' → " + locs);
+    });
+  }
+
   return lines.join('\n');
 }
 
@@ -310,10 +435,32 @@ function parseSoqlResponse(text) {
   if (!text) throw new Error('Empty response');
   // Strip code fences if present
   var cleaned = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
-  // Find the JSON object even if there's surrounding prose
+  // Find the first complete top-level JSON object. Models sometimes append
+  // commentary after the JSON ("here is the query: { ... }\nthis returns ..."),
+  // which trips JSON.parse with "Unexpected non-whitespace character after JSON".
+  // Walk the brace depth, ignoring braces inside string literals.
   var start = cleaned.indexOf('{');
-  var end = cleaned.lastIndexOf('}');
-  if (start === -1 || end === -1) throw new Error('Could not parse response: ' + text.slice(0, 120));
+  if (start === -1) throw new Error('Could not parse response: ' + text.slice(0, 120));
+  var depth = 0;
+  var inString = false;
+  var escapeNext = false;
+  var end = -1;
+  for (var i = start; i < cleaned.length; i++) {
+    var ch = cleaned[i];
+    if (escapeNext) { escapeNext = false; continue; }
+    if (inString) {
+      if (ch === '\\') { escapeNext = true; continue; }
+      if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') { inString = true; continue; }
+    if (ch === '{') depth++;
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0) { end = i; break; }
+    }
+  }
+  if (end === -1) throw new Error('Could not parse response: ' + text.slice(0, 120));
   var json = cleaned.slice(start, end + 1);
   try {
     var obj = JSON.parse(json);
@@ -322,6 +469,373 @@ function parseSoqlResponse(text) {
   } catch (e) {
     throw new Error('Invalid JSON in response: ' + e.message);
   }
+}
+
+// Object-existence preflight. The Salesforce planner DOES reject queries
+// against non-existent objects in production, but the diagnostic ("sObject type
+// 'Flight__c' is not supported") doesn't give the retry loop anywhere to land.
+// This check fires the same retry path with a more useful error that lists the
+// objects we already sent schema for, so the model has somewhere to pivot to
+// instead of repeating the hallucination. In the eval harness where the
+// planner stub always passes, this is also the only line of defense against
+// FROM-target hallucination.
+//
+// Strict mode: FROM must be an object in the org at all (knownObjectNames).
+// Suggestions are drawn preferentially from schemaObjects since the model
+// already has their full schema in context.
+function validateSoqlObjectExists(soql, schemaObjects, knownObjectNames) {
+  if (!soql) return { ok: true };
+  if (!knownObjectNames || !knownObjectNames.length) return { ok: true };
+
+  // Only check the outer FROM. Subquery FROMs are child-relationship names,
+  // not sObject api names, and shouldn't be validated against the object list.
+  var stripped = soql.replace(/\(\s*SELECT\b[^)]*\)/gi, '');
+  var fromMatch = /\bFROM\s+([A-Za-z0-9_]+)/i.exec(stripped);
+  if (!fromMatch) return { ok: true };
+  var fromApi = fromMatch[1];
+
+  var knownByLc = {};
+  for (var i = 0; i < knownObjectNames.length; i++) {
+    knownByLc[knownObjectNames[i].toLowerCase()] = knownObjectNames[i];
+  }
+  if (knownByLc[fromApi.toLowerCase()]) return { ok: true };
+
+  var schemaNames = (schemaObjects || []).map(function (o) { return o.apiName; });
+  var suggestions = schemaNames.length ? schemaNames.slice() : knownObjectNames.slice(0, 12);
+
+  var msg = "Object '" + fromApi + "' does not exist in this org. " +
+    "Pick one of the objects already in your schema: " + suggestions.join(', ') +
+    ". If none of these matches the user's intent, return the best fit anyway — do not invent a new object name.";
+  return { ok: false, error: msg };
+}
+
+// Field-existence check on FROM. The planner DOES reject "no such column"
+// references in production, but the eval-harness planner stub doesn't, and
+// the error doesn't suggest a dot-walk recovery. This walks every identifier
+// in the (subquery-stripped) SOQL and verifies it resolves on the FROM
+// object's schema — directly for simple refs, by dot-walking through
+// relationship fields for paths. When a field doesn't exist on FROM but
+// DOES exist on a related schema we already sent, the error suggests the
+// reachable dot-walk so the retry has a concrete next step.
+//
+// Conservative: silently passes when FROM isn't in our schema (object-exists
+// owns that case), when the resolution path crosses an object we lack schema
+// for, or for keywords / aggregate functions / RecordType paths. We do not
+// try to be exhaustive — false positives turn into wasted retries against
+// real users.
+var SOQL_FIELD_VALIDATOR_SKIP_KEYWORDS = (function () {
+  var keywords = [
+    // SOQL grammar
+    'select', 'from', 'where', 'and', 'or', 'not', 'in', 'like', 'includes', 'excludes',
+    'null', 'true', 'false', 'order', 'by', 'asc', 'desc', 'nulls', 'first', 'last',
+    'group', 'having', 'limit', 'offset', 'with', 'data', 'category', 'rollup', 'cube',
+    'using', 'scope', 'for', 'view', 'reference', 'update', 'tracking', 'security_enforced',
+    'all', 'rows', 'typeof', 'when', 'then', 'else', 'end',
+    // Date literals (bare tokens, no quotes)
+    'today', 'yesterday', 'tomorrow',
+    'this_week', 'last_week', 'next_week',
+    'this_month', 'last_month', 'next_month',
+    'this_quarter', 'last_quarter', 'next_quarter',
+    'this_year', 'last_year', 'next_year',
+    'this_fiscal_quarter', 'last_fiscal_quarter', 'next_fiscal_quarter',
+    'this_fiscal_year', 'last_fiscal_year', 'next_fiscal_year',
+    'last_90_days', 'next_90_days', 'last_n_days', 'next_n_days',
+    'last_n_weeks', 'next_n_weeks', 'last_n_months', 'next_n_months',
+    'last_n_quarters', 'next_n_quarters', 'last_n_years', 'next_n_years',
+    'last_n_fiscal_quarters', 'next_n_fiscal_quarters',
+    'last_n_fiscal_years', 'next_n_fiscal_years',
+    // Aggregate + date functions
+    'count', 'count_distinct', 'sum', 'avg', 'min', 'max',
+    'calendar_year', 'calendar_month', 'calendar_quarter',
+    'day_in_week', 'day_in_month', 'day_in_year',
+    'hour_in_day', 'day_only',
+    'fiscal_year', 'fiscal_quarter', 'week_in_year', 'week_in_month',
+    // Converters / misc
+    'format', 'convertcurrency', 'tolabel', 'distance', 'geolocation',
+    // RecordType — planner handles RecordType.X paths natively
+    'recordtype'
+  ];
+  var set = {};
+  keywords.forEach(function (k) { set[k] = true; });
+  return set;
+})();
+
+function validateSoqlFieldsExist(soql, schemaObjects) {
+  if (!soql || !schemaObjects || !schemaObjects.length) return { ok: true };
+
+  var schemaByName = {};
+  schemaObjects.forEach(function (o) {
+    if (!o.fields) return;
+    var byName = {};
+    var byRel = {};
+    o.fields.forEach(function (f) {
+      byName[f.name.toLowerCase()] = f;
+      if (f.relationshipName) byRel[f.relationshipName.toLowerCase()] = f;
+    });
+    schemaByName[o.apiName] = { fieldsByName: byName, fieldsByRelationship: byRel, fields: o.fields, apiName: o.apiName };
+  });
+
+  // Strip subqueries — their field references resolve against a different
+  // FROM scope (the child object). Validating them against the outer schema
+  // would create false positives.
+  var stripped = soql.replace(/\(\s*SELECT\b[^)]*\)/gi, '');
+  // Strip string literals so identifiers inside quotes don't get scanned
+  // (e.g. WHERE Name = 'CR_Customer').
+  stripped = stripped.replace(/'(?:\\.|[^'\\])*'/g, "''");
+
+  var fromMatch = /\bFROM\s+([A-Za-z0-9_]+)/i.exec(stripped);
+  if (!fromMatch) return { ok: true };
+  var fromApi = fromMatch[1];
+
+  var rootApi = null;
+  for (var key in schemaByName) {
+    if (key.toLowerCase() === fromApi.toLowerCase()) { rootApi = key; break; }
+  }
+  if (!rootApi) return { ok: true }; // object-exists validator owns this case
+
+  function resolveDottedPath(path) {
+    var segs = path.split('.');
+    var currentApi = rootApi;
+    for (var i = 0; i < segs.length - 1; i++) {
+      var schema = schemaByName[currentApi];
+      if (!schema) return { skip: true }; // related object schema unavailable
+      var relField = schema.fieldsByRelationship[segs[i].toLowerCase()];
+      if (!relField || !relField.referenceTo || !relField.referenceTo[0]) {
+        return { ok: false, badSegment: segs[i], onObject: currentApi };
+      }
+      currentApi = relField.referenceTo[0];
+    }
+    var finalSchema = schemaByName[currentApi];
+    if (!finalSchema) return { skip: true };
+    var finalField = finalSchema.fieldsByName[segs[segs.length - 1].toLowerCase()];
+    if (!finalField) return { ok: false, badSegment: segs[segs.length - 1], onObject: currentApi };
+    return { ok: true };
+  }
+
+  function suggestDotWalk(rootSchema, fieldName) {
+    // Look for the field on any related schema we sent, then describe how to
+    // reach it from rootApi via a single-hop relationship.
+    var hints = [];
+    var lower = fieldName.toLowerCase();
+    for (var apiName in schemaByName) {
+      if (apiName === rootApi) continue;
+      if (!schemaByName[apiName].fieldsByName[lower]) continue;
+      for (var i = 0; i < rootSchema.fields.length; i++) {
+        var f = rootSchema.fields[i];
+        if (f.relationshipName && f.referenceTo && f.referenceTo.indexOf(apiName) !== -1) {
+          hints.push(f.relationshipName + '.' + schemaByName[apiName].fieldsByName[lower].name);
+        }
+      }
+    }
+    return hints;
+  }
+
+  var pathRe = /\b([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\b/g;
+  var violations = [];
+  var seen = {};
+  var m;
+  while ((m = pathRe.exec(stripped)) !== null) {
+    var path = m[1];
+    var lower = path.toLowerCase();
+    var firstSeg = lower.split('.')[0];
+    if (SOQL_FIELD_VALIDATOR_SKIP_KEYWORDS[firstSeg]) continue;
+    // Skip pure-number-suffixed tokens like LAST_N_DAYS:7's `7` (regex already
+    // excludes leading-digit, defensive).
+    if (/^\d/.test(path)) continue;
+    // Skip the FROM object name itself (appears in SELECT Account.Name dot-walks,
+    // but bare 'Account' immediately after FROM is also captured).
+    if (lower === rootApi.toLowerCase()) continue;
+    if (seen[lower]) continue;
+    seen[lower] = true;
+
+    if (path.indexOf('.') === -1) {
+      var rootSchema = schemaByName[rootApi];
+      if (!rootSchema.fieldsByName[lower]) {
+        var suggestions = suggestDotWalk(rootSchema, path);
+        violations.push({ path: path, onObject: rootApi, suggestions: suggestions });
+      }
+      continue;
+    }
+
+    var res = resolveDottedPath(path);
+    if (res.skip) continue;
+    if (!res.ok) {
+      violations.push({ path: path, onObject: res.onObject, badSegment: res.badSegment, suggestions: [] });
+    }
+  }
+
+  if (!violations.length) return { ok: true };
+
+  var parts = violations.map(function (v) {
+    var msg = "Field '" + v.path + "' is not on " + v.onObject + ".";
+    if (v.suggestions && v.suggestions.length) {
+      msg += ' Reach it via a relationship dot-walk: ' + v.suggestions.map(function (s) { return rootApi + '.' + s; }).join(' OR ') + '.';
+    }
+    return msg;
+  });
+  parts.push("Use only fields that exist on the FROM object's schema, or dot-walk through a relationship field to a related object.");
+  return { ok: false, error: parts.join(' ') };
+}
+
+// Literal-preservation check. The picklist hint we inject calls out tokens in
+// the user's prompt that ARE picklist values somewhere in the candidate
+// schema (rare codes like 'CR' / 'CL'). The model sometimes still drops the
+// literal entirely (silent substitution — translates 'CR' to 'OnGround' on
+// the wrong field). Catch that: if a hinted token doesn't appear in any
+// quoted literal in the generated SOQL, that's a literal-preservation
+// failure. Conservative: only enforces the same tokens we already flagged in
+// the hint, so it inherits the MAX_LOCATIONS filter (no enforcement on
+// generic words like 'open' that match many fields).
+function validateSoqlLiteralPreservation(soql, prompt, schemaObjects) {
+  if (!soql || !prompt || !schemaObjects || !schemaObjects.length) return { ok: true };
+
+  var pvIndex = buildPicklistValueIndex(schemaObjects);
+  var promptHits = findPicklistMatchesInPrompt(prompt, pvIndex);
+  if (!promptHits.length) return { ok: true };
+
+  // Collect every quoted literal in the SOQL, lowercased. Comparing against
+  // the SOQL string directly would false-positive on field names that share
+  // characters with the token (e.g. token 'CR' inside field 'CR_Code__c').
+  var quotedRe = /'((?:\\.|[^'\\])*)'/g;
+  var quotedLiterals = {};
+  var qm;
+  while ((qm = quotedRe.exec(soql)) !== null) {
+    var lit = qm[1].replace(/\\'/g, "'").replace(/\\\\/g, '\\');
+    quotedLiterals[lit.toLowerCase()] = true;
+  }
+
+  var missing = [];
+  promptHits.forEach(function (h) {
+    var tokenLower = h.token.toLowerCase();
+    if (quotedLiterals[tokenLower]) return;
+    // Also accept the picklist value casing the hint surfaced — the model is
+    // allowed to use the canonical value rather than the user's casing.
+    for (var i = 0; i < h.locations.length; i++) {
+      if (quotedLiterals[h.locations[i].value.toLowerCase()]) return;
+    }
+    missing.push(h);
+  });
+
+  if (!missing.length) return { ok: true };
+
+  var parts = missing.map(function (h) {
+    var locs = h.locations.map(function (l) {
+      return "object=" + l.apiName + " field=" + l.fieldName + " value='" + l.value + "'";
+    }).join(' OR ');
+    return "The user's literal '" + h.token + "' is missing from the SOQL. " +
+      "This token is a picklist value on: " + locs + ". " +
+      "Filter on it explicitly (dot-walk from FROM if the field is on a related object); do not silently substitute a different value.";
+  });
+  return { ok: false, error: parts.join(' ') };
+}
+
+// Semantic check the planner can't do: picklist-literal mismatch. The planner
+// accepts any string against a picklist field, so the "flights with status CR"
+// case where the model picks Asset.StatusFlight__c = 'CR' instead of the
+// parent's eu261Status__c slips through. We walk every Field='Literal' and
+// Field IN (...) comparison; if Field is a picklist with cached values and the
+// literal isn't among them, that's a violation. The error feeds the same
+// retry loop as planner errors — model has to pick a different field where the
+// literal actually exists (often the correct dot-walk).
+//
+// Conservative by design: skip subqueries (different FROM scope), unresolvable
+// field paths (no false positives), non-picklist types, and multipicklist
+// (uses INCLUDES, different shape). Empty schemaObjects → ok.
+function validateSoqlSemantics(soql, schemaObjects) {
+  if (!soql || !schemaObjects || !schemaObjects.length) return { ok: true };
+
+  var schemaByName = {};
+  schemaObjects.forEach(function (o) {
+    if (!o.fields) return;
+    var fieldsByName = {};
+    var fieldsByRelationship = {};
+    o.fields.forEach(function (f) {
+      fieldsByName[f.name.toLowerCase()] = f;
+      if (f.relationshipName) fieldsByRelationship[f.relationshipName.toLowerCase()] = f;
+    });
+    schemaByName[o.apiName] = { fieldsByName: fieldsByName, fieldsByRelationship: fieldsByRelationship };
+  });
+
+  // Strip child subqueries and semi-joins — their WHERE filters resolve against
+  // a different FROM scope. SOQL subqueries don't nest, so a non-greedy
+  // [^)]* is sufficient.
+  var stripped = soql.replace(/\(\s*SELECT\b[^)]*\)/gi, '');
+
+  var fromMatch = /\bFROM\s+([A-Za-z0-9_]+)/i.exec(stripped);
+  if (!fromMatch) return { ok: true };
+  var fromApi = fromMatch[1];
+  var rootApi = null;
+  for (var key in schemaByName) {
+    if (key.toLowerCase() === fromApi.toLowerCase()) { rootApi = key; break; }
+  }
+  if (!rootApi) return { ok: true };
+
+  function resolveField(path) {
+    var segments = path.split('.');
+    var currentApi = rootApi;
+    for (var i = 0; i < segments.length - 1; i++) {
+      var schema = schemaByName[currentApi];
+      if (!schema) return null;
+      var relField = schema.fieldsByRelationship[segments[i].toLowerCase()];
+      if (!relField || !relField.referenceTo || !relField.referenceTo[0]) return null;
+      currentApi = relField.referenceTo[0];
+    }
+    var finalSchema = schemaByName[currentApi];
+    if (!finalSchema) return null;
+    return finalSchema.fieldsByName[segments[segments.length - 1].toLowerCase()] || null;
+  }
+
+  function isCheckablePicklist(field) {
+    return field && field.type === 'picklist' && field.values && field.values.length > 0;
+  }
+
+  // Track unique (path, literal) violations so a literal repeated in IN-lists
+  // doesn't spam the retry message.
+  var seen = {};
+  var violations = [];
+  function record(path, literal, field) {
+    var k = path.toLowerCase() + ' ' + literal;
+    if (seen[k]) return;
+    seen[k] = true;
+    violations.push({ path: path, literal: literal, field: field });
+  }
+
+  // Field = 'lit' / Field != 'lit'
+  var eqRe = /\b([A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*)\s*(?:=|!=)\s*'((?:\\.|[^'\\])*)'/g;
+  var m;
+  while ((m = eqRe.exec(stripped)) !== null) {
+    var path = m[1];
+    var literal = m[2].replace(/\\'/g, "'").replace(/\\\\/g, '\\');
+    var field = resolveField(path);
+    if (!isCheckablePicklist(field)) continue;
+    if (field.values.indexOf(literal) === -1) record(path, literal, field);
+  }
+
+  // Field IN ('a', 'b') / Field NOT IN ('a', 'b')
+  var inRe = /\b([A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)*)\s+(?:NOT\s+)?IN\s*\(([^)]+)\)/gi;
+  while ((m = inRe.exec(stripped)) !== null) {
+    var inPath = m[1];
+    var listText = m[2];
+    var inField = resolveField(inPath);
+    if (!isCheckablePicklist(inField)) continue;
+    var litRe = /'((?:\\.|[^'\\])*)'/g;
+    var lm;
+    while ((lm = litRe.exec(listText)) !== null) {
+      var inLiteral = lm[1].replace(/\\'/g, "'").replace(/\\\\/g, '\\');
+      if (inField.values.indexOf(inLiteral) === -1) record(inPath, inLiteral, inField);
+    }
+  }
+
+  if (violations.length === 0) return { ok: true };
+
+  var parts = violations.map(function (v) {
+    var sample = v.field.values.slice(0, 8).join(', ');
+    var more = v.field.values.length > 8 ? ', ...' : '';
+    return "Picklist field " + v.path + " does not accept '" + v.literal +
+      "'. Its valid values are: " + sample + more + ".";
+  });
+  parts.push("If the user's term lives on a different field (possibly via a relationship dot-walk), use that field instead.");
+  return { ok: false, error: parts.join(' ') };
 }
 
 // Ask Salesforce's query planner to parse the SOQL without executing. Returns
@@ -497,6 +1011,39 @@ async function generateSoql(prompt, onProgress) {
     schemaObjects = schemaObjects.concat(relatedSchemas);
   }
 
+  // Field-name re-ranking. Score every loaded schema's field names against
+  // the prompt. If a contextOnly (lookup-target) schema scores higher on
+  // field-name match than every candidate AND clears the minimum signal
+  // threshold, the prompt's terminology lives there — promote it to a real
+  // candidate so the model considers it as FROM material. Without this,
+  // the canonical home of a concept can be hidden under a "usually NOT FROM"
+  // hint just because its object-level name doesn't match the prompt.
+  var maxCandidateFieldScore = 0;
+  schemaObjects.forEach(function (so) {
+    so._fieldNameScore = scoreFieldNameMatch(prompt, so.fields || []);
+    if (!so.contextOnly && so._fieldNameScore > maxCandidateFieldScore) {
+      maxCandidateFieldScore = so._fieldNameScore;
+    }
+  });
+  schemaObjects.forEach(function (so) {
+    if (so.contextOnly && so._fieldNameScore > maxCandidateFieldScore && so._fieldNameScore >= SOQL_FIELD_PROMOTE_MIN_SCORE) {
+      so.contextOnly = false;
+      so.fieldPromoted = true;
+    }
+  });
+  // Surface field-promoted candidates near the top of the schema block so
+  // the model sees them before the lexical-only matches. Preserve lexical
+  // order for non-promoted candidates (Array.prototype.sort is stable in V8) —
+  // do NOT reorder them by field-name score, because field-name signal is
+  // noisier than the lexical scorer's object/label/record-type signal and
+  // shouldn't override it for objects that already lexically matched.
+  schemaObjects.sort(function (a, b) {
+    if (a.contextOnly !== b.contextOnly) return a.contextOnly ? 1 : -1;
+    if (!!a.fieldPromoted !== !!b.fieldPromoted) return b.fieldPromoted ? 1 : -1;
+    if (a.fieldPromoted && b.fieldPromoted) return (b._fieldNameScore || 0) - (a._fieldNameScore || 0);
+    return 0;
+  });
+
   var systemPrompt = buildSystemPrompt();
   var baseUserMessage = buildUserMessage(prompt, schemaObjects);
   var userMessage = baseUserMessage;
@@ -520,6 +1067,47 @@ async function generateSoql(prompt, onProgress) {
     }
 
     if (validation.ok) {
+      // Planner-passed but FROM target doesn't exist in this org — catches
+      // hallucinated objects that the eval harness's permissive planner stub
+      // lets through, and gives the production retry loop a richer error than
+      // the planner's bare "sObject not supported" message.
+      var knownNames = getSoqlObjects().map(function (o) { return o.apiName; });
+      var objectExists = validateSoqlObjectExists(parsed.soql, schemaObjects, knownNames);
+      if (!objectExists.ok) {
+        attempts.push({ soql: parsed.soql, error: objectExists.error });
+        userMessage = buildRetryUserMessage(baseUserMessage, attempts);
+        continue;
+      }
+      // Planner-passed but references a field that doesn't exist on FROM.
+      // Catches the "EU261Status__c on Asset" hallucination where the model
+      // takes a field name from the picklist hint and uses it directly on
+      // the wrong object instead of dot-walking.
+      var fieldsExist = validateSoqlFieldsExist(parsed.soql, schemaObjects);
+      if (!fieldsExist.ok) {
+        attempts.push({ soql: parsed.soql, error: fieldsExist.error });
+        userMessage = buildRetryUserMessage(baseUserMessage, attempts);
+        continue;
+      }
+      // Planner-passed but semantically wrong: picklist literal doesn't exist
+      // on the chosen field. Feed into the same retry loop with cumulative
+      // failure context (same shape as planner errors).
+      var semantics = validateSoqlSemantics(parsed.soql, schemaObjects);
+      if (!semantics.ok) {
+        attempts.push({ soql: parsed.soql, error: semantics.error });
+        userMessage = buildRetryUserMessage(baseUserMessage, attempts);
+        continue;
+      }
+      // Literal-preservation: the user named a picklist value in the prompt
+      // (e.g. 'CR') but it doesn't appear in the SOQL. Catches silent
+      // substitution where the model swaps the user's literal for a valid-
+      // but-unrelated value on the field it chose.
+      var literals = validateSoqlLiteralPreservation(parsed.soql, prompt, schemaObjects);
+      if (!literals.ok) {
+        attempts.push({ soql: parsed.soql, error: literals.error });
+        userMessage = buildRetryUserMessage(baseUserMessage, attempts);
+        continue;
+      }
+      // All checks passed — observe and return.
       // Phase-1 glossary observation: fire-and-forget so a buggy extractor or
       // storage hiccup never blocks returning a valid query to the user.
       try { _observeSoqlSuccess(prompt, parsed, schemaObjects); }
