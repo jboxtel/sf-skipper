@@ -10,7 +10,9 @@
     "eval:soql": "node test/soql-eval.js",
     "eval:flow-debug": "node test/flow-debug-eval.js",
     "test:flow-debug-validator": "node test/flow-debug-validator-test.js",
-    "test:org-glossary": "node test/org-glossary-test.js"
+    "test:org-glossary": "node test/org-glossary-test.js",
+    "test:soql-semantic": "node test/soql-semantic-test.js",
+    "test:soql-grounding": "node test/soql-grounding-test.js"
   },
   "devDependencies": {
     "playwright": "^1.59.1"
