@@ -435,10 +435,32 @@ function parseSoqlResponse(text) {
   if (!text) throw new Error('Empty response');
   // Strip code fences if present
   var cleaned = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
-  // Find the JSON object even if there's surrounding prose
+  // Find the first complete top-level JSON object. Models sometimes append
+  // commentary after the JSON ("here is the query: { ... }\nthis returns ..."),
+  // which trips JSON.parse with "Unexpected non-whitespace character after JSON".
+  // Walk the brace depth, ignoring braces inside string literals.
   var start = cleaned.indexOf('{');
-  var end = cleaned.lastIndexOf('}');
-  if (start === -1 || end === -1) throw new Error('Could not parse response: ' + text.slice(0, 120));
+  if (start === -1) throw new Error('Could not parse response: ' + text.slice(0, 120));
+  var depth = 0;
+  var inString = false;
+  var escapeNext = false;
+  var end = -1;
+  for (var i = start; i < cleaned.length; i++) {
+    var ch = cleaned[i];
+    if (escapeNext) { escapeNext = false; continue; }
+    if (inString) {
+      if (ch === '\\') { escapeNext = true; continue; }
+      if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') { inString = true; continue; }
+    if (ch === '{') depth++;
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0) { end = i; break; }
+    }
+  }
+  if (end === -1) throw new Error('Could not parse response: ' + text.slice(0, 120));
   var json = cleaned.slice(start, end + 1);
   try {
     var obj = JSON.parse(json);
