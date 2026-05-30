@@ -1,5 +1,10 @@
 var SF_HOST_RE = /^https:\/\/[^/]+\.(lightning\.force\.com|salesforce\.com|salesforce-setup\.com|force\.com)\//;
 
+// Skipper backend base URL. localhost for dev; replaced at packaging time for
+// production builds. Kept as a single constant so a future build step (or
+// chrome.storage override) can swap it.
+var SKIPPER_BACKEND_URL = 'http://localhost:3000';
+
 // Provider catalogue. Everything user-facing about a provider — label, key
 // console link, setup steps, key-format hints, default model, model menu —
 // lives here so adding a fourth provider is just a new entry. Keep this
@@ -367,3 +372,273 @@ function mergeOptions(patch) {
     });
   });
 }
+
+// ─── Skipper Account pane ───────────────────────────────────────────────────
+
+var skipperEmailEl   = document.getElementById('skipperEmail');
+var skipperReqBtnEl  = document.getElementById('skipperRequestLink');
+var skipperReqStatEl = document.getElementById('skipperRequestStatus');
+var skipperCancelEl  = document.getElementById('skipperCancelPending');
+var skipperSignOutEl = document.getElementById('skipperSignOut');
+var paneSignedOut    = document.getElementById('accountSignedOut');
+var panePending      = document.getElementById('accountPending');
+var paneSignedIn     = document.getElementById('accountSignedIn');
+var pendingEmailEl   = document.getElementById('pendingEmail');
+var accountEmailEl   = document.getElementById('accountEmail');
+var accountPlanEl    = document.getElementById('accountPlan');
+var orgsCardEl       = document.getElementById('orgsCard');
+var connectOrgBtnEl  = document.getElementById('connectOrgBtn');
+var connectOrgStatEl = document.getElementById('connectOrgStatus');
+
+var skipperPollTimer = null;
+
+function setAccountStatus(text, kind) {
+  skipperReqStatEl.textContent = text || '';
+  skipperReqStatEl.className = kind || '';
+}
+
+// Phase 2 ships behind sfnavOptions.featureFlags.skipperAccount. The pane and
+// nav item stay hidden until the flag is flipped from DevTools — keeps the
+// rest of the Phase 2 wiring (callClaudeRouted, skipper.routedClaude) shippable
+// without exposing the UI. Flip by running this in the Options-page console:
+//   chrome.storage.local.get('sfnavOptions', d => chrome.storage.local.set({
+//     sfnavOptions: { ...d.sfnavOptions, featureFlags: { ...(d.sfnavOptions && d.sfnavOptions.featureFlags), skipperAccount: true }}
+//   }))
+function isAccountFeatureEnabled(opts) {
+  return !!(opts && opts.featureFlags && opts.featureFlags.skipperAccount);
+}
+
+function renderAccount() {
+  chrome.storage.local.get('sfnavOptions', function (data) {
+    var opts = data.sfnavOptions || {};
+    if (!isAccountFeatureEnabled(opts)) {
+      stopSkipperPolling();
+      return;
+    }
+    if (opts.skipperJwt && opts.skipperEmail) {
+      paneSignedOut.hidden = true;
+      panePending.hidden = true;
+      paneSignedIn.hidden = false;
+      accountEmailEl.textContent = opts.skipperEmail;
+      accountPlanEl.textContent = 'Plan: ' + (opts.skipperPlan ? opts.skipperPlan.charAt(0).toUpperCase() + opts.skipperPlan.slice(1) : 'Free');
+      loadConnectedOrgs(opts.skipperJwt);
+      return;
+    }
+    if (opts.skipperPendingTicket && opts.skipperPendingEmail) {
+      paneSignedOut.hidden = true;
+      panePending.hidden = false;
+      paneSignedIn.hidden = true;
+      pendingEmailEl.textContent = opts.skipperPendingEmail;
+      startSkipperPolling(opts.skipperPendingTicket);
+      return;
+    }
+    paneSignedOut.hidden = false;
+    panePending.hidden = true;
+    paneSignedIn.hidden = true;
+    stopSkipperPolling();
+  });
+}
+
+skipperReqBtnEl.addEventListener('click', async function () {
+  var email = (skipperEmailEl.value || '').trim();
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    setAccountStatus('Enter a valid email', 'err');
+    return;
+  }
+  skipperReqBtnEl.disabled = true;
+  setAccountStatus('Sending…', 'loading');
+  try {
+    var resp = await fetch(SKIPPER_BACKEND_URL + '/auth/request-link', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email })
+    });
+    if (!resp.ok) {
+      var err = await resp.json().catch(function () { return { error: 'request_failed' }; });
+      setAccountStatus('Failed: ' + (err.error || resp.status), 'err');
+      return;
+    }
+    var data = await resp.json();
+    await mergeOptions({
+      skipperPendingTicket: data.ticket,
+      skipperPendingEmail: email
+    });
+    setAccountStatus('', '');
+    renderAccount();
+  } catch (e) {
+    setAccountStatus('Network error: ' + e.message, 'err');
+  } finally {
+    skipperReqBtnEl.disabled = false;
+  }
+});
+
+skipperCancelEl.addEventListener('click', async function () {
+  stopSkipperPolling();
+  await mergeOptions({ skipperPendingTicket: null, skipperPendingEmail: null });
+  renderAccount();
+});
+
+skipperSignOutEl.addEventListener('click', async function () {
+  await mergeOptions({ skipperJwt: null, skipperEmail: null, skipperPlan: null });
+  renderAccount();
+});
+
+function startSkipperPolling(ticket) {
+  if (skipperPollTimer) return;
+  var attempts = 0;
+  var maxAttempts = 150; // 5 min @ 2s
+  skipperPollTimer = setInterval(async function () {
+    attempts++;
+    if (attempts > maxAttempts) {
+      stopSkipperPolling();
+      await mergeOptions({ skipperPendingTicket: null, skipperPendingEmail: null });
+      setAccountStatus('Sign-in link expired. Request a new one.', 'err');
+      renderAccount();
+      return;
+    }
+    try {
+      var resp = await fetch(SKIPPER_BACKEND_URL + '/auth/poll', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ticket: ticket })
+      });
+      var data = await resp.json().catch(function () { return {}; });
+      if (data.status === 'ready' && data.jwt) {
+        stopSkipperPolling();
+        await mergeOptions({
+          skipperJwt: data.jwt,
+          skipperEmail: data.email,
+          skipperPlan: 'free',
+          skipperPendingTicket: null,
+          skipperPendingEmail: null
+        });
+        renderAccount();
+      } else if (data.status === 'expired' || data.status === 'unknown') {
+        stopSkipperPolling();
+        await mergeOptions({ skipperPendingTicket: null, skipperPendingEmail: null });
+        setAccountStatus('Sign-in link expired. Request a new one.', 'err');
+        renderAccount();
+      }
+    } catch (_) {
+      // transient network errors — keep polling
+    }
+  }, 2000);
+}
+
+function setConnectStatus(text, kind) {
+  connectOrgStatEl.textContent = text || '';
+  connectOrgStatEl.className = 'walk-status' + (kind ? ' ' + kind : '');
+}
+
+function renderOrgs(orgList) {
+  // Wipe existing rows; rebuild from data.
+  orgsCardEl.innerHTML = '';
+  if (!orgList || orgList.length === 0) {
+    var empty = document.createElement('div');
+    empty.className = 'cr';
+    empty.innerHTML =
+      '<div class="crt">' +
+        '<div class="rl">No orgs connected yet</div>' +
+        '<div class="rd">Connect an org so Skipper can read metadata (describes, Flow XML, validation rules) as the integration user. Requires Salesforce admin rights.</div>' +
+      '</div>' +
+      '<div class="crc">' +
+        '<button id="connectOrgBtn" class="btn bp" type="button">Connect a Salesforce org</button>' +
+      '</div>';
+    orgsCardEl.appendChild(empty);
+    document.getElementById('connectOrgBtn').addEventListener('click', startOrgConnect);
+    return;
+  }
+  orgList.forEach(function (o) {
+    var row = document.createElement('div');
+    row.className = 'cr';
+    var instance = (o.instanceUrl || '').replace(/^https?:\/\//, '');
+    row.innerHTML =
+      '<div class="crt">' +
+        '<div class="rl">' + esc(instance) + '</div>' +
+        '<div class="rd">Org ID <code>' + esc(o.sfOrgId) + '</code> &middot; integration user <code>' + esc(o.integrationUserId || '—') + '</code></div>' +
+      '</div>';
+    orgsCardEl.appendChild(row);
+  });
+  var actionRow = document.createElement('div');
+  actionRow.className = 'cr';
+  actionRow.innerHTML =
+    '<div class="crt">' +
+      '<div class="rl">Connect another org</div>' +
+      '<div class="rd">Open a Salesforce tab first, then click Connect to authorize this extension against that org\'s integration user.</div>' +
+    '</div>' +
+    '<div class="crc"><button id="connectOrgBtn" class="btn bs bsm" type="button">Connect</button></div>';
+  orgsCardEl.appendChild(actionRow);
+  document.getElementById('connectOrgBtn').addEventListener('click', startOrgConnect);
+}
+
+async function loadConnectedOrgs(jwt) {
+  try {
+    var resp = await fetch(SKIPPER_BACKEND_URL + '/orgs/mine', {
+      headers: { 'Authorization': 'Bearer ' + jwt }
+    });
+    if (!resp.ok) {
+      renderOrgs([]);
+      return;
+    }
+    var data = await resp.json();
+    renderOrgs(data.orgs || []);
+  } catch (_) {
+    renderOrgs([]);
+  }
+}
+
+async function startOrgConnect() {
+  setConnectStatus('Looking for a Salesforce tab…', 'loading');
+  var tabs = await new Promise(function (r) { chrome.tabs.query({}, r); });
+  var sfTabs = (tabs || []).filter(function (t) { return t.url && SF_HOST_RE.test(t.url); });
+  if (!sfTabs.length) {
+    setConnectStatus('Open a Salesforce tab first, then click Connect again.', 'err');
+    return;
+  }
+  var target = sfTabs.find(function (t) { return t.active; }) || sfTabs[0];
+  var orgUrl = new URL(target.url).origin;
+
+  var data = await chrome.storage.local.get('sfnavOptions');
+  var jwt = data.sfnavOptions && data.sfnavOptions.skipperJwt;
+  if (!jwt) {
+    setConnectStatus('You must sign in to Skipper first.', 'err');
+    return;
+  }
+
+  setConnectStatus('Requesting authorization URL…', 'loading');
+  try {
+    var resp = await fetch(SKIPPER_BACKEND_URL + '/sf/oauth/start', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + jwt, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orgUrl: orgUrl })
+    });
+    if (resp.status === 503) {
+      setConnectStatus('Backend is missing the Salesforce Connected App credentials. Configure SF_CONNECTED_APP_CLIENT_ID / SECRET in the backend .env.', 'err');
+      return;
+    }
+    if (!resp.ok) {
+      var err = await resp.json().catch(function () { return { error: 'failed' }; });
+      setConnectStatus('Failed: ' + (err.error || resp.status), 'err');
+      return;
+    }
+    var d = await resp.json();
+    chrome.tabs.create({ url: d.authorizeUrl });
+    setConnectStatus('Authorization opened in a new tab — finish there, then refresh this page to see the connected org.', 'ok');
+  } catch (e) {
+    setConnectStatus('Network error: ' + e.message, 'err');
+  }
+}
+
+function stopSkipperPolling() {
+  if (skipperPollTimer) {
+    clearInterval(skipperPollTimer);
+    skipperPollTimer = null;
+  }
+}
+
+chrome.storage.local.get('sfnavOptions', function (data) {
+  var opts = data.sfnavOptions || {};
+  var navItem = document.querySelector('.ni[data-pane="account"]');
+  if (navItem) navItem.hidden = !isAccountFeatureEnabled(opts);
+  if (isAccountFeatureEnabled(opts)) renderAccount();
+});
