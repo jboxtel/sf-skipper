@@ -12,7 +12,7 @@ Strictly read-only — no DML, no anonymous Apex, no metadata writes. There is n
 
 ## Who is this for?
 
-Developers, consultants, and admins who work in multiple orgs and sandboxes. If you switch between orgs all day, you already know the cost of un-grounded AI: a "typical Product2" doesn't exist, every org renames things differently, and a query that works in one sandbox is garbage in the next. Skipper assumes that's the world you live in.
+Salesforce developers, consultants, and admins, especially anyone who hops between client orgs and sandboxes, or who has to support an org they didn't build. Generic AI guesses at what a "typical" `Product2` looks like, but in real orgs half the fields have been renamed and the picklist values it confidently invents were never valid in your org. Skipper reads your org's actual schema before the model says a word. A developer gets a query that runs, and an admin gets an answer to *"which flow updated this field?"* grounded in their actual org, because the grounding does the heavy lifting, not the prompt.
 
 ## Install
 
@@ -144,13 +144,17 @@ options.{html,js,css}  Settings page (provider, API key, model)
 
 Caches, session cookies, and AI grounding calls are all scoped to the host of the active tab. Switch from your prod tab to a sandbox tab and Skipper automatically picks up the sandbox's `sid` cookie, hits the sandbox's REST and Tooling APIs, and reads from a separate cache namespace — no logout, no setting toggle, no manual cache flush. The same `@soql` prompt typed against two orgs produces two different queries, because each describe call runs against a different org's schema.
 
+### Does Skipper work if I don't have extensive rights in the org?
+
+Skipper acts as your logged-in user, so it can only see what your profile already allows. The command palette and `@soql` work with normal Read access. `@debug` and `@ask` read Flow and Apex source via the Tooling API, which typically requires `View All Setup` (most admin profiles have it; most standard users don't). If a permission blocks a call, you'll see the Salesforce API error rather than a fabricated answer.
+
 ### Why bring-your-own-key instead of a hosted service?
 
 Two reasons. Your prompts, screenshots, and tool-call results never pass through infrastructure I control — they go straight from your browser to the provider under your own account, subject to whatever DPA you already have with them. And it lets you pick the provider (Gemini, Claude, or GPT) that your team's policy or budget already approves; you're not locked into mine.
 
 ### Why strictly read-only?
 
-Because the most useful AI tools are the ones admins are actually allowed to use. A "Skipper that can edit metadata" would never get past most security reviews — and a hallucinated write is a far worse outcome than a hallucinated answer. The read-only boundary is enforced at the transport layer (`askFetch` in `ask.js`), not just by prompting.
+We've all watched AI confidently invent fields that don't exist, update records it shouldn't have touched, and delete things it had no business deleting. Skipper makes that class of mistake impossible. The read-only boundary is enforced at the transport layer (`askFetch` in `ask.js`), not just by prompting, so any non-GET request is rejected before it leaves the browser. You get the leverage of AI without the risk of an autonomous write.
 
 ## Changelog
 
