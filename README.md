@@ -4,7 +4,7 @@
 
 **Grounded AI and a command palette for Salesforce — schema-backed, read-only, bring your own key.**
 
-Most "AI for Salesforce" tools point an LLM at a screenshot and hope. Skipper goes the other way: every AI feature pulls live context from *your* org — real field API names, picklist values, flow metadata, Apex source, field history — before the model says a word. The model never gets to invent a field, a flow node, or a query.
+Ask an LLM about your Salesforce org and it hands you confident answers about fields, flows, and queries that don't exist. The model leans on whatever Salesforce documentation happened to be in its training data, and never checks against the org you're actually in. Skipper goes the other way: every AI feature pulls live context from *your* org (real field API names, picklist values, flow metadata, Apex source, field history) before the model says a word. The model never gets to invent a field, a flow node, or a query.
 
 On top of that grounded AI layer sits a keyboard-first command palette (`⌘⇧K` / `Ctrl+Shift+K`) that fuzzy-matches every object, flow, Lightning app, custom metadata type, custom label, permission set, and Setup page in your org.
 
@@ -70,7 +70,7 @@ When a flow doesn't behave the way you expected:
 3. Press `⌘⇧K` and select **"Debug this flow"** (it appears at the top of the menu when a flow is open).
 4. Paste the debug output, optionally add a sentence about what you expected, and click **Analyze**.
 
-Skipper fetches the flow's metadata from the Tooling API, sends it together with your debug output to your chosen provider, and returns a **summary**, **root cause**, **suggested fix**, and **execution path**.
+Skipper fetches the flow's metadata from the Tooling API, sends it together with your debug output to your chosen provider, and returns a **summary**, **root cause**, and **suggested fix**.
 
 ## Command palette
 
