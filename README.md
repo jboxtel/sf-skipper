@@ -148,7 +148,7 @@ Caches, session cookies, and AI grounding calls are all scoped to the host of th
 
 Skipper acts as your logged-in user, so it can only see what your profile already allows. The command palette and `@soql` work with normal Read access. `@debug` and `@ask` read Flow and Apex source via the Tooling API, which typically requires `View All Setup` (most admin profiles have it; most standard users don't). If a permission blocks a call, you'll see the Salesforce API error rather than a fabricated answer.
 
-### Why bring-your-own-key instead of a hosted service?
+### Why bring-your-own-key?
 
 Two reasons. Your prompts, screenshots, and tool-call results never pass through infrastructure I control — they go straight from your browser to the provider under your own account, subject to whatever DPA you already have with them. And it lets you pick the provider (Gemini, Claude, or GPT) that your team's policy or budget already approves; you're not locked into mine.
 
