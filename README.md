@@ -1,3 +1,5 @@
+<p align="center"><img src="icons/icon128.png" alt="Skipper logo" width="96" height="96"></p>
+
 # Skipper for Salesforce
 
 **Grounded AI and a command palette for Salesforce — schema-backed, read-only, bring your own key.**
@@ -21,14 +23,10 @@ In dev mode, click the reload icon on `chrome://extensions` after editing any so
 
 ## Screenshots
 
-| | |
-|---|---|
-| ![Command palette](screenshots/command-palette.jpg) | ![SOQL Generator](screenshots/soql-generator.jpg) |
-| Search objects, flows, setup pages, or pick a category | Generate SOQL from natural language |
-| ![Flow Debug — paste input](screenshots/flow-debug-input.jpg) | ![Flow Debug — suggested fix](screenshots/flow-debug-suggested-fix.jpg) |
-| Paste debug output from Flow Builder | Get a root-cause analysis and suggested fix |
-| ![Flow browser](screenshots/flow-browser.jpg) | ![Custom metadata drill-down](screenshots/custom-metadata-drill.jpg) |
-| Browse and filter all flows in your org | Drill into custom metadata types |
+| | | |
+|---|---|---|
+| ![Command palette](screenshots/commandpallette.jpg) | ![Flow browser](screenshots/flows.png) | ![SOQL Generator](screenshots/soql.png) |
+| Open Skipper from anywhere — search objects, flows, apps, custom metadata, labels, permission sets, and Setup pages | Browse and filter every flow in your org with `@flow` | Generate SOQL from natural language, grounded in your org's real schema |
 
 ## AI assistants
 
