@@ -1,6 +1,6 @@
 # Skipper for Salesforce
 
-**Grounded AI and a command palette for Salesforce — schema-backed, read-only, BYO key.**
+**Grounded AI and a command palette for Salesforce — schema-backed, read-only, bring your own key.**
 
 Most "AI for Salesforce" tools point an LLM at a screenshot and hope. Skipper goes the other way: every AI feature pulls live context from *your* org — real field API names, picklist values, flow metadata, Apex source, field history — before the model says a word. The model never gets to invent a field, a flow node, or a query.
 
@@ -139,6 +139,20 @@ salesforce-urls.js     URL builders + Setup quick-links registry
 soql.js                SOQL generator: schema fetch, prompt, history
 options.{html,js,css}  Settings page (provider, API key, model)
 ```
+
+## FAQ
+
+### How does it work across multiple orgs?
+
+Caches, session cookies, and AI grounding calls are all scoped to the host of the active tab. Switch from your prod tab to a sandbox tab and Skipper automatically picks up the sandbox's `sid` cookie, hits the sandbox's REST and Tooling APIs, and reads from a separate cache namespace — no logout, no setting toggle, no manual cache flush. The same `@soql` prompt typed against two orgs produces two different queries, because each describe call runs against a different org's schema.
+
+### Why bring-your-own-key instead of a hosted service?
+
+Two reasons. Your prompts, screenshots, and tool-call results never pass through infrastructure I control — they go straight from your browser to the provider under your own account, subject to whatever DPA you already have with them. And it lets you pick the provider (Gemini, Claude, or GPT) that your team's policy or budget already approves; you're not locked into mine.
+
+### Why strictly read-only?
+
+Because the most useful AI tools are the ones admins are actually allowed to use. A "Skipper that can edit metadata" would never get past most security reviews — and a hallucinated write is a far worse outcome than a hallucinated answer. The read-only boundary is enforced at the transport layer (`askFetch` in `ask.js`), not just by prompting.
 
 ## Changelog
 
