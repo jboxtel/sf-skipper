@@ -20,10 +20,6 @@
             <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="4" width="4" height="4" rx="1"/><rect x="9" y="4" width="4" height="4" rx="1"/><line x1="5" y1="6" x2="9" y2="6"/></svg>
             Provider
           </div>
-          <div class="ni" data-pane="account" hidden>
-            <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2"><circle cx="7" cy="5" r="2.4"/><path d="M2 12c.7-2.4 2.7-3.6 5-3.6S11.3 9.6 12 12" stroke-linecap="round"/></svg>
-            Account
-          </div>
           <div class="ni" data-pane="navigation">
             <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><path d="M2 3.5h10M2 7h10M2 10.5h6"/></svg>
             Navigation
@@ -104,63 +100,6 @@
                 <button id="save" class="btn bp" type="button">Save and test</button>
                 <span id="status"></span>
               </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- ACCOUNT -->
-        <div class="pane" id="pane-account">
-          <div class="ph">
-            <h1>Skipper Account</h1>
-            <p>Sign in to enable integration-user grounding — metadata describes, Flow XML, and Tooling reads continue to work even when your Salesforce user lacks View Setup. Or skip this and stay on Power User mode with your own provider key.</p>
-          </div>
-
-          <div class="sec" id="accountSignedOut">
-            <div class="sl">Sign in with email</div>
-            <div class="fg">
-              <div>
-                <label class="fl" for="skipperEmail">Email</label>
-                <div class="iw">
-                  <input id="skipperEmail" type="email" placeholder="you@company.com" autocomplete="email" spellcheck="false" />
-                </div>
-              </div>
-              <div class="actions">
-                <button id="skipperRequestLink" class="btn bp" type="button">Send sign-in link</button>
-                <span id="skipperRequestStatus"></span>
-              </div>
-            </div>
-          </div>
-
-          <div class="sec" id="accountPending" hidden>
-            <div class="sl">Check your email</div>
-            <div class="card">
-              <div class="cr">
-                <div class="crt">
-                  <div class="rl">Sign-in link sent</div>
-                  <div class="rd">Open the link in <strong id="pendingEmail"></strong> to finish signing in. This tab will pick up the session automatically.</div>
-                </div>
-                <div class="crc">
-                  <button id="skipperCancelPending" class="btn bs bsm" type="button">Cancel</button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div class="sec" id="accountSignedIn" hidden>
-            <div class="sl">Signed in</div>
-            <div class="card">
-              <div class="cr">
-                <div class="crt">
-                  <div class="rl" id="accountEmail">—</div>
-                  <div class="rd"><span id="accountPlan">Plan: Free</span> — 50 @soql / 20 @ask / 10 @debug per calendar month.</div>
-                </div>
-                <div class="crc">
-                  <button id="skipperSignOut" class="btn bs bsm" type="button">Sign out</button>
-                </div>
-              </div>
-            </div>
-            <div class="callout a" style="margin-top:14px">
-              When signed in, Skipper routes AI calls through the backend so it can ground prompts with metadata read by the integration user. Power-user (BYO key) mode still works — clear this session if you want to go back to it.
             </div>
           </div>
         </div>

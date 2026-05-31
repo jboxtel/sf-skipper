@@ -79,41 +79,6 @@ async function sfRestPreamble() {
   return { apiBase: apiBase, headers: headers, basePath: basePath };
 }
 
-// Skipper backend base URL. Same constant exists in options.js — keep in sync
-// or move to a tiny shared config file when a third caller appears.
-var SKIPPER_BACKEND_URL = 'http://localhost:3000';
-
-// Routing wrapper. If the user is signed in to Skipper, route through the
-// backend so calls can be quota-tracked and grounded by the integration user.
-// Otherwise fall back to the existing BYO path (callClaude). Power-user BYO
-// must keep working — never delete this fallback.
-function callClaudeRouted(systemPrompt, userMessage, opts) {
-  opts = opts || {};
-  return new Promise(function (resolve, reject) {
-    chrome.storage.local.get('sfnavOptions', function (data) {
-      var stored = (data && data.sfnavOptions) || {};
-      if (!stored.skipperJwt) {
-        callClaude(systemPrompt, userMessage, opts).then(resolve, reject);
-        return;
-      }
-      chrome.runtime.sendMessage(
-        {
-          type: 'skipper.routedClaude',
-          system: systemPrompt,
-          user: userMessage,
-          feature: opts.feature || 'unknown'
-        },
-        function (resp) {
-          if (chrome.runtime.lastError) { reject(new Error(chrome.runtime.lastError.message)); return; }
-          if (!resp) { reject(new Error('No response from background')); return; }
-          if (!resp.ok) { reject(new Error(resp.error || 'Skipper backend error')); return; }
-          resolve(resp);
-        }
-      );
-    });
-  });
-}
-
 // Send a system+user prompt to the background, which proxies to Anthropic.
 // By default returns the raw text from the model. Options:
 //   - cacheSystem: mark system prompt as an ephemeral cache breakpoint
