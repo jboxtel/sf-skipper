@@ -1273,7 +1273,33 @@
       return;
     }
 
+    if (result && result.type === 'subpage') {
+      openSubPage(result);
+      return;
+    }
+
     openUrl(url);
+  }
+
+  // Object Manager sub-pages must be opened with the EntityDefinition DurableId,
+  // not the API name. Using the API name bounces the page to the setup subdomain
+  // in a state where the "New" button (and other action-bar elements) don't render.
+  function openSubPage(result) {
+    var object = result.object;
+    if (object && object.entityId) {
+      openUrl(buildObjectSubPageUrl(object.entityId, result.segment));
+      return;
+    }
+    var hintEl = document.getElementById('sfnav-hint');
+    if (hintEl) hintEl.textContent = 'Resolving object…';
+    getEntityIdForObject(object.apiName)
+      .then(function (entityId) {
+        openUrl(buildObjectSubPageUrl(entityId, result.segment));
+      })
+      .catch(function (err) {
+        console.warn('sfnav: entity ID lookup failed —', err);
+        openUrl(result.url);
+      });
   }
 
   function executeShortcut(keyword) {

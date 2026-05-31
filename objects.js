@@ -140,3 +140,23 @@ function getAllObjects() {
   var customs = _customObjects.filter(function (o) { return !standardApiNames.has(o.apiName); });
   return STANDARD_OBJECTS.concat(customs);
 }
+
+// Resolve EntityDefinition.DurableId for use in Object Manager sub-page URLs.
+// Salesforce internally routes /lightning/setup/ObjectManager/<DurableId>/<Sub>/view;
+// supplying the API name instead bounces to the my.salesforce-setup.com domain
+// in a state where the action bar (e.g. "New" button) fails to render.
+async function getEntityIdForObject(apiName) {
+  var match = findCachedObject(apiName);
+  if (match && match.entityId) return match.entityId;
+
+  var pre = await sfRestPreamble();
+  var soql = "SELECT DurableId FROM EntityDefinition WHERE QualifiedApiName = '" + escapeSoqlLiteral(apiName) + "'";
+  var resp = await sfFetch(pre.apiBase + pre.basePath + '/tooling/query/?q=' + encodeURIComponent(soql), { headers: pre.headers });
+  if (!resp.ok) throw new Error('EntityDefinition lookup failed for ' + apiName + ': ' + resp.status);
+  var data = await resp.json();
+  if (!data.records || !data.records.length) throw new Error('No EntityDefinition for ' + apiName);
+  var entityId = data.records[0].DurableId;
+
+  updateCachedObject(apiName, { entityId: entityId });
+  return entityId;
+}

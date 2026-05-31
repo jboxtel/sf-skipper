@@ -90,6 +90,8 @@ function toSubPageResult(page, object) {
     sublabel: object.label,
     url: buildObjectSubPageUrl(object.apiName, page.segment),
     type: 'subpage',
+    object: object,
+    segment: page.segment,
   };
 }
 
