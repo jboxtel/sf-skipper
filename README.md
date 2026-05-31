@@ -67,7 +67,7 @@ When a flow doesn't behave the way you expected:
 
 1. Open the flow in Flow Builder and run a Debug session as you normally would.
 2. Copy the **Debug Details** panel output.
-3. Press `⌘⇧K` and select **"Debug this flow"** (it appears at the top of the menu when a flow is open).
+3. Press `⌘⇧K` and select **`@debug`** under **AI Tools** (only enabled when you're on a Flow Builder page).
 4. Paste the debug output, optionally add a sentence about what you expected, and click **Analyze**.
 
 Skipper fetches the flow's metadata from the Tooling API, sends it together with your debug output to your chosen provider, and returns a **summary**, **root cause**, and **suggested fix**.
@@ -117,24 +117,12 @@ Your API key is stored in `chrome.storage.local` (local to this browser profile,
 ## Architecture
 
 ```
-manifest.json          Manifest v3 declaration
-background.js          Service worker — session cookie lookup + AI provider proxy
-providers.js           Adapter layer that translates Anthropic-shaped requests
-                       to/from Gemini and OpenAI so content scripts stay
-                       provider-agnostic
-shared.js              Cross-file helpers (session, REST base path cache)
-content.js             Palette UI + state machine
-content.css            Palette styles
-commands.js            Search resolution + fuzzy matching
-objects.js             Object cache (REST describeGlobal + storage)
-flows.js               Flow cache (FlowDefinitionView SOQL)
-apps.js                Lightning app cache (AppDefinition SOQL)
-labels.js              Custom Label cache (ExternalString Tooling API query)
-permsets.js            Permission set cache (PermissionSet SOQL, excludes profile-backed)
-flow-debug.js          Flow Debug Assistant: Tooling API fetch, prompt, parser
-ask.js                 @ask agentic loop + read-only askFetch transport gate
-salesforce-urls.js     URL builders + Setup quick-links registry
-soql.js                SOQL generator: schema fetch, prompt, history
+manifest.json          Manifest v3 declaration (see content_scripts.js for the canonical load order)
+background.js          Service worker: session cookie lookup, screenshot capture, AI provider proxy
+providers.js           Anthropic <-> Gemini/OpenAI adapter so content scripts stay provider-agnostic
+content scripts        Palette UI, command resolution, per-org caches (objects, flows, apps, labels,
+                       permission sets, custom metadata types) and the three AI features
+                       (@soql, @debug, @ask), including the read-only askFetch transport gate
 options.{html,js,css}  Settings page (provider, API key, model)
 ```
 
