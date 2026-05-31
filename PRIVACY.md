@@ -71,4 +71,4 @@ If this policy changes materially, the change will be reflected in this file wit
 
 ## Contact
 
-Questions about this policy or about how the extension handles data: open an issue at `https://github.com/jboxtel/sf-skipper/issues` or email `jeroen.boxtel@salesfive.com`.
+Questions about this policy or about how the extension handles data: open an issue at `https://github.com/jboxtel/sf-skipper/issues` or email `skipperforsalesforce@gmail.com`.
