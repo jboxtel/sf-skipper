@@ -20,6 +20,10 @@
             <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="4" width="4" height="4" rx="1"/><rect x="9" y="4" width="4" height="4" rx="1"/><line x1="5" y1="6" x2="9" y2="6"/></svg>
             Provider
           </div>
+          <div class="ni" data-pane="account">
+            <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2"><circle cx="7" cy="5" r="2.2"/><path d="M2.5 12c.6-2.2 2.4-3.5 4.5-3.5s3.9 1.3 4.5 3.5" stroke-linecap="round"/></svg>
+            Skipper account
+          </div>
           <div class="ni" data-pane="navigation">
             <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><path d="M2 3.5h10M2 7h10M2 10.5h6"/></svg>
             Navigation
@@ -100,6 +104,59 @@
                 <button id="save" class="btn bp" type="button">Save and test</button>
                 <span id="status"></span>
               </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- SKIPPER ACCOUNT -->
+        <div class="pane" id="pane-account">
+          <div class="ph">
+            <h1>Skipper account</h1>
+            <p>Sign in with your email to enable Skipper-hosted features (integration-user grounding, paid quotas). Today this only proves the sign-in works — the AI calls still go to the provider you configured under <em>Provider</em>.</p>
+          </div>
+
+          <!-- Signed-out state -->
+          <div class="sec" id="acctSignedOut">
+            <div class="sl">Email</div>
+            <div class="fg">
+              <div>
+                <label class="fl" for="acctEmail">Your work email</label>
+                <div class="iw">
+                  <input id="acctEmail" type="email" placeholder="you@example.com" autocomplete="email" spellcheck="false" />
+                </div>
+              </div>
+              <div class="actions">
+                <button id="acctSendCode" class="btn bp" type="button">Send sign-in code</button>
+                <span id="acctSendStatus"></span>
+              </div>
+            </div>
+
+            <div class="sl" style="margin-top:1.5rem">Code from email</div>
+            <div class="fg">
+              <div>
+                <label class="fl" for="acctOtp">8-digit code</label>
+                <div class="iw">
+                  <input id="acctOtp" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="12345678" maxlength="10" spellcheck="false" />
+                </div>
+                <p class="field-warn" id="acctOtpWarn" hidden>Send a code first — we'll email it to the address above.</p>
+              </div>
+              <div class="actions">
+                <button id="acctVerify" class="btn bp" type="button" disabled>Verify and sign in</button>
+                <span id="acctVerifyStatus"></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Signed-in state -->
+          <div class="sec" id="acctSignedIn" hidden>
+            <div class="cs">
+              <div class="cs-b">SKIPPER</div>
+              <div class="cs-k" id="acctEmailLabel">—</div>
+              <div class="cs-s"><div class="dot g"></div><span id="acctSessionState">Signed in</span></div>
+            </div>
+            <div class="actions" style="margin-top:1rem">
+              <button id="acctSignOut" class="btn bs bsm" type="button">Sign out</button>
+              <span id="acctSignOutStatus"></span>
             </div>
           </div>
         </div>
@@ -197,6 +254,7 @@
         </div>
       </main>
     </div>
+    <script src="skipper-auth.js"></script>
     <script src="options.js"></script>
   </body>
 </html>

@@ -367,3 +367,105 @@ function mergeOptions(patch) {
     });
   });
 }
+
+// ─── Skipper account ────────────────────────────────────────────────────────
+
+var acctSignedOutEl   = document.getElementById('acctSignedOut');
+var acctSignedInEl    = document.getElementById('acctSignedIn');
+var acctEmailEl       = document.getElementById('acctEmail');
+var acctSendCodeEl    = document.getElementById('acctSendCode');
+var acctSendStatusEl  = document.getElementById('acctSendStatus');
+var acctOtpEl         = document.getElementById('acctOtp');
+var acctOtpWarnEl     = document.getElementById('acctOtpWarn');
+var acctVerifyEl      = document.getElementById('acctVerify');
+var acctVerifyStatusEl= document.getElementById('acctVerifyStatus');
+var acctEmailLabelEl  = document.getElementById('acctEmailLabel');
+var acctSessionStateEl= document.getElementById('acctSessionState');
+var acctSignOutEl     = document.getElementById('acctSignOut');
+var acctSignOutStatusEl = document.getElementById('acctSignOutStatus');
+
+// Tracks the email used to request the current OTP, so verify always pairs
+// the code with the address that received it — not whatever's in the input now.
+var acctPendingEmail = null;
+
+function setAcctStatus(el, text, kind) {
+  el.textContent = text;
+  el.className = kind || '';
+}
+
+async function renderAcctPane() {
+  var session = await skipperGetSession();
+  if (session && session.accessToken) {
+    acctSignedOutEl.hidden = true;
+    acctSignedInEl.hidden = false;
+    acctEmailLabelEl.textContent = session.email || '—';
+    acctSessionStateEl.textContent = 'Signed in';
+  } else {
+    acctSignedOutEl.hidden = false;
+    acctSignedInEl.hidden = true;
+  }
+}
+
+acctSendCodeEl.addEventListener('click', async function () {
+  var email = (acctEmailEl.value || '').trim().toLowerCase();
+  if (!email || !/.+@.+\..+/.test(email)) {
+    setAcctStatus(acctSendStatusEl, 'Enter a valid email', 'err');
+    return;
+  }
+  acctSendCodeEl.disabled = true;
+  setAcctStatus(acctSendStatusEl, 'Sending…', 'loading');
+  try {
+    await skipperSendOtp(email);
+    acctPendingEmail = email;
+    setAcctStatus(acctSendStatusEl, 'Code sent to ' + email + '. Check your inbox.', 'ok');
+    acctVerifyEl.disabled = false;
+    acctOtpWarnEl.hidden = true;
+    acctOtpEl.focus();
+  } catch (err) {
+    setAcctStatus(acctSendStatusEl, 'Failed: ' + err.message, 'err');
+  } finally {
+    acctSendCodeEl.disabled = false;
+  }
+});
+
+acctVerifyEl.addEventListener('click', async function () {
+  var code = (acctOtpEl.value || '').trim();
+  if (!acctPendingEmail) {
+    acctOtpWarnEl.hidden = false;
+    return;
+  }
+  if (!/^\d{6,10}$/.test(code)) {
+    setAcctStatus(acctVerifyStatusEl, 'Enter the code from your email', 'err');
+    return;
+  }
+  acctVerifyEl.disabled = true;
+  setAcctStatus(acctVerifyStatusEl, 'Verifying…', 'loading');
+  try {
+    var user = await skipperVerifyOtp(acctPendingEmail, code);
+    setAcctStatus(acctVerifyStatusEl, '', '');
+    acctOtpEl.value = '';
+    acctEmailEl.value = '';
+    acctPendingEmail = null;
+    setAcctStatus(acctSendStatusEl, '', '');
+    await renderAcctPane();
+  } catch (err) {
+    setAcctStatus(acctVerifyStatusEl, 'Failed: ' + err.message, 'err');
+    acctVerifyEl.disabled = false;
+  }
+});
+
+acctSignOutEl.addEventListener('click', async function () {
+  acctSignOutEl.disabled = true;
+  setAcctStatus(acctSignOutStatusEl, 'Signing out…', 'loading');
+  try {
+    await skipperSignOut();
+    setAcctStatus(acctSignOutStatusEl, '', '');
+    await renderAcctPane();
+  } catch (err) {
+    setAcctStatus(acctSignOutStatusEl, 'Error: ' + err.message, 'err');
+  } finally {
+    acctSignOutEl.disabled = false;
+  }
+});
+
+renderAcctPane();
