@@ -968,11 +968,17 @@ function _observeAskSoqlSuccess(question, soql) {
   var recordTypes = (typeof getRecordTypesFor === 'function')
     ? getRecordTypesFor(fromObject) : [];
 
+  // @ask path doesn't carry the candidate-schema list needed to resolve
+  // dot-walked relationship names back to api names, so we don't extract
+  // related-object observations here. The from-role observations are still
+  // the primary signal; related is a v2 enrichment we can wire up later if
+  // the model's runs surface dot-walks worth learning from.
   var candidates = extractObjectAliasCandidates(
     question,
     { apiName: fromObject, label: label },
     null,         // no field schema in this path
-    recordTypes
+    recordTypes,
+    []            // no related-object resolution available here
   );
   if (!candidates.length) return;
   var observations = candidates.map(function (c) {
@@ -981,6 +987,8 @@ function _observeAskSoqlSuccess(question, soql) {
       feature: 'ask',
       term: c.term,
       target: c.target,
+      role: c.role,
+      strength: c.strength,
       evidence: c.evidence
     };
   });
