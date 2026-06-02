@@ -16,7 +16,7 @@ Salesforce developers, consultants, and admins, especially anyone who hops betwe
 
 ## Install
 
-1. Install from the Chrome Web Store (link to come once approved), or load unpacked for development: clone the repo, open `chrome://extensions`, enable **Developer mode** (top-right), click **Load unpacked**, select the project folder.
+1. Install from the [Chrome Web Store](https://chromewebstore.google.com/detail/skipper-for-salesforce/gjgleklcolffnmdaededpmcolieodmpc), or load unpacked for development: clone the repo, open `chrome://extensions`, enable **Developer mode** (top-right), click **Load unpacked**, select the project folder.
 2. (For the AI assistants) Right-click the extension icon → **Options** → pick a provider (Gemini, Claude, or GPT) and paste your API key. Gemini has a free tier; the others are pay-as-you-go directly by the provider.
 
 In dev mode, click the reload icon on `chrome://extensions` after editing any source file.
