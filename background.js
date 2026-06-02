@@ -279,7 +279,7 @@ async function openPaletteInTab(tab) {
     await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       world: 'ISOLATED',
-      files: ['salesforce-urls.js', 'shared.js', 'cache-factory.js', 'objects.js', 'cmdt.js', 'flows.js', 'apps.js', 'labels.js', 'permsets.js', 'flow-debug.js', 'commands.js', 'soql.js', 'ask.js', 'feedback.js', 'markdown.js', 'onboarding.js', 'content.js'],
+      files: ['salesforce-urls.js', 'shared.js', 'cache-factory.js', 'objects.js', 'cmdt.js', 'flows.js', 'apps.js', 'labels.js', 'permsets.js', 'flow-debug.js', 'commands.js', 'org-glossary.js', 'org-glossary-extractors.js', 'soql.js', 'ask.js', 'feedback.js', 'markdown.js', 'onboarding.js', 'content.js'],
     });
     await new Promise(r => setTimeout(r, 80));
     await chrome.scripting.executeScript({

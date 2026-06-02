@@ -32,7 +32,7 @@ const CASES = [
     run: async () => {
       const g = await glossaryGetSnapshot();
       return {
-        ok: g.version === 1
+        ok: g.version === 2
           && g.objectAliases && Object.keys(g.objectAliases).length === 0
           && g.fieldAliases && Object.keys(g.fieldAliases).length === 0
           && g.valueSemantics && Object.keys(g.valueSemantics).length === 0,
@@ -41,11 +41,11 @@ const CASES = [
     }
   },
   {
-    name: 'observe creates a new objectAlias entry with feature counter at 1',
+    name: 'observe creates a new objectAlias entry with strong/weak counters at 1/0',
     run: async () => {
       await glossaryObserve({
         type: 'objectAlias', feature: 'soql',
-        term: 'flight', target: 'Product2',
+        term: 'flight', target: 'Product2', strength: 'strong',
         evidence: 'prompt: show me flights'
       });
       const g = await glossaryGetSnapshot();
@@ -54,8 +54,10 @@ const CASES = [
       const e = bucket[0];
       return {
         ok: e.target === 'Product2'
-          && e.observations.soql === 1
-          && e.observations.ask === 0
+          && e.role === 'from'
+          && e.observations.soql.strong === 1
+          && e.observations.soql.weak === 0
+          && e.observations.ask.strong === 0
           && e.corrections === 0
           && Array.isArray(e.evidence) && e.evidence.length === 1,
         detail: JSON.stringify(e)
@@ -63,9 +65,9 @@ const CASES = [
     }
   },
   {
-    name: 'repeated observation increments the same feature counter (no new entry)',
+    name: 'repeated strong observation increments the strong counter (no new entry)',
     run: async () => {
-      const obs = { type: 'objectAlias', feature: 'soql', term: 'flight', target: 'Product2' };
+      const obs = { type: 'objectAlias', feature: 'soql', term: 'flight', target: 'Product2', strength: 'strong' };
       await glossaryObserve(obs);
       await glossaryObserve(obs);
       await glossaryObserve(obs);
@@ -73,21 +75,49 @@ const CASES = [
       const bucket = g.objectAliases.flight || [];
       if (bucket.length !== 1) return { ok: false, detail: 'bucket length: ' + bucket.length };
       return {
-        ok: bucket[0].observations.soql === 3,
-        detail: 'soql counter: ' + bucket[0].observations.soql
+        ok: bucket[0].observations.soql.strong === 3 && bucket[0].observations.soql.weak === 0,
+        detail: 'soql counter: ' + JSON.stringify(bucket[0].observations.soql)
+      };
+    }
+  },
+  {
+    name: 'weak and strong observations accumulate in separate sub-counters',
+    run: async () => {
+      await glossaryObserve({ type: 'objectAlias', feature: 'soql', term: 'flight', target: 'Product2', strength: 'strong' });
+      await glossaryObserve({ type: 'objectAlias', feature: 'soql', term: 'flight', target: 'Product2', strength: 'weak' });
+      await glossaryObserve({ type: 'objectAlias', feature: 'soql', term: 'flight', target: 'Product2', strength: 'weak' });
+      const g = await glossaryGetSnapshot();
+      const e = (g.objectAliases.flight || [])[0];
+      return {
+        ok: e && e.observations.soql.strong === 1 && e.observations.soql.weak === 2,
+        detail: JSON.stringify(e && e.observations.soql)
       };
     }
   },
   {
     name: 'observations from different features accumulate independently',
     run: async () => {
-      await glossaryObserve({ type: 'objectAlias', feature: 'soql', term: 'flight', target: 'Product2' });
-      await glossaryObserve({ type: 'objectAlias', feature: 'ask',  term: 'flight', target: 'Product2' });
+      await glossaryObserve({ type: 'objectAlias', feature: 'soql', term: 'flight', target: 'Product2', strength: 'strong' });
+      await glossaryObserve({ type: 'objectAlias', feature: 'ask',  term: 'flight', target: 'Product2', strength: 'strong' });
       const g = await glossaryGetSnapshot();
       const e = (g.objectAliases.flight || [])[0];
       return {
-        ok: e && e.observations.soql === 1 && e.observations.ask === 1,
+        ok: e && e.observations.soql.strong === 1 && e.observations.ask.strong === 1,
         detail: JSON.stringify(e && e.observations)
+      };
+    }
+  },
+  {
+    name: 'same term + different role create separate entries (from vs related)',
+    run: async () => {
+      await glossaryObserve({ type: 'objectAlias', feature: 'soql', term: 'project', target: 'Project__c', role: 'from', strength: 'strong' });
+      await glossaryObserve({ type: 'objectAlias', feature: 'soql', term: 'project', target: 'Project__c', role: 'related', strength: 'strong' });
+      const g = await glossaryGetSnapshot();
+      const bucket = g.objectAliases.project || [];
+      const roles = bucket.map(e => e.role).sort();
+      return {
+        ok: bucket.length === 2 && roles[0] === 'from' && roles[1] === 'related',
+        detail: 'roles: ' + JSON.stringify(roles)
       };
     }
   },
@@ -132,12 +162,12 @@ const CASES = [
   {
     name: 'term is normalised (case + whitespace)',
     run: async () => {
-      await glossaryObserve({ type: 'objectAlias', feature: 'soql', term: '  FLIGHT  ', target: 'Product2' });
-      await glossaryObserve({ type: 'objectAlias', feature: 'soql', term: 'flight', target: 'Product2' });
+      await glossaryObserve({ type: 'objectAlias', feature: 'soql', term: '  FLIGHT  ', target: 'Product2', strength: 'strong' });
+      await glossaryObserve({ type: 'objectAlias', feature: 'soql', term: 'flight', target: 'Product2', strength: 'strong' });
       const g = await glossaryGetSnapshot();
       const bucket = g.objectAliases.flight || [];
       return {
-        ok: bucket.length === 1 && bucket[0].observations.soql === 2,
+        ok: bucket.length === 1 && bucket[0].observations.soql.strong === 2,
         detail: 'flight bucket: ' + JSON.stringify(bucket) + ' all keys: ' + JSON.stringify(Object.keys(g.objectAliases))
       };
     }
@@ -146,16 +176,16 @@ const CASES = [
     name: 'observeBatch accepts an array and dedupes per the bucket key',
     run: async () => {
       await glossaryObserveBatch([
-        { type: 'objectAlias', feature: 'soql', term: 'flight',   target: 'Product2' },
-        { type: 'objectAlias', feature: 'soql', term: 'aircraft', target: 'Product2' },
-        { type: 'objectAlias', feature: 'soql', term: 'flight',   target: 'Product2' }
+        { type: 'objectAlias', feature: 'soql', term: 'flight',   target: 'Product2', strength: 'strong' },
+        { type: 'objectAlias', feature: 'soql', term: 'aircraft', target: 'Product2', strength: 'strong' },
+        { type: 'objectAlias', feature: 'soql', term: 'flight',   target: 'Product2', strength: 'strong' }
       ]);
       const g = await glossaryGetSnapshot();
       const f = (g.objectAliases.flight || [])[0];
       const a = (g.objectAliases.aircraft || [])[0];
       return {
-        ok: f && f.observations.soql === 2 && a && a.observations.soql === 1,
-        detail: 'flight=' + (f && f.observations.soql) + ' aircraft=' + (a && a.observations.soql)
+        ok: f && f.observations.soql.strong === 2 && a && a.observations.soql.strong === 1,
+        detail: 'flight=' + (f && JSON.stringify(f.observations.soql)) + ' aircraft=' + (a && JSON.stringify(a.observations.soql))
       };
     }
   },
@@ -263,7 +293,7 @@ const CASES = [
     }
   },
   {
-    name: 'extractor filters out tokens that already appear in the object surface',
+    name: 'extractor records surface-matching tokens as WEAK observations',
     run: async () => {
       const candidates = extractObjectAliasCandidates(
         'show me opportunities by stage',
@@ -271,12 +301,18 @@ const CASES = [
         { fields: [{ name: 'StageName', label: 'Stage' }] },
         []
       );
-      // "stage" is in the field surface; "opportunity" is a generic noun. Net: zero candidates.
-      return { ok: candidates.length === 0, detail: JSON.stringify(candidates) };
+      // "stage" matches the field surface (StageName/Stage); we now record it
+      // as a weak observation rather than dropping. "opportunity" is a
+      // generic noun and stays filtered. So exactly one weak candidate.
+      const stage = candidates.find(c => c.term === 'stage');
+      return {
+        ok: candidates.length === 1 && stage && stage.strength === 'weak' && stage.role === 'from',
+        detail: JSON.stringify(candidates)
+      };
     }
   },
   {
-    name: 'extractor filters out tokens that match record-type names',
+    name: 'extractor records record-type tokens as WEAK observations',
     run: async () => {
       const candidates = extractObjectAliasCandidates(
         'show me retail accounts',
@@ -284,7 +320,38 @@ const CASES = [
         { fields: [] },
         [{ developerName: 'Retail', name: 'Retail' }]
       );
-      return { ok: candidates.length === 0, detail: JSON.stringify(candidates) };
+      // "retail" matches a record-type name; v2 records it as weak rather
+      // than dropping (the doc explains why: lexical scoring also surfaces
+      // these matches, but having the evidence cumulatively still helps
+      // disambiguate similar-named objects on read-side ranking).
+      const retail = candidates.find(c => c.term === 'retail');
+      return {
+        ok: candidates.length === 1 && retail && retail.strength === 'weak',
+        detail: JSON.stringify(candidates)
+      };
+    }
+  },
+  {
+    name: 'extractor emits related-role observations for strong terms when relatedApiNames provided',
+    run: async () => {
+      const candidates = extractObjectAliasCandidates(
+        'cancelled flights by airline',
+        { apiName: 'Product2', label: 'Product' },
+        { fields: [{ name: 'Name' }] },
+        [],
+        ['Airline__c']  // related object reached via dot-walk
+      );
+      // "flight" is strong (not in Product2 surface) → emits FROM observation
+      // against Product2 AND related observation against Airline__c.
+      // "airline" is strong (not in Product2 surface) → same fan-out.
+      const flightFrom    = candidates.find(c => c.term === 'flight'  && c.target === 'Product2'   && c.role === 'from');
+      const flightRelated = candidates.find(c => c.term === 'flight'  && c.target === 'Airline__c' && c.role === 'related');
+      const airlineFrom   = candidates.find(c => c.term === 'airline' && c.target === 'Product2'   && c.role === 'from');
+      const airlineRelated= candidates.find(c => c.term === 'airline' && c.target === 'Airline__c' && c.role === 'related');
+      return {
+        ok: !!(flightFrom && flightRelated && airlineFrom && airlineRelated),
+        detail: JSON.stringify(candidates)
+      };
     }
   },
   {

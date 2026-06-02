@@ -1,8 +1,6 @@
-// Heuristic extractors that convert (prompt, soql, chosenObject, schema) into
-// glossary observation candidates. Pure functions — no LLM calls, no I/O — so
-// they can run synchronously after a feature succeeds. Phase 1 only emits
-// objectAlias candidates; fieldAlias and valueSemantic extraction lands with
-// the read-side rollout in v1.1 when there's a UI to surface and correct them.
+// Heuristic extractors that convert (prompt, soql, chosenObject, schema,
+// relatedObjects) into glossary observation candidates. Pure functions — no
+// LLM calls, no I/O — so they can run synchronously after a feature succeeds.
 
 // Words that almost never carry org-specific meaning. Anything in this set is
 // dropped during prompt tokenisation so we don't try to learn that "show",
@@ -22,7 +20,8 @@ var EXTRACTOR_STOPWORDS = (function () {
     'please', 'just', 'only', 'also', 'really', 'still', 'always', 'never',
     'me', 'my', 'mine', 'our', 'we', 'us', 'you', 'your',
     'records', 'record', 'rows', 'row', 'data', 'list', 'lists',
-    'created', 'modified', 'updated', 'changed', 'owned', 'assigned'
+    'created', 'modified', 'updated', 'changed', 'owned', 'assigned',
+    'group', 'grouped', 'order', 'sort', 'sorted', 'filter', 'filtered'
   ];
   var set = {};
   for (var i = 0; i < list.length; i++) set[list[i]] = true;
@@ -54,8 +53,9 @@ function tokenisePromptForExtraction(prompt) {
 
 // Build the set of "surface" tokens for an object — every token that already
 // appears in its api name, label, record-type names, or field names/labels.
-// If a prompt token isn't in this set, yet the object was chosen anyway, we
-// have a candidate alias.
+// A prompt token in this set is recorded as a WEAK observation (lexical
+// scoring would have caught it anyway). Tokens not in this set are STRONG
+// observations (we genuinely learned a vocabulary mapping).
 function objectSurfaceTokens(chosenObject, schema, recordTypes) {
   var tokens = {};
   function add(s) {
@@ -113,38 +113,78 @@ var EXTRACTOR_GENERIC_NOUNS = (function () {
   return set;
 })();
 
-// Max candidates per interaction. If filtering leaves more than this, the
-// prompt is too noisy to learn from cleanly — we'd be guessing which token is
-// the alias vs. which are value-semantic noise. Phase 1 prefers fewer, higher-
-// signal observations over volume.
-var EXTRACTOR_MAX_CANDIDATES_PER_INTERACTION = 3;
+// Soft caps per strength. Strong candidates are precious (one prompt rarely
+// surfaces more than 2-3 genuinely-novel terms), so we keep the existing tight
+// gate. Weak candidates fire more often by design, so we accept more of them
+// per interaction; the confidence formula will down-weight them appropriately.
+var EXTRACTOR_MAX_STRONG_PER_INTERACTION = 3;
+var EXTRACTOR_MAX_WEAK_PER_INTERACTION = 8;
 
-// Extract objectAlias candidates from one successful SOQL interaction.
-// `chosenObject` is { apiName, label }. `schema` is the describe result used
-// during generation (may be null in @ask paths where the model used its own
-// describe call — surface tokens degrade gracefully). `recordTypes` is the
-// record-type list for chosenObject (may be empty).
-function extractObjectAliasCandidates(prompt, chosenObject, schema, recordTypes) {
+// Extract objectAlias candidates from one successful interaction.
+//
+// `chosenObject` is { apiName, label } — the FROM target.
+// `schema` is the describe result used during generation (may be null).
+// `recordTypes` is the record-type list for chosenObject (may be empty).
+// `relatedApiNames` is the list of api names the SOQL touched as dot-walks or
+//                   subqueries — recorded with role='related' so the read side
+//                   can distinguish row-shape vocabulary from dimension
+//                   vocabulary.
+//
+// Returns a flat list with { type, term, target, role, strength, evidence }.
+function extractObjectAliasCandidates(prompt, chosenObject, schema, recordTypes, relatedApiNames) {
   if (!chosenObject || !chosenObject.apiName) return [];
   var tokens = tokenisePromptForExtraction(prompt);
   if (!tokens.length) return [];
   var surface = objectSurfaceTokens(chosenObject, schema, recordTypes);
-  var out = [];
+  var evidence = 'prompt: ' + String(prompt).slice(0, 160);
+
+  var strong = [];
+  var weak = [];
   for (var i = 0; i < tokens.length; i++) {
     var term = tokens[i];
     if (EXTRACTOR_GENERIC_NOUNS[term]) continue;     // not org-specific
-    if (surface[term]) continue;                      // already in the object's surface — model picked it from lexical signal, not an alias
-    out.push({
+    var strength = surface[term] ? 'weak' : 'strong';
+    var entry = {
       type: 'objectAlias',
       term: term,
       target: chosenObject.apiName,
-      evidence: 'prompt: ' + String(prompt).slice(0, 160)
-    });
+      role: 'from',
+      strength: strength,
+      evidence: evidence
+    };
+    if (strength === 'strong') strong.push(entry);
+    else weak.push(entry);
   }
-  // Conservative gate: too many candidates means the prompt is full of nouns
-  // we can't disambiguate without read-side feedback. Skip entirely rather
-  // than poison the glossary with weak observations.
-  if (out.length > EXTRACTOR_MAX_CANDIDATES_PER_INTERACTION) return [];
+
+  // Cap per strength independently. Strong cap mirrors v1's "if more than N
+  // candidates remain, the prompt is too noisy" rule. Weak cap is looser
+  // because weak observations are designed to be common.
+  if (strong.length > EXTRACTOR_MAX_STRONG_PER_INTERACTION) strong = [];
+  if (weak.length > EXTRACTOR_MAX_WEAK_PER_INTERACTION) weak = [];
+
+  var out = strong.concat(weak);
+
+  // Related-object observations: each prompt token (filtered the same way)
+  // also gets one observation per related api name with role='related'. We
+  // only emit related observations for *strong* terms — recording weak terms
+  // against every related object would explode the storage and dilute the
+  // signal (every "by" / "of" / generic preposition match would fan out N-way).
+  if (relatedApiNames && relatedApiNames.length) {
+    for (var s = 0; s < strong.length; s++) {
+      for (var r = 0; r < relatedApiNames.length; r++) {
+        if (relatedApiNames[r] === chosenObject.apiName) continue;
+        out.push({
+          type: 'objectAlias',
+          term: strong[s].term,
+          target: relatedApiNames[r],
+          role: 'related',
+          strength: 'strong',
+          evidence: evidence
+        });
+      }
+    }
+  }
+
   return out;
 }
 
@@ -157,4 +197,63 @@ function extractFromObject(soql) {
   var stripped = String(soql).replace(/\([^)]*\)/g, ' ');
   var m = stripped.match(/\bFROM\s+([A-Za-z][A-Za-z0-9_]*)/i);
   return m ? m[1] : null;
+}
+
+// Walk a SOQL string and collect every api name reachable from the outer FROM
+// via dot-walked relationship fields or subqueries. The schemaObjects argument
+// is the list of describe-loaded objects sent to the generator — we use them
+// to resolve relationshipName → referenceTo. Returns a deduped array of api
+// names, excluding the FROM target itself.
+//
+// Best-effort: when the related object's schema isn't loaded (couldn't resolve
+// the dot-walk to an api name), the path is silently skipped. The read side
+// degrades gracefully — missing related observations just mean we don't learn
+// from that walk.
+function extractRelatedObjectsFromSoql(soql, schemaObjects) {
+  if (!soql || !schemaObjects || !schemaObjects.length) return [];
+
+  var fromApi = extractFromObject(soql);
+  if (!fromApi) return [];
+
+  var byName = {};
+  schemaObjects.forEach(function (o) {
+    if (!o || !o.apiName) return;
+    var byRel = {};
+    (o.fields || []).forEach(function (f) {
+      if (f.relationshipName && f.referenceTo && f.referenceTo.length) {
+        byRel[f.relationshipName.toLowerCase()] = f.referenceTo[0];
+      }
+    });
+    byName[o.apiName] = { fieldsByRel: byRel };
+  });
+
+  if (!byName[fromApi]) return [];
+
+  var found = {};
+
+  // Dot-walks in SELECT / WHERE / ORDER BY. Strip subqueries first because
+  // their relationship chains resolve against the child object, not FROM.
+  var outer = String(soql).replace(/\(\s*SELECT\b[^)]*\)/gi, ' ');
+  var pathRe = /\b([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+)\b/g;
+  var m;
+  while ((m = pathRe.exec(outer)) !== null) {
+    var segs = m[1].split('.');
+    var currentApi = fromApi;
+    for (var i = 0; i < segs.length - 1; i++) {
+      var schema = byName[currentApi];
+      if (!schema) break;
+      var relTarget = schema.fieldsByRel[segs[i].toLowerCase()];
+      if (!relTarget) break;
+      if (relTarget !== fromApi) found[relTarget] = true;
+      currentApi = relTarget;
+    }
+  }
+
+  // Subqueries — (SELECT ... FROM <ChildRelationshipName>). The child
+  // relationship name doesn't map to an api name directly without child
+  // relationship metadata in describe (we don't capture those today), so we
+  // can't resolve these to api names yet. Left as a TODO when populationality
+  // / describe captures childRelationships.
+
+  return Object.keys(found);
 }

@@ -139,6 +139,17 @@ async function setupFixture(page, org) {
     if (typeof _recordTypesCache !== 'undefined') {
       window._recordTypesCache = null;
     }
+    // Per-field populationality cache (item 2) — keyed by api name, so a
+    // fixture swap with shared api names would otherwise read stale values.
+    if (typeof _fieldPopCache !== 'undefined') {
+      for (const k of Object.keys(_fieldPopCache)) delete _fieldPopCache[k];
+    }
+    // BM25 index cache (item 5) — invalidates on object count change in prod
+    // but the harness can swap fixtures with the same count; reset to be safe.
+    if (typeof _bm25IndexCache !== 'undefined') {
+      window._bm25IndexCache = null;
+      window._bm25IndexObjectCount = -1;
+    }
 
     // Seed objects.js custom-object cache from fixture
     window._customObjects = fix.sobjects.map(s => ({

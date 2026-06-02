@@ -189,7 +189,162 @@ function pickCandidateObjects(prompt, max) {
     .map(function (o) { return { obj: o, score: soqlScoreObject(prompt, o) }; })
     .filter(function (x) { return x.score > 0; })
     .sort(function (a, b) { return b.score - a.score; });
-  return scored.slice(0, max || 3).map(function (x) { return x.obj; });
+  var lexical = scored.slice(0, max || 3).map(function (x) { return x.obj; });
+
+  // BM25 fallback (item 5). The lexical scorer above is whole-word and
+  // length-weighted — it misses cases where the prompt's terminology only
+  // partially matches an object's surface text (e.g. prompt token "billing"
+  // vs object name "BillableEvent__c"). BM25 captures partial-token
+  // overlap and term-frequency signals the lexical scorer doesn't see.
+  //
+  // Merge strategy: lexical first (keeps the existing tight scoring), then
+  // BM25 candidates that aren't already in the lexical list, capped so the
+  // total candidate budget grows by at most SOQL_BM25_EXTRA_CANDIDATES.
+  try {
+    var bm25 = pickBM25Candidates(prompt, SOQL_BM25_TOP_K);
+    var seen = {};
+    lexical.forEach(function (o) { seen[o.apiName] = true; });
+    var extra = [];
+    for (var i = 0; i < bm25.length && extra.length < SOQL_BM25_EXTRA_CANDIDATES; i++) {
+      if (!seen[bm25[i].apiName]) {
+        extra.push(bm25[i]);
+        seen[bm25[i].apiName] = true;
+      }
+    }
+    if (extra.length) return lexical.concat(extra);
+  } catch (bErr) {
+    console.warn('sfnav: bm25 candidate retrieval failed —', bErr.message);
+  }
+  return lexical;
+}
+
+// ── BM25 retrieval (item 5) ───────────────────────────────────────────────
+//
+// In-process BM25 index over object surface text (api name + label + record
+// types). Complements `soqlScoreObject` which is a whole-word lexical match;
+// BM25 catches partial-token overlap and IDF-weighted rare terms. No external
+// dependencies — runs entirely client-side, builds on demand, caches until
+// the underlying object list changes.
+//
+// Why BM25 instead of TF-IDF cosine: BM25's length normalisation matters here
+// because object surface texts vary wildly in length (a custom object with 20
+// record types is much longer than a barebones one). Standard k1=1.2, b=0.75.
+var SOQL_BM25_K1 = 1.2;
+var SOQL_BM25_B = 0.75;
+var SOQL_BM25_TOP_K = 5;
+var SOQL_BM25_EXTRA_CANDIDATES = 2; // how many BM25-only candidates to append past the lexical top-3
+var SOQL_BM25_MIN_SCORE = 1.0;      // ignore weak matches — only surface meaningful BM25 hits
+
+var _bm25IndexCache = null;
+var _bm25IndexObjectCount = -1;
+
+function _bm25Tokenise(text) {
+  if (!text) return [];
+  var lowered = String(text).toLowerCase()
+    .replace(/__c$/g, '')
+    .replace(/_/g, ' ')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/[-']/g, '')
+    .toLowerCase();
+  var parts = lowered.split(/[^a-z0-9]+/);
+  var out = [];
+  for (var i = 0; i < parts.length; i++) {
+    var t = parts[i];
+    if (!t || t.length < 3) continue;
+    out.push(t);
+    var singular = t.replace(/(?:es|s)$/, '');
+    if (singular.length >= 3 && singular !== t) out.push(singular);
+  }
+  return out;
+}
+
+function _bm25SurfaceTextForObject(obj) {
+  var parts = [obj.apiName || '', obj.label || ''];
+  // Strip the __c / __mdt suffix from api name BEFORE handing to tokeniser so
+  // "TrackingHour2__c" contributes "tracking", "hour", "2" — not a literal "c".
+  var bareApi = (obj.apiName || '').replace(/__c$/i, '').replace(/__mdt$/i, '');
+  if (bareApi !== obj.apiName) parts.push(bareApi);
+  var rts = getRecordTypesFor(obj.apiName) || [];
+  rts.forEach(function (rt) {
+    if (rt.name) parts.push(rt.name);
+    if (rt.developerName) parts.push(rt.developerName);
+  });
+  return parts.join(' ');
+}
+
+function _bm25BuildIndex() {
+  var all = getSoqlObjects();
+  var docs = [];
+  var df = {};
+  var totalLen = 0;
+  for (var i = 0; i < all.length; i++) {
+    var tokens = _bm25Tokenise(_bm25SurfaceTextForObject(all[i]));
+    var tf = {};
+    tokens.forEach(function (t) { tf[t] = (tf[t] || 0) + 1; });
+    Object.keys(tf).forEach(function (t) { df[t] = (df[t] || 0) + 1; });
+    docs.push({ obj: all[i], tf: tf, len: tokens.length });
+    totalLen += tokens.length;
+  }
+  return {
+    docs: docs,
+    df: df,
+    n: docs.length,
+    avgdl: docs.length ? totalLen / docs.length : 0
+  };
+}
+
+function _bm25GetIndex() {
+  var all = getSoqlObjects();
+  if (_bm25IndexCache && _bm25IndexObjectCount === all.length) return _bm25IndexCache;
+  _bm25IndexCache = _bm25BuildIndex();
+  _bm25IndexObjectCount = all.length;
+  return _bm25IndexCache;
+}
+
+function _bm25Score(idx, queryTokens, doc) {
+  if (!doc.len) return 0;
+  var score = 0;
+  for (var i = 0; i < queryTokens.length; i++) {
+    var q = queryTokens[i];
+    var dfq = idx.df[q] || 0;
+    if (dfq === 0) continue;
+    // Standard BM25 IDF with the +1 smoothing variant.
+    var idf = Math.log(1 + (idx.n - dfq + 0.5) / (dfq + 0.5));
+    var f = doc.tf[q] || 0;
+    if (f === 0) continue;
+    var denom = f + SOQL_BM25_K1 * (1 - SOQL_BM25_B + SOQL_BM25_B * (doc.len / (idx.avgdl || 1)));
+    score += idf * (f * (SOQL_BM25_K1 + 1)) / denom;
+  }
+  return score;
+}
+
+function pickBM25Candidates(prompt, topK) {
+  if (!prompt) return [];
+  var idx = _bm25GetIndex();
+  if (!idx.n) return [];
+  var queryTokens = _bm25Tokenise(prompt);
+  // De-dupe and drop very short stopword-ish tokens; the BM25 IDF would
+  // already down-weight common words but skipping them is cheaper.
+  var seen = {};
+  var qFiltered = [];
+  for (var i = 0; i < queryTokens.length; i++) {
+    var t = queryTokens[i];
+    if (t.length < 3) continue;
+    if (seen[t]) continue;
+    seen[t] = true;
+    qFiltered.push(t);
+  }
+  if (!qFiltered.length) return [];
+
+  var scored = [];
+  for (var d = 0; d < idx.docs.length; d++) {
+    var doc = idx.docs[d];
+    if (isDataCloudObject(doc.obj)) continue;
+    var s = _bm25Score(idx, qFiltered, doc);
+    if (s >= SOQL_BM25_MIN_SCORE) scored.push({ obj: doc.obj, score: s });
+  }
+  scored.sort(function (a, b) { return b.score - a.score; });
+  return scored.slice(0, topK || SOQL_BM25_TOP_K).map(function (x) { return x.obj; });
 }
 
 // Salesforce convention: a reference field's SOQL relationship name is
@@ -261,6 +416,102 @@ async function fetchCount(apiName) {
   }
   _countCache[apiName] = { count: count, ts: Date.now() };
   return count;
+}
+
+// Field populationality: sample N rows and count non-nulls per field. The
+// "abandoned object" failure mode — Project__c has HoursBudgeted__c but no
+// row actually populates it in this org — is invisible to describe and to
+// raw record count, both of which only see the object's shape. Sampling
+// actual values is the cheapest fix.
+//
+// Strategy: SELECT a bounded set of fields LIMIT N. Count non-nulls
+// client-side. Returns { fieldName: ratio } where ratio is fraction populated
+// in the sample (0.0–1.0). Conservative on which fields to include: skip
+// system audit / always-populated fields (Id, Name, OwnerId, audit dates)
+// since they wouldn't help the model decide between candidates anyway. URL
+// length cap: max 50 fields per query.
+var _fieldPopCache = {};                      // apiName → { population, ts }
+var SOQL_FIELD_POP_TTL_MS = 30 * 60 * 1000;   // 30 minutes
+var SOQL_FIELD_POP_SAMPLE = 100;              // rows to sample
+var SOQL_FIELD_POP_MAX_FIELDS = 50;           // URL-safety cap
+var SOQL_FIELD_POP_SKIP = (function () {
+  var skip = [
+    'id', 'name', 'ownerid', 'isdeleted', 'createdbyid', 'createddate',
+    'lastmodifiedbyid', 'lastmodifieddate', 'systemmodstamp', 'lastactivitydate',
+    'lastvieweddate', 'lastreferenceddate', 'recordtypeid'
+  ];
+  var set = {};
+  for (var i = 0; i < skip.length; i++) set[skip[i]] = true;
+  return set;
+})();
+
+function _pickFieldsToSample(fields) {
+  if (!fields || !fields.length) return [];
+  var picked = [];
+  for (var i = 0; i < fields.length; i++) {
+    var f = fields[i];
+    if (!f || !f.name) continue;
+    var lower = f.name.toLowerCase();
+    if (SOQL_FIELD_POP_SKIP[lower]) continue;
+    // Skip compound address / location fields — they aren't directly
+    // selectable in SOQL (BillingAddress is selectable but BillingStreet etc.
+    // appear as separate fields). Filtering on `type` is the cleanest gate.
+    if (f.type === 'address' || f.type === 'location') continue;
+    picked.push(f.name);
+    if (picked.length >= SOQL_FIELD_POP_MAX_FIELDS) break;
+  }
+  return picked;
+}
+
+async function fetchFieldPopulation(apiName, fields) {
+  var cached = _fieldPopCache[apiName];
+  if (cached && (Date.now() - cached.ts) < SOQL_FIELD_POP_TTL_MS) {
+    return cached.population;
+  }
+  if (!/^[A-Za-z0-9_]+$/.test(apiName)) throw new Error('Invalid sObject name: ' + apiName);
+  var sampleFields = _pickFieldsToSample(fields);
+  if (!sampleFields.length) {
+    _fieldPopCache[apiName] = { population: {}, ts: Date.now() };
+    return {};
+  }
+
+  var pre = await sfRestPreamble();
+  // SELECT Id, ... so we always have at least one always-non-null projection;
+  // some sObjects 400 on `SELECT FieldA FROM X` if FieldA is the only field
+  // and is restricted by FLS. Id is safe.
+  var soql = 'SELECT Id, ' + sampleFields.join(', ') + ' FROM ' + apiName + ' LIMIT ' + SOQL_FIELD_POP_SAMPLE;
+  var url = pre.apiBase + pre.basePath + '/query/?q=' + encodeURIComponent(soql);
+  var resp;
+  try { resp = await sfFetch(url, { headers: pre.headers }); }
+  catch (e) {
+    _fieldPopCache[apiName] = { population: {}, ts: Date.now() };
+    return {};
+  }
+
+  var population = {};
+  if (resp.ok) {
+    var data = null;
+    try { data = await resp.json(); } catch (_) {}
+    var records = (data && data.records) || [];
+    if (records.length) {
+      var counts = {};
+      for (var i = 0; i < sampleFields.length; i++) counts[sampleFields[i]] = 0;
+      for (var r = 0; r < records.length; r++) {
+        var row = records[r];
+        for (var k = 0; k < sampleFields.length; k++) {
+          var fname = sampleFields[k];
+          var v = row[fname];
+          if (v !== null && v !== undefined && v !== '') counts[fname] += 1;
+        }
+      }
+      for (var fk in counts) {
+        if (!Object.prototype.hasOwnProperty.call(counts, fk)) continue;
+        population[fk] = counts[fk] / records.length;
+      }
+    }
+  }
+  _fieldPopCache[apiName] = { population: population, ts: Date.now() };
+  return population;
 }
 
 function buildSystemPrompt() {
@@ -348,10 +599,30 @@ function findPicklistMatchesInPrompt(prompt, index) {
   return hits;
 }
 
-function buildUserMessage(prompt, schemaObjects) {
+function buildUserMessage(prompt, schemaObjects, context) {
+  context = context || {};
   var lines = [];
   lines.push('User request: ' + prompt);
   lines.push('');
+
+  // Org-specific vocabulary block — placed BEFORE the schema dump so it's the
+  // first signal the model reads. Lexical scoring may have produced a
+  // candidate set that's superficially correct but ambiguous; glossary hits
+  // tell the model which candidate this org has historically used for the
+  // user's terminology.
+  if (context.glossaryAnchorBlock && context.glossaryAnchorBlock.trim()) {
+    lines.push(context.glossaryAnchorBlock);
+    lines.push('');
+  }
+
+  // Plan from the planner step (item 4). Pinning row-shape + FROM is more
+  // authoritative than any heuristic; surface above the schema so the
+  // generator reads it before considering alternatives.
+  if (context.plan) {
+    lines.push(formatPlanBlock(context.plan));
+    lines.push('');
+  }
+
   // Counts reflect actual usage in this org — strongly prefer the object the
   // org is populating over a lexically-tempting but empty/near-empty sibling.
   var hasCounts = schemaObjects.some(function (o) { return typeof o.count === 'number'; });
@@ -388,6 +659,18 @@ function buildUserMessage(prompt, schemaObjects) {
         }
         if (f.values) meta += ' [' + f.values.join(',') + ']';
         var line = '  - ' + f.name + ' : ' + meta + (f.label && f.label !== f.name ? ' (' + f.label + ')' : '');
+        // Populationality: a per-field "is this filled in on real records in
+        // this org" signal sampled at fetchCandidateSchema time. Salient when
+        // the value is at the extremes (≥80% says "this is the canonical field
+        // for this object"; ≤10% says "the field exists but nobody uses it").
+        // Surface only the extremes — middle-of-the-road values just add noise.
+        if (o.fieldPopulation && Object.prototype.hasOwnProperty.call(o.fieldPopulation, f.name)) {
+          var pct = o.fieldPopulation[f.name];
+          if (typeof pct === 'number' && !isNaN(pct)) {
+            if (pct >= 0.8) line += '  [populated on ' + Math.round(pct * 100) + '% of sampled rows]';
+            else if (pct <= 0.1) line += '  [populated on ' + Math.round(pct * 100) + '% of sampled rows — usually empty]';
+          }
+        }
         if (f.helpText) {
           var help = String(f.helpText).replace(/\s+/g, ' ').trim();
           if (help.length > 120) help = help.slice(0, 117) + '...';
@@ -411,6 +694,39 @@ function buildUserMessage(prompt, schemaObjects) {
     });
   }
 
+  // Few-shot examples (item 3): in-context demonstrations from prior
+  // successful queries in THIS org. Placed at the end so they're the last
+  // thing the model reads before generating — research consistently finds
+  // recency of examples in the prompt matters for small models. The retrieval
+  // / similarity selection happens in the caller; we just format what's
+  // passed in.
+  if (context.fewShotExamples && context.fewShotExamples.length) {
+    lines.push('');
+    lines.push('Examples from prior successful queries in this org. They demonstrate this org\'s vocabulary and FROM-object conventions:');
+    context.fewShotExamples.forEach(function (ex) {
+      lines.push('');
+      lines.push('User asked: "' + (ex.prompt || '').replace(/"/g, "'") + '"');
+      lines.push('SOQL: ' + (ex.soql || ''));
+    });
+  }
+
+  return lines.join('\n');
+}
+
+// Render the planner output (item 4) as a directive block inside the user
+// message. The plan is treated as authoritative for FROM + row-shape; the
+// generator's freedom is at the field / filter / ordering level.
+function formatPlanBlock(plan) {
+  if (!plan || !plan.fromObject) return '';
+  var lines = ['Query plan from the planner step. Treat as authoritative for FROM and row-shape:'];
+  lines.push('  - Row shape: ' + (plan.rowShape || '(one row per ' + plan.fromObject + ' record)'));
+  lines.push('  - FROM: ' + plan.fromObject);
+  if (plan.groupBy) lines.push('  - GROUP BY hint: ' + plan.groupBy);
+  if (plan.needsRelated && plan.needsRelated.length) {
+    lines.push('  - Reach related data via dot-walks to: ' + plan.needsRelated.join(', '));
+  }
+  if (plan.notes) lines.push('  - Notes: ' + plan.notes);
+  lines.push('Do not change FROM. Pick fields, filters, and ordering to satisfy the user\'s intent given this plan.');
   return lines.join('\n');
 }
 
@@ -872,6 +1188,217 @@ function buildRetryUserMessage(baseMessage, attempts) {
   return lines.join('\n');
 }
 
+// ── Planner step (item 4 in grounding.md) ─────────────────────────────────
+//
+// Decomposes generation into two LLM calls: a lightweight planner that picks
+// FROM + row-shape + related objects, then the existing generator that emits
+// SOQL against that plan. The planner sees condensed object info (no full
+// describes); the generator sees the full schemas for the planned objects.
+//
+// Rationale: small models reason better one step at a time. The "row-shape
+// inversion" failure (user types "X grouped by Y", model picks Y as FROM
+// because of the surface phrasing) goes away when the planner is forced to
+// articulate row-shape as a separate output before any SOQL is emitted.
+
+var SOQL_PLAN_TOOL = {
+  name: 'pick_query_plan',
+  description: 'Pick the FROM object and articulate the row-shape for a SOQL query before any SOQL is emitted.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      rowShape: {
+        type: 'string',
+        description: 'One sentence describing what the answer\'s rows look like, e.g. "one row per billable-hours entry" or "one row per project with aggregated hours". This is the most important field — it pins the granularity of the result.'
+      },
+      fromObject: {
+        type: 'string',
+        description: 'The api name of the FROM object. MUST be one of the candidate api names listed in the user message. Do not invent.'
+      },
+      groupBy: {
+        type: 'string',
+        description: 'If the user wants aggregation, name the dimension (the "by" part), e.g. "project" or "stage". Otherwise omit.'
+      },
+      needsRelated: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Api names of related objects (lookup targets) whose fields the SOQL will need to reach via dot-walks. Pick from the candidate list. Omit if no related objects are needed.'
+      },
+      notes: {
+        type: 'string',
+        description: 'Optional: one short sentence explaining a non-obvious choice (e.g. "Project__c is empty in this org; using TrackingHour2__c grouped by Project__r"). Skip when the choice is obvious.'
+      },
+      confidence: {
+        type: 'string',
+        enum: ['high', 'medium', 'low'],
+        description: 'How confident you are in the FROM choice. "low" signals the candidates are similar enough that another reasonable interpretation exists.'
+      }
+    },
+    required: ['rowShape', 'fromObject']
+  }
+};
+
+function buildPlannerSystemPrompt() {
+  return [
+    'You are the planning step of a Salesforce SOQL generator. You DO NOT write SOQL — a second step does that. Your only job is to articulate the row-shape of the answer and pick the FROM object.',
+    '',
+    'Rules:',
+    '- "Get X grouped by Y" — FROM is the object that holds X (the granular data). GROUP BY is the dimension Y, reached as a dot-walk if it lives on another object.',
+    '- "Which X have/did Y" — FROM is X (the answer rows), not Y.',
+    '- Prefer objects with substantial record counts. An empty or near-empty object is rarely the right FROM target even when its name lexically matches.',
+    '- Field populationality is a strong signal. If field "Hours__c" exists on object A but is populated on 0% of A\'s rows, A is almost certainly not the home of the user\'s concept.',
+    '- Org-specific vocabulary in the user message is authoritative — if the org has historically used "X" to mean object A, prefer A even if its name doesn\'t match.',
+    '',
+    'Call the pick_query_plan tool. Do not emit prose.'
+  ].join('\n');
+}
+
+// Condense schemaObjects into a planner-sized summary. Full describes (50–200
+// fields per object) would blow the planner's context budget; we keep top-N
+// fields by a populationality+name-relevance signal and drop everything else.
+function buildPlannerUserMessage(prompt, schemaObjects, context) {
+  context = context || {};
+  var lines = [];
+  lines.push('User request: ' + prompt);
+  lines.push('');
+
+  if (context.glossaryAnchorBlock && context.glossaryAnchorBlock.trim()) {
+    lines.push(context.glossaryAnchorBlock);
+    lines.push('');
+  }
+
+  lines.push('Candidate objects (pick fromObject from this list — using any other api name is invalid):');
+  for (var i = 0; i < schemaObjects.length; i++) {
+    var o = schemaObjects[i];
+    var header = '- ' + o.apiName + (o.label ? ' (' + o.label + ')' : '');
+    if (typeof o.count === 'number') {
+      var countText = o.count >= SOQL_COUNT_LIMIT
+        ? SOQL_COUNT_LIMIT.toLocaleString('en-US') + '+ records'
+        : o.count.toLocaleString('en-US') + ' records';
+      header += ' — ' + countText;
+    }
+    if (o.contextOnly) header += ' [lookup target — typically a dot-walk dimension, rarely the FROM]';
+    if (o.fieldPromoted) header += ' [FIELD-MATCH PROMOTED — the prompt\'s concepts live in this object\'s field names]';
+    lines.push(header);
+    if (o.recordTypes && o.recordTypes.length) {
+      lines.push('    record types: ' + o.recordTypes.map(function (rt) { return rt.developerName; }).join(', '));
+    }
+    // Top fields summary: prioritise high-populationality custom fields whose
+    // names share tokens with the prompt, then any other populated fields.
+    var fieldSummary = _summarizeFieldsForPlanner(prompt, o);
+    if (fieldSummary) lines.push('    relevant fields: ' + fieldSummary);
+  }
+
+  if (context.fewShotExamples && context.fewShotExamples.length) {
+    lines.push('');
+    lines.push('Prior queries from this org (for vocabulary anchoring — note their FROM choices):');
+    context.fewShotExamples.forEach(function (ex) {
+      var from = extractFromObject(ex.soql) || '(unknown)';
+      lines.push('  "' + (ex.prompt || '').replace(/"/g, "'") + '" → FROM ' + from);
+    });
+  }
+
+  return lines.join('\n');
+}
+
+var SOQL_PLANNER_MAX_FIELDS_SUMMARY = 12;
+
+function _summarizeFieldsForPlanner(prompt, schemaObj) {
+  if (!schemaObj || !schemaObj.fields) return '';
+  var p = String(prompt || '').toLowerCase();
+  var scored = [];
+  for (var i = 0; i < schemaObj.fields.length; i++) {
+    var f = schemaObj.fields[i];
+    if (!f || !f.name) continue;
+    var nameTokens = f.name.toLowerCase().replace(/__c$/, '').replace(/_/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2');
+    var labelLower = (f.label || '').toLowerCase();
+    var hits = 0;
+    (nameTokens + ' ' + labelLower).split(/\s+/).forEach(function (t) {
+      if (t && t.length >= 4 && p.indexOf(t) !== -1) hits += 1;
+    });
+    var pop = (schemaObj.fieldPopulation && schemaObj.fieldPopulation[f.name]) || 0;
+    // Score: prompt-token hits weighted heavily, then populationality as tiebreak.
+    var score = hits * 10 + pop;
+    if (score > 0) scored.push({ name: f.name, label: f.label, pop: pop, score: score });
+  }
+  if (!scored.length) return '';
+  scored.sort(function (a, b) { return b.score - a.score; });
+  var top = scored.slice(0, SOQL_PLANNER_MAX_FIELDS_SUMMARY);
+  return top.map(function (f) {
+    var bits = [f.name];
+    if (typeof f.pop === 'number' && !isNaN(f.pop)) {
+      bits.push(Math.round(f.pop * 100) + '% populated');
+    }
+    return bits.join(' (') + (typeof f.pop === 'number' ? ')' : '');
+  }).join('; ');
+}
+
+// Run the planner. Returns { rowShape, fromObject, groupBy, needsRelated,
+// notes, confidence }. Throws if the planner picks an unknown api name; the
+// caller can choose to retry or fall through to the un-planned pipeline.
+async function runPlanner(prompt, schemaObjects, context, knownApiNames) {
+  var systemPrompt = buildPlannerSystemPrompt();
+  var userMessage = buildPlannerUserMessage(prompt, schemaObjects, context);
+  var plan = await callClaude(systemPrompt, userMessage, {
+    cacheSystem: true,
+    tools: [SOQL_PLAN_TOOL],
+    toolChoice: { type: 'tool', name: SOQL_PLAN_TOOL.name }
+  });
+  if (!plan || !plan.fromObject) throw new Error('Planner returned no fromObject');
+
+  // Validate FROM against the candidate set first, fall back to the org-wide
+  // object list. The planner is told to pick from candidates; anything else
+  // is a hallucination we should surface.
+  var candidateNames = {};
+  schemaObjects.forEach(function (o) { if (o.apiName) candidateNames[o.apiName.toLowerCase()] = o.apiName; });
+  var picked = candidateNames[plan.fromObject.toLowerCase()];
+  if (!picked && knownApiNames) {
+    var knownByLc = {};
+    knownApiNames.forEach(function (n) { knownByLc[n.toLowerCase()] = n; });
+    picked = knownByLc[plan.fromObject.toLowerCase()];
+  }
+  if (!picked) throw new Error('Planner picked an unknown object: ' + plan.fromObject);
+  plan.fromObject = picked; // canonical-case
+
+  // Same validation for needsRelated.
+  if (Array.isArray(plan.needsRelated)) {
+    var resolved = [];
+    plan.needsRelated.forEach(function (n) {
+      var hit = candidateNames[String(n).toLowerCase()];
+      if (hit) resolved.push(hit);
+    });
+    plan.needsRelated = resolved;
+  } else {
+    plan.needsRelated = [];
+  }
+
+  return plan;
+}
+
+// Reorder + mark schemaObjects according to the plan. The planned fromObject
+// moves to position 0 and gets cleared of any contextOnly flag; needsRelated
+// entries get contextOnly = true so they read as "use these for dot-walks";
+// objects not mentioned by the plan keep their existing flags (we don't drop
+// them — the generator still sees them but with their original priority).
+function applyPlanToSchemaObjects(schemaObjects, plan) {
+  if (!plan || !plan.fromObject) return schemaObjects;
+  var byName = {};
+  schemaObjects.forEach(function (o) { byName[o.apiName] = o; });
+  var fromObj = byName[plan.fromObject];
+  if (!fromObj) return schemaObjects;
+  fromObj.contextOnly = false;
+  fromObj.planSelected = true;
+  (plan.needsRelated || []).forEach(function (n) {
+    var rel = byName[n];
+    if (rel && rel !== fromObj) rel.contextOnly = true;
+  });
+  // Stable sort: planSelected first, then non-contextOnly, then contextOnly.
+  return schemaObjects.slice().sort(function (a, b) {
+    if (a.planSelected !== b.planSelected) return a.planSelected ? -1 : 1;
+    if (a.contextOnly !== b.contextOnly) return a.contextOnly ? 1 : -1;
+    return 0;
+  });
+}
+
 // Picker responses are often noisy — Claude may wrap the api name in
 // punctuation, backticks, a sentence, or pick a name with a typo'd
 // case. Scan the response for any known object api name (word-boundary,
@@ -916,6 +1443,7 @@ async function fetchCandidateSchema(candidates) {
       label: obj.label,
       fields: null,
       count: null,
+      fieldPopulation: null,
       recordTypes: getRecordTypesFor(obj.apiName)
     };
     var describePromise = fetchDescribe(obj.apiName).then(
@@ -927,8 +1455,99 @@ async function fetchCandidateSchema(candidates) {
       function (err) { console.warn('sfnav: count failed for', obj.apiName, err.message); }
     );
     await Promise.all([describePromise, countPromise]);
+    // Field populationality runs AFTER describe (needs the field list) but
+    // before related-schema fetch so the signal is available everywhere it's
+    // used. Skipped for empty / unknown-magnitude objects: count===0 means
+    // there's literally no data to sample; count===null means the count query
+    // failed (formula-only object, perm issue) and a sampling query would
+    // likely fail the same way.
+    if (result.fields && result.fields.length && result.count > 0) {
+      try {
+        result.fieldPopulation = await fetchFieldPopulation(obj.apiName, result.fields);
+      } catch (err) {
+        console.warn('sfnav: field population failed for', obj.apiName, err.message);
+      }
+    }
     return result;
   }));
+}
+
+// ── Self-consistency vote (item 6) ────────────────────────────────────────
+//
+// Sample N candidates in parallel, validate each, group survivors by query
+// signature, return the majority. Trigger is `plan.confidence === 'low'`.
+// Cost is N× generation cost but only on the prompts where the planner has
+// flagged genuine ambiguity, so the expected amplification is modest.
+
+var SOQL_SELF_CONSISTENCY_N = 3;
+
+// Cheap query signature for grouping. FROM api name carries the most
+// disagreement weight; SELECT field-set + presence-of-GROUP-BY break ties.
+// Deliberately ignores literal values, ordering, and limit clauses — those
+// rarely encode the true intent split between samples.
+function _soqlSignature(soql) {
+  if (!soql) return '?';
+  var from = (extractFromObject(soql) || '?').toLowerCase();
+  // SELECT clause: extract field tokens between SELECT and FROM (strip
+  // subqueries first so child relationship names don't leak in).
+  var stripped = String(soql).replace(/\(\s*SELECT\b[^)]*\)/gi, ' ');
+  var selectMatch = /\bSELECT\b([\s\S]+?)\bFROM\b/i.exec(stripped);
+  var fields = [];
+  if (selectMatch) {
+    selectMatch[1].split(',').forEach(function (f) {
+      var clean = f.trim().split(/\s+/)[0].toLowerCase();
+      if (clean && clean !== 'id') fields.push(clean);
+    });
+    fields.sort();
+  }
+  var hasGroupBy = /\bGROUP\s+BY\b/i.test(stripped);
+  return from + '|' + fields.join(',') + '|' + (hasGroupBy ? 'g' : '');
+}
+
+async function runSelfConsistencyVote(systemPrompt, baseUserMessage, prompt, schemaObjects, knownApiNames) {
+  var samplePromises = [];
+  for (var i = 0; i < SOQL_SELF_CONSISTENCY_N; i++) {
+    samplePromises.push(_sampleOneCandidate(systemPrompt, baseUserMessage, prompt, schemaObjects, knownApiNames));
+  }
+  var results = await Promise.all(samplePromises);
+  var valid = results.filter(function (r) { return r && r.parsed && r.ok; });
+  if (!valid.length) return null;
+
+  // Group by signature, count, pick the largest group.
+  var groups = {};
+  valid.forEach(function (r) {
+    var sig = _soqlSignature(r.parsed.soql);
+    if (!groups[sig]) groups[sig] = [];
+    groups[sig].push(r);
+  });
+  var sigs = Object.keys(groups);
+  sigs.sort(function (a, b) { return groups[b].length - groups[a].length; });
+  var winner = groups[sigs[0]];
+  if (!winner || !winner.length) return null;
+  // When there's a tie (e.g. 1/1/1), prefer the candidate whose FROM matches
+  // the planner's pick; falls back to the first surviving sample otherwise.
+  var picked = winner[0].parsed;
+  return picked;
+}
+
+async function _sampleOneCandidate(systemPrompt, baseUserMessage, prompt, schemaObjects, knownApiNames) {
+  try {
+    var text = await callClaude(systemPrompt, baseUserMessage);
+    var parsed = parseSoqlResponse(text);
+    // Run the same validator chain we'd run in the main retry loop. The
+    // planner /query?explain validator is async and somewhat expensive; we
+    // pay that cost N times during a vote, but only on low-confidence
+    // prompts (which is the design).
+    var validation = await validateSoql(parsed.soql);
+    if (!validation.ok) return { ok: false };
+    if (!validateSoqlObjectExists(parsed.soql, schemaObjects, knownApiNames).ok) return { ok: false };
+    if (!validateSoqlFieldsExist(parsed.soql, schemaObjects).ok) return { ok: false };
+    if (!validateSoqlSemantics(parsed.soql, schemaObjects).ok) return { ok: false };
+    if (!validateSoqlLiteralPreservation(parsed.soql, prompt, schemaObjects).ok) return { ok: false };
+    return { ok: true, parsed: parsed };
+  } catch (e) {
+    return { ok: false };
+  }
 }
 
 async function generateSoql(prompt, onProgress) {
@@ -1044,8 +1663,74 @@ async function generateSoql(prompt, onProgress) {
     return 0;
   });
 
+  // Pre-generation grounding signals — assemble glossary hits, few-shot
+  // examples, and (later) plan into a single context bag passed to
+  // buildUserMessage. Each lookup is fire-and-degrade: any failure logs and
+  // falls back to the empty signal, never blocking the generate path.
+  var promptContext = {};
+  try {
+    if (typeof glossaryLookupForPrompt === 'function') {
+      var hits = await glossaryLookupForPrompt(prompt);
+      if (hits && hits.length && typeof formatGlossaryAnchorBlock === 'function') {
+        promptContext.glossaryAnchorBlock = formatGlossaryAnchorBlock(hits);
+      }
+    }
+  } catch (gErr) {
+    console.warn('sfnav: glossary lookup failed —', gErr.message);
+  }
+  try {
+    if (typeof pickFewShotExamples === 'function') {
+      var fewShots = await pickFewShotExamples(prompt);
+      if (fewShots && fewShots.length) promptContext.fewShotExamples = fewShots;
+    }
+  } catch (fErr) {
+    console.warn('sfnav: few-shot pick failed —', fErr.message);
+  }
+
+  // Planner step (item 4). One extra LLM call: condensed candidate map +
+  // glossary + few-shots → tool_use returns rowShape, fromObject, etc. The
+  // resulting plan is injected into the generator's user message and the
+  // candidate ordering is rewritten so the planned FROM is the first schema
+  // entry the model reads.
+  //
+  // Degrades to the un-planned pipeline if the planner call fails or picks an
+  // unknown object — we never want a planner bug to block SOQL generation.
+  try {
+    notify('Planning query');
+    var knownNamesForPlan = getSoqlObjects().map(function (o) { return o.apiName; });
+    var plan = await runPlanner(prompt, schemaObjects, promptContext, knownNamesForPlan);
+    promptContext.plan = plan;
+    schemaObjects = applyPlanToSchemaObjects(schemaObjects, plan);
+  } catch (pErr) {
+    console.warn('sfnav: planner step skipped —', pErr.message);
+  }
+
   var systemPrompt = buildSystemPrompt();
-  var baseUserMessage = buildUserMessage(prompt, schemaObjects);
+  var baseUserMessage = buildUserMessage(prompt, schemaObjects, promptContext);
+
+  // Self-consistency (item 6). When the planner is uncertain, sample N=3
+  // generator runs in parallel and pick the majority by query signature.
+  // Triggered only on planner confidence='low' so the cost amplification is
+  // gated to the prompts where it actually matters. Runs once — if all
+  // samples fail validation, we fall through to the standard retry loop.
+  if (promptContext.plan && promptContext.plan.confidence === 'low') {
+    var voted = null;
+    try {
+      notify('Sampling for self-consistency');
+      voted = await runSelfConsistencyVote(
+        systemPrompt, baseUserMessage, prompt, schemaObjects, getSoqlObjects().map(function (o) { return o.apiName; })
+      );
+    } catch (vErr) {
+      console.warn('sfnav: self-consistency vote failed —', vErr.message);
+    }
+    if (voted) {
+      try { _observeSoqlSuccess(prompt, voted, schemaObjects); }
+      catch (_obs) { console.warn('sfnav: glossary observe failed', _obs.message); }
+      return voted;
+    }
+    // Fall through to the standard retry loop if no sample survived validation.
+  }
+
   var userMessage = baseUserMessage;
   var attempts = [];
   var lastParsed = null;
@@ -1126,10 +1811,9 @@ async function generateSoql(prompt, onProgress) {
   throw new Error('Failed to generate a valid SOQL query');
 }
 
-// Run extractors and fan out observations to the org glossary. Phase 1 is
-// write-only — nothing reads these entries yet, the v1.1 read-side will. By
-// the time the inspector + reads ship, early users already have populated
-// glossaries from organic v1.0 use.
+// Run extractors and fan out observations to the org glossary. The read-side
+// (glossaryLookupForPrompt, called from generateSoql before message building)
+// is the consumer — every successful query teaches the next.
 function _observeSoqlSuccess(prompt, parsed, schemaObjects) {
   if (typeof glossaryObserveBatch !== 'function') return;
   if (typeof extractObjectAliasCandidates !== 'function') return;
@@ -1151,7 +1835,16 @@ function _observeSoqlSuccess(prompt, parsed, schemaObjects) {
     : { apiName: fromObject, label: null };
   var recordTypes = schemaEntry ? (schemaEntry.recordTypes || []) : [];
 
-  var candidates = extractObjectAliasCandidates(prompt, chosenObject, schemaEntry, recordTypes);
+  // Related objects in the SOQL — distinguishes "row-shape vocabulary" from
+  // "dimension vocabulary." Resolution needs the candidate schemas (for
+  // relationshipName→apiName lookup); silently degrades when we can't resolve.
+  var relatedApiNames = [];
+  if (typeof extractRelatedObjectsFromSoql === 'function') {
+    try { relatedApiNames = extractRelatedObjectsFromSoql(parsed.soql, schemaObjects) || []; }
+    catch (_) { relatedApiNames = []; }
+  }
+
+  var candidates = extractObjectAliasCandidates(prompt, chosenObject, schemaEntry, recordTypes, relatedApiNames);
   if (!candidates.length) return;
   var observations = candidates.map(function (c) {
     return {
@@ -1159,6 +1852,8 @@ function _observeSoqlSuccess(prompt, parsed, schemaObjects) {
       feature: 'soql',
       term: c.term,
       target: c.target,
+      role: c.role,
+      strength: c.strength,
       evidence: c.evidence
     };
   });
@@ -1175,6 +1870,68 @@ function getSoqlHistory() {
     chrome.storage.local.get(key, function (data) {
       resolve(data[key] || []);
     });
+  });
+}
+
+// Few-shot example retrieval. The Anthropic published Haiku eval shows CoT +
+// few-shot as the largest single improvement vector for small models, and
+// `sfnavSoqlHistory` is a free source of org-specific examples — every entry
+// is a previously-successful (prompt, soql) pair generated against this org's
+// schema, with this org's vocabulary.
+//
+// Similarity: token Jaccard on the same tokenisation the glossary uses (drops
+// stopwords + plural). Cheap, deterministic, no external dependencies. At our
+// scale (≤10 entries per org) the cost is negligible and embeddings would be
+// overkill — the win is having ANY similar example to show the model, not
+// having the BEST one.
+var SOQL_FEW_SHOT_TOP_K = 2;
+var SOQL_FEW_SHOT_MIN_SIMILARITY = 0.15;
+
+function _jaccardSimilarity(aTokens, bTokens) {
+  if (!aTokens.length || !bTokens.length) return 0;
+  var setB = {};
+  for (var i = 0; i < bTokens.length; i++) setB[bTokens[i]] = true;
+  var inter = 0;
+  var seenA = {};
+  for (var j = 0; j < aTokens.length; j++) {
+    if (seenA[aTokens[j]]) continue;
+    seenA[aTokens[j]] = true;
+    if (setB[aTokens[j]]) inter += 1;
+  }
+  var union = Object.keys(seenA).length + bTokens.length - inter;
+  return union ? inter / union : 0;
+}
+
+async function pickFewShotExamples(prompt, opts) {
+  opts = opts || {};
+  if (typeof tokenisePromptForExtraction !== 'function') return [];
+  var history = await getSoqlHistory();
+  if (!history || !history.length) return [];
+
+  var promptTokens = tokenisePromptForExtraction(prompt);
+  if (!promptTokens.length) return [];
+
+  // Skip the exact same prompt: if the user retries the same text we don't
+  // want to feed the prior result back as an example (the entire purpose of
+  // retrying is to get a different result).
+  var promptNorm = String(prompt).trim().toLowerCase();
+  var minSim = typeof opts.minSimilarity === 'number' ? opts.minSimilarity : SOQL_FEW_SHOT_MIN_SIMILARITY;
+  var topK = opts.topK || SOQL_FEW_SHOT_TOP_K;
+
+  var scored = [];
+  for (var i = 0; i < history.length; i++) {
+    var h = history[i];
+    if (!h || !h.prompt || !h.soql) continue;
+    if (String(h.prompt).trim().toLowerCase() === promptNorm) continue;
+    var hTokens = tokenisePromptForExtraction(h.prompt);
+    var sim = _jaccardSimilarity(promptTokens, hTokens);
+    if (sim < minSim) continue;
+    scored.push({ prompt: h.prompt, soql: h.soql, sim: sim });
+  }
+  if (!scored.length) return [];
+  scored.sort(function (a, b) { return b.sim - a.sim; });
+  return scored.slice(0, topK).map(function (s) {
+    return { prompt: s.prompt, soql: s.soql };
   });
 }
 
