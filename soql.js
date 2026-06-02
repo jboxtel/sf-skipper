@@ -381,6 +381,27 @@ async function fetchDescribe(apiName) {
       compact.values = f.picklistValues.slice(0, 50).map(function (v) { return v.value; });
     }
     if (f.inlineHelpText) compact.helpText = f.inlineHelpText;
+    // Capacity flags. Salesforce marks long-text / encrypted / formula /
+    // location fields as non-filterable / non-groupable / non-sortable —
+    // using them in WHERE / GROUP BY / ORDER BY rejects with errors that
+    // don't suggest what to do instead. Surfacing the flags in the schema
+    // block lets the model avoid the mismatch up front.
+    //
+    // We only store flags when they're restrictive (the value is `false`),
+    // because the default state for most fields is permissive and surfacing
+    // every permissive flag would add noise to the prompt. Reader contract:
+    // a flag *absent* from the compact object means "default (true)"; a flag
+    // *present and false* means "restricted, do not use in that operation."
+    if (f.filterable === false) compact.notFilterable = true;
+    if (f.groupable === false) compact.notGroupable = true;
+    if (f.sortable === false) compact.notSortable = true;
+    if (f.aggregatable === false) compact.notAggregatable = true;
+    // Length is salient for textarea / string fields — a 100k textarea is a
+    // very different beast from a 50-char text. Only stored for types where
+    // length carries meaningful signal.
+    if ((f.type === 'textarea' || f.type === 'string') && typeof f.length === 'number' && f.length > 0) {
+      compact.length = f.length;
+    }
     return compact;
   });
 
@@ -653,12 +674,31 @@ function buildUserMessage(prompt, schemaObjects, context) {
       for (var j = 0; j < o.fields.length; j++) {
         var f = o.fields[j];
         var meta = f.type;
+        // Length is part of the type signal for text fields — a 100k textarea
+        // behaves very differently from a 50-char string. Render inline so
+        // it's right next to the type token where it's most readable.
+        if (typeof f.length === 'number' && f.length > 0) {
+          meta += '(' + f.length + ')';
+        }
         if (f.referenceTo) {
           meta += ' → ' + f.referenceTo.join('|');
           if (f.relationshipName) meta += ' [dot-walk: ' + f.relationshipName + '.<field>]';
         }
         if (f.values) meta += ' [' + f.values.join(',') + ']';
         var line = '  - ' + f.name + ' : ' + meta + (f.label && f.label !== f.name ? ' (' + f.label + ')' : '');
+        // Capacity-flag warnings. SOQL rejects long-text / encrypted / certain
+        // formula / location fields when used in WHERE / GROUP BY / ORDER BY,
+        // with errors like "field X can not be filtered in a query call".
+        // Surfacing the restrictions inline lets the model avoid the mismatch
+        // up front rather than discovering it through retry. We only render
+        // the restrictive flags (per the fetchDescribe contract — a flag is
+        // present in the compact object only when it's `false`/restricted).
+        var caps = [];
+        if (f.notFilterable) caps.push('not filterable (cannot appear in WHERE)');
+        if (f.notGroupable)  caps.push('not groupable (cannot appear in GROUP BY)');
+        if (f.notSortable)   caps.push('not sortable (cannot appear in ORDER BY)');
+        if (f.notAggregatable) caps.push('not aggregatable (cannot wrap in COUNT/SUM/AVG/MIN/MAX)');
+        if (caps.length) line += ' [' + caps.join('; ') + ']';
         // Populationality: a per-field "is this filled in on real records in
         // this org" signal sampled at fetchCandidateSchema time. Salient when
         // the value is at the extremes (≥80% says "this is the canonical field
