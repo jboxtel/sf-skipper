@@ -74,28 +74,48 @@ function loadCase(name, dir) {
   };
 }
 
-async function callAnthropic(apiKey, model, system, user) {
+// Same shape as soql-eval.js's callAnthropic — accepts the full opts payload
+// the production callClaude builds (system, user, cacheSystem, tools,
+// toolChoice) and returns { text, toolInput }. flow-debug.js uses tool_use
+// (report_flow_diagnosis) so the eval was previously running with degraded
+// tool_use: the response had no toolInput, the in-page callClaude rejected,
+// and analyzeFlowDebug threw on the first iteration.
+async function callAnthropic(apiKey, model, opts) {
+  opts = opts || {};
+  let system = opts.system;
+  if (opts.cacheSystem && typeof system === 'string') {
+    system = [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }];
+  }
+  const body = {
+    model,
+    max_tokens: 1024,
+    system,
+    messages: [{ role: 'user', content: opts.user }]
+  };
+  if (opts.tools && opts.tools.length) body.tools = opts.tools;
+  if (opts.toolChoice) body.tool_choice = opts.toolChoice;
+
   const resp = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
       'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01'
+      'anthropic-version': '2023-06-01',
+      'anthropic-beta': 'prompt-caching-2024-07-31'
     },
-    body: JSON.stringify({
-      model,
-      max_tokens: 1024,
-      system,
-      messages: [{ role: 'user', content: user }]
-    })
+    body: JSON.stringify(body)
   });
   if (!resp.ok) {
-    const body = await resp.text();
-    throw new Error('Anthropic ' + resp.status + ': ' + body.slice(0, 300));
+    const bodyText = await resp.text();
+    throw new Error('Anthropic ' + resp.status + ': ' + bodyText.slice(0, 300));
   }
   const data = await resp.json();
-  const block = (data.content || []).find(b => b.type === 'text');
-  return block ? block.text : '';
+  const textBlock = (data.content || []).find(b => b.type === 'text');
+  const toolBlock = (data.content || []).find(b => b.type === 'tool_use');
+  return {
+    text: (textBlock && textBlock.text) || '',
+    toolInput: (toolBlock && toolBlock.input) || null
+  };
 }
 
 // Mirror of test/soql-eval.js — strip PCRE (?i) inline flag so patterns stay
@@ -246,13 +266,15 @@ async function runOne(page, caseObj) {
   const page = await browser.newPage();
   await page.goto('data:text/html,<html><body></body></html>');
 
-  await page.exposeFunction('__callClaude', async (system, user) => {
-    return callAnthropic(apiKey, model, system, user);
+  await page.exposeFunction('__callClaude', async (opts) => {
+    return callAnthropic(apiKey, model, opts);
   });
 
   // Inject production scripts. flow-debug uses fetchDescribe / loadRecordTypes
-  // from soql.js, so include it too.
-  for (const f of ['salesforce-urls.js', 'shared.js', 'objects.js', 'soql.js', 'flow-debug.js']) {
+  // from soql.js, so include it too. Glossary scripts loaded for parity with
+  // soql-eval.js — flow-debug doesn't observe to the glossary today but the
+  // load itself is cheap and keeps the script set consistent.
+  for (const f of ['salesforce-urls.js', 'shared.js', 'objects.js', 'org-glossary.js', 'org-glossary-extractors.js', 'soql.js', 'flow-debug.js']) {
     await page.addScriptTag({ path: path.join(ROOT, f) });
   }
 
@@ -263,8 +285,14 @@ async function runOne(page, caseObj) {
       runtime: {
         sendMessage: (msg, cb) => {
           if (msg && msg.type === 'soql.generate') {
-            window.__callClaude(msg.system, msg.user).then(
-              text => cb({ ok: true, text }),
+            window.__callClaude({
+              system: msg.system,
+              user: msg.user,
+              cacheSystem: msg.cacheSystem,
+              tools: msg.tools,
+              toolChoice: msg.toolChoice
+            }).then(
+              resp => cb({ ok: true, text: resp.text, toolInput: resp.toolInput }),
               e => cb({ ok: false, error: e.message })
             );
             return;

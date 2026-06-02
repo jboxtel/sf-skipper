@@ -69,28 +69,56 @@ function loadOrg(name, dir) {
   };
 }
 
-async function callAnthropic(apiKey, model, system, user) {
+// Call the Anthropic Messages API. Accepts the full opts shape passed from
+// the in-page `callClaude` helper so tool_use, tool_choice, and the cached
+// system-prompt block all reach the API unchanged. Mirrors background.js's
+// handleSoqlGenerate so the eval exercises the same request the extension
+// would build in production.
+//
+// Returns { text, toolInput } — text is the first text block (may be empty
+// when the model went straight to tool_use); toolInput is the parsed input
+// object from the first tool_use block (null when the model didn't use a
+// tool). Callers that ask for tools must look at toolInput, not text.
+async function callAnthropic(apiKey, model, opts) {
+  opts = opts || {};
+  // Apply the same cache-control block transformation background.js does:
+  // when caller passes a string system + cacheSystem flag, wrap into the
+  // ephemeral-cache block shape the API expects.
+  let system = opts.system;
+  if (opts.cacheSystem && typeof system === 'string') {
+    system = [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }];
+  }
+  const body = {
+    model,
+    max_tokens: 1024,
+    system,
+    messages: [{ role: 'user', content: opts.user }]
+  };
+  if (opts.tools && opts.tools.length) body.tools = opts.tools;
+  if (opts.toolChoice) body.tool_choice = opts.toolChoice;
+
   const resp = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
       'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01'
+      'anthropic-version': '2023-06-01',
+      // Required to read cache_control blocks; harmless on calls that don't use them.
+      'anthropic-beta': 'prompt-caching-2024-07-31'
     },
-    body: JSON.stringify({
-      model,
-      max_tokens: 1024,
-      system,
-      messages: [{ role: 'user', content: user }]
-    })
+    body: JSON.stringify(body)
   });
   if (!resp.ok) {
-    const body = await resp.text();
-    throw new Error('Anthropic ' + resp.status + ': ' + body.slice(0, 300));
+    const bodyText = await resp.text();
+    throw new Error('Anthropic ' + resp.status + ': ' + bodyText.slice(0, 300));
   }
   const data = await resp.json();
-  const block = (data.content || []).find(b => b.type === 'text');
-  return block ? block.text : '';
+  const textBlock = (data.content || []).find(b => b.type === 'text');
+  const toolBlock = (data.content || []).find(b => b.type === 'tool_use');
+  return {
+    text: (textBlock && textBlock.text) || '',
+    toolInput: (toolBlock && toolBlock.input) || null
+  };
 }
 
 // JS regex doesn't support PCRE inline flags like `(?i)`. Patterns written
@@ -277,16 +305,25 @@ async function runOne(page, org, promptText) {
   const page = await browser.newPage();
   await page.goto('data:text/html,<html><body></body></html>');
 
-  await page.exposeFunction('__callClaude', async (system, user) => {
-    return callAnthropic(apiKey, model, system, user);
+  // Exposed function takes the full opts payload (system, user, cacheSystem,
+  // tools, toolChoice) — same shape background.js's handleSoqlGenerate
+  // expects. Returns { text, toolInput }. Both fields always present so the
+  // stub doesn't need to know which path the caller used.
+  await page.exposeFunction('__callClaude', async (opts) => {
+    return callAnthropic(apiKey, model, opts);
   });
 
-  // Inject the production scripts in dependency order
-  for (const f of ['salesforce-urls.js', 'shared.js', 'objects.js', 'soql.js']) {
+  // Inject the production scripts in dependency order. Glossary scripts are
+  // included so the read-side + extractors load like in prod; tests can
+  // optionally seed the glossary before running prompts.
+  for (const f of ['salesforce-urls.js', 'shared.js', 'objects.js', 'org-glossary.js', 'org-glossary-extractors.js', 'soql.js']) {
     await page.addScriptTag({ path: path.join(ROOT, f) });
   }
 
-  // Stub chrome surface — route soql.generate to our exposed Anthropic caller
+  // Stub chrome surface — route soql.generate to our exposed Anthropic caller.
+  // The stub forwards the entire opts payload (tools, toolChoice, cacheSystem)
+  // through to __callClaude so tool_use-bearing calls work end-to-end. The
+  // response shape matches background.js's: { ok, text, toolInput }.
   await page.evaluate(() => {
     window.getOrgBase = () => 'https://myorg.lightning.force.com';
     window.getApiBase = () => '';
@@ -294,8 +331,14 @@ async function runOne(page, org, promptText) {
       runtime: {
         sendMessage: (msg, cb) => {
           if (msg && msg.type === 'soql.generate') {
-            window.__callClaude(msg.system, msg.user).then(
-              text => cb({ ok: true, text }),
+            window.__callClaude({
+              system: msg.system,
+              user: msg.user,
+              cacheSystem: msg.cacheSystem,
+              tools: msg.tools,
+              toolChoice: msg.toolChoice
+            }).then(
+              resp => cb({ ok: true, text: resp.text, toolInput: resp.toolInput }),
               e => cb({ ok: false, error: e.message })
             );
             return;
