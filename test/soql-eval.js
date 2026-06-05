@@ -338,12 +338,14 @@ function parseArgs(argv) {
   const tierFilter = args.tier || null;
   // Default throttle: 5s between cells on the heavy `full` tier (Anthropic
   // free tier is 50K input tokens per minute, and the full fixture's schema
-  // dumps eat 5–15K per call); 0s on the smoke tier where calls are small
-  // enough that throttling just adds latency. Explicit --throttle=<ms>
-  // always wins.
+  // dumps eat 5–15K per call); 1.5s on the smoke tier — small fixtures don't
+  // need a 5s delay, but 0s makes the eval flaky on bursts (planner + generator
+  // + occasional retry in quick succession can briefly cross the ITPM cap and
+  // trigger 429 retries that delay specific cells by 30s). 1.5s smooths the
+  // burst without making the run feel slow. Explicit --throttle=<ms> wins.
   const throttleMs = args.throttle != null
     ? parseInt(args.throttle, 10)
-    : (tierFilter === 'smoke' ? 0 : 5000);
+    : (tierFilter === 'smoke' ? 1500 : 5000);
 
   const fixtureDirs = discoverFixtures();
   const orgNames = Object.keys(fixtureDirs);

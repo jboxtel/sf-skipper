@@ -1287,6 +1287,7 @@ function buildPlannerSystemPrompt() {
     '- Prefer objects with substantial record counts. An empty or near-empty object is rarely the right FROM target even when its name lexically matches.',
     '- Field populationality is a strong signal. If field "Hours__c" exists on object A but is populated on 0% of A\'s rows, A is almost certainly not the home of the user\'s concept.',
     '- Org-specific vocabulary in the user message is authoritative — if the org has historically used "X" to mean object A, prefer A even if its name doesn\'t match.',
+    '- Literal-anchored signals override lexical and record-type signals. If a prompt token IS a picklist value uniquely on object X\'s field F, the concept the user is asking about lives on X. Either FROM = X (when X carries the answer row-shape) or include X in needsRelated and dot-walk to F (when the row-shape lives elsewhere). DO NOT pick a different object whose record types lexically match while ignoring the literal anchor — the model that writes SOQL after you will silently substitute the literal for some other value and the answer will be wrong.',
     '',
     'Call the pick_query_plan tool. Do not emit prose.'
   ].join('\n');
@@ -1326,6 +1327,26 @@ function buildPlannerUserMessage(prompt, schemaObjects, context) {
     // names share tokens with the prompt, then any other populated fields.
     var fieldSummary = _summarizeFieldsForPlanner(prompt, o);
     if (fieldSummary) lines.push('    relevant fields: ' + fieldSummary);
+  }
+
+  // Picklist value hints. The generator's user message includes these (see
+  // buildUserMessage); the planner needs them too — when a rare prompt token
+  // like 'CR' is uniquely a picklist value on one specific field, that's the
+  // strongest possible signal for which object should be FROM (or reached via
+  // dot-walk). Without this, the planner picks blind to literal-anchoring and
+  // tends to pick an object whose record types lexically match while the
+  // actual literal lives on a different object.
+  var pvIndex = buildPicklistValueIndex(schemaObjects);
+  var pvHits = findPicklistMatchesInPrompt(prompt, pvIndex);
+  if (pvHits.length) {
+    lines.push('');
+    lines.push('Literal-anchored signals — tokens in the prompt that are picklist values somewhere in the candidate set. These pinpoint which object holds the concept; prefer that object for FROM (or include it in needsRelated if the answer\'s row-shape lives elsewhere and we need to dot-walk to it):');
+    pvHits.forEach(function (h) {
+      var locs = h.locations.map(function (l) {
+        return l.apiName + '.' + l.fieldName + " = '" + l.value + "'";
+      }).join(' OR ');
+      lines.push("  - '" + h.token + "' → " + locs);
+    });
   }
 
   if (context.fewShotExamples && context.fewShotExamples.length) {
