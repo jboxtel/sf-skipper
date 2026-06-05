@@ -620,6 +620,38 @@ function findPicklistMatchesInPrompt(prompt, index) {
   return hits;
 }
 
+// Returns the record type developerNames on `apiName` whose CamelCase-split
+// tokens contain `token` exactly. Used to suppress picklist hints when the
+// same token already appears in a record type name on the same object —
+// RecordType.DeveloperName is the primary category discriminator and is
+// already shown in the schema header, so the picklist hint is redundant noise.
+//
+// Split rule: underscore → space, then CamelCase split, then lowercase.
+// "MCM_LegalCase" → ["mcm", "legal", "case"]. Exact match only — no prefix
+// matching — to avoid "leg" firing on "LegalCase".
+function _findRecordTypeMatchesForToken(token, apiName, schemaObjects) {
+  if (!token || !apiName || !schemaObjects) return [];
+  var lc = String(token).toLowerCase();
+  var obj = null;
+  for (var i = 0; i < schemaObjects.length; i++) {
+    if (schemaObjects[i].apiName === apiName) { obj = schemaObjects[i]; break; }
+  }
+  if (!obj || !obj.recordTypes || !obj.recordTypes.length) return [];
+  var matches = [];
+  for (var j = 0; j < obj.recordTypes.length; j++) {
+    var rt = obj.recordTypes[j];
+    var normalized = (rt.developerName || '')
+      .replace(/_/g, ' ')
+      .replace(/([a-z])([A-Z])/g, '$1 $2')
+      .toLowerCase();
+    var parts = normalized.split(/\s+/);
+    for (var k = 0; k < parts.length; k++) {
+      if (parts[k] === lc) { matches.push(rt.developerName); break; }
+    }
+  }
+  return matches;
+}
+
 function buildUserMessage(prompt, schemaObjects, context) {
   context = context || {};
   var lines = [];
@@ -727,10 +759,15 @@ function buildUserMessage(prompt, schemaObjects, context) {
     lines.push('');
     lines.push("Picklist value matches in the prompt. Each line says where a token in the user's request lives as a picklist value. Use this to pick the right field — but if your FROM object differs from the object that holds the field, you MUST reach the field via a relationship dot-walk (find a reference field on FROM whose referenceTo matches), not by referencing the field directly on FROM:");
     pvHits.forEach(function (h) {
-      var locs = h.locations.map(function (l) {
-        return "object=" + l.apiName + " field=" + l.fieldName + " value='" + l.value + "'";
-      }).join(' OR ');
-      lines.push("  - token '" + h.token + "' → " + locs);
+      var locs = h.locations
+        .filter(function (l) {
+          return !_findRecordTypeMatchesForToken(h.token, l.apiName, schemaObjects).length;
+        })
+        .map(function (l) {
+          return "object=" + l.apiName + " field=" + l.fieldName + " value='" + l.value + "'";
+        });
+      if (!locs.length) return;
+      lines.push("  - token '" + h.token + "' → " + locs.join(' OR '));
     });
   }
 
@@ -1342,10 +1379,15 @@ function buildPlannerUserMessage(prompt, schemaObjects, context) {
     lines.push('');
     lines.push('Literal-anchored signals — tokens in the prompt that are picklist values somewhere in the candidate set. These pinpoint which object holds the concept; prefer that object for FROM (or include it in needsRelated if the answer\'s row-shape lives elsewhere and we need to dot-walk to it):');
     pvHits.forEach(function (h) {
-      var locs = h.locations.map(function (l) {
-        return l.apiName + '.' + l.fieldName + " = '" + l.value + "'";
-      }).join(' OR ');
-      lines.push("  - '" + h.token + "' → " + locs);
+      var locs = h.locations
+        .filter(function (l) {
+          return !_findRecordTypeMatchesForToken(h.token, l.apiName, schemaObjects).length;
+        })
+        .map(function (l) {
+          return l.apiName + '.' + l.fieldName + " = '" + l.value + "'";
+        });
+      if (!locs.length) return;
+      lines.push("  - '" + h.token + "' → " + locs.join(' OR '));
     });
   }
 
