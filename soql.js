@@ -1439,6 +1439,69 @@ function applyPlanToSchemaObjects(schemaObjects, plan) {
   });
 }
 
+// Planner-divergence schema fetch. The planner is allowed to pick a FROM
+// object outside the candidate set (it falls back to org-wide knownApiNames
+// when its choice doesn't match a candidate — see runPlanner). Without this
+// step, the divergent pick has no loaded schema, the generator emits SOQL
+// against it blind, and the downstream field validators silent-pass because
+// FROM isn't in schemaByName.
+//
+// Resolution: identify api names mentioned in the plan that aren't already
+// in schemaObjects, look them up in getSoqlObjects to recover label/keyPrefix,
+// and run them through fetchCandidateSchema so they get the full bundle
+// (describe + count + populationality + record types). Prepend to
+// schemaObjects so they're sorted first by applyPlanToSchemaObjects.
+//
+// Failure-soft: an individual fetch can fail (perm-restricted, formula-only
+// object, network blip); fetchCandidateSchema already swallows describe/count
+// failures internally and returns a result with `fields: null`. We just pass
+// whatever comes back; downstream validators will then refuse rather than
+// silent-pass against a no-fields schema.
+async function _fetchDivergentSchemas(schemaObjects, plan, notify) {
+  if (!plan || !plan.fromObject) return schemaObjects;
+
+  var existing = {};
+  schemaObjects.forEach(function (o) { if (o && o.apiName) existing[o.apiName] = true; });
+
+  // Build the wanted-but-missing set: FROM first, then needsRelated.
+  var wanted = [];
+  if (!existing[plan.fromObject]) wanted.push(plan.fromObject);
+  (plan.needsRelated || []).forEach(function (n) {
+    if (!existing[n] && wanted.indexOf(n) === -1) wanted.push(n);
+  });
+  if (!wanted.length) return schemaObjects;
+
+  // Look up label + keyPrefix from the full org list. If something the planner
+  // picked isn't there either, skip it silently — runPlanner validated against
+  // knownApiNames so this branch shouldn't fire in practice, but defensive.
+  var all = getSoqlObjects();
+  var byName = {};
+  all.forEach(function (o) { byName[o.apiName] = o; });
+  var toFetch = wanted
+    .map(function (name) { return byName[name]; })
+    .filter(function (o) { return !!o; });
+  if (!toFetch.length) return schemaObjects;
+
+  if (typeof notify === 'function') {
+    notify('Reading planner-picked schema for ' + toFetch.map(function (o) { return o.apiName; }).join(', '));
+  }
+  // Mark the FROM-target schema as planSelected ahead of applyPlanToSchemaObjects
+  // so the FROM stays at position 0 regardless of fetch order — and so a
+  // subsequent fetchCandidateSchema call that re-fetches the same apiName
+  // (cache hit) doesn't accidentally re-sort it.
+  var fetched;
+  try {
+    fetched = await fetchCandidateSchema(toFetch);
+  } catch (e) {
+    console.warn('sfnav: planner-divergent schema fetch failed —', e.message);
+    return schemaObjects;
+  }
+  // Tag every divergent schema so we can tell at debug time that this entry
+  // came from the planner step rather than the original lexical/BM25 pass.
+  fetched.forEach(function (s) { s.fromPlannerDivergence = true; });
+  return fetched.concat(schemaObjects);
+}
+
 // Picker responses are often noisy — Claude may wrap the api name in
 // punctuation, backticks, a sentence, or pick a name with a typo'd
 // case. Scan the response for any known object api name (word-boundary,
@@ -1740,6 +1803,23 @@ async function generateSoql(prompt, onProgress) {
     var knownNamesForPlan = getSoqlObjects().map(function (o) { return o.apiName; });
     var plan = await runPlanner(prompt, schemaObjects, promptContext, knownNamesForPlan);
     promptContext.plan = plan;
+    // Planner-divergence schema fetch. runPlanner is allowed to pick a FROM
+    // object that wasn't in the candidate set — it falls back to the org-wide
+    // knownApiNames list for cases where the lexical scorer missed something
+    // the model finds plausible. Before that change, applyPlanToSchemaObjects
+    // would silently do nothing for divergent picks, the generator would
+    // emit against an object whose schema we never loaded, and
+    // validateSoqlFieldsExist would silent-pass because FROM isn't in
+    // schemaByName. End result: hallucinated fields shipped past every
+    // validator. Smoke F2 (`cancelled-flight-with-assignments × signal-in-
+    // picklist-value`) is the canonical case.
+    //
+    // Fix: when the planner picks an object (FROM or needsRelated) that we
+    // haven't loaded yet, fetch its full schema bundle (describe + count +
+    // populationality) before applying the plan. Fail-soft on individual
+    // fetches — populationality may not exist for permission-restricted
+    // objects, that's fine; the validators only need the describe.
+    schemaObjects = await _fetchDivergentSchemas(schemaObjects, plan, notify);
     schemaObjects = applyPlanToSchemaObjects(schemaObjects, plan);
   } catch (pErr) {
     console.warn('sfnav: planner step skipped —', pErr.message);
