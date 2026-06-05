@@ -8,6 +8,7 @@
     "e2e": "node test/e2e.js",
     "debug": "node test/debug.js",
     "eval:soql": "node test/soql-eval.js",
+    "eval:soql:smoke": "node test/soql-eval.js --tier=smoke",
     "eval:flow-debug": "node test/flow-debug-eval.js",
     "test:flow-debug-validator": "node test/flow-debug-validator-test.js",
     "test:org-glossary": "node test/org-glossary-test.js",

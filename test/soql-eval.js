@@ -79,6 +79,19 @@ function loadOrg(name, dir) {
 // when the model went straight to tool_use); toolInput is the parsed input
 // object from the first tool_use block (null when the model didn't use a
 // tool). Callers that ask for tools must look at toolInput, not text.
+//
+// On a 429 rate-limit response, honors the retry-after header (seconds) and
+// retries up to ANTHROPIC_MAX_RETRIES times before propagating. The full-tier
+// fixture has heavy schema dumps that easily blow the per-minute input-token
+// budget on the Anthropic free tier; throttling between cells in the cell
+// loop is the primary defense, this retry is a safety net.
+const ANTHROPIC_MAX_RETRIES = 3;
+const ANTHROPIC_DEFAULT_RETRY_S = 30;
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 async function callAnthropic(apiKey, model, opts) {
   opts = opts || {};
   // Apply the same cache-control block transformation background.js does:
@@ -97,28 +110,53 @@ async function callAnthropic(apiKey, model, opts) {
   if (opts.tools && opts.tools.length) body.tools = opts.tools;
   if (opts.toolChoice) body.tool_choice = opts.toolChoice;
 
-  const resp = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      // Required to read cache_control blocks; harmless on calls that don't use them.
-      'anthropic-beta': 'prompt-caching-2024-07-31'
-    },
-    body: JSON.stringify(body)
-  });
-  if (!resp.ok) {
-    const bodyText = await resp.text();
-    throw new Error('Anthropic ' + resp.status + ': ' + bodyText.slice(0, 300));
+  for (let attempt = 0; attempt <= ANTHROPIC_MAX_RETRIES; attempt++) {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        // Required to read cache_control blocks; harmless on calls that don't use them.
+        'anthropic-beta': 'prompt-caching-2024-07-31'
+      },
+      body: JSON.stringify(body)
+    });
+
+    if (resp.status === 429 && attempt < ANTHROPIC_MAX_RETRIES) {
+      // Anthropic returns retry-after in seconds (HTTP standard). Some
+      // responses include a unix-timestamp variant; both are handled here.
+      // Default to 30s if the header is missing — same order of magnitude as
+      // the per-minute window resetting.
+      const raw = resp.headers.get('retry-after');
+      let waitMs = ANTHROPIC_DEFAULT_RETRY_S * 1000;
+      if (raw) {
+        const n = parseInt(raw, 10);
+        if (!isNaN(n)) {
+          // Heuristic: values > 10^10 are unix seconds, smaller are deltas.
+          waitMs = n > 1e10 ? Math.max(0, (n - Math.floor(Date.now() / 1000)) * 1000) : n * 1000;
+        }
+      }
+      // Cap waits at a sane upper bound so a misbehaving server can't park us.
+      waitMs = Math.min(waitMs, 90 * 1000);
+      process.stderr.write(`\n      [rate-limited, retrying after ${Math.round(waitMs / 1000)}s] `);
+      await sleep(waitMs);
+      continue;
+    }
+
+    if (!resp.ok) {
+      const bodyText = await resp.text();
+      throw new Error('Anthropic ' + resp.status + ': ' + bodyText.slice(0, 300));
+    }
+    const data = await resp.json();
+    const textBlock = (data.content || []).find(b => b.type === 'text');
+    const toolBlock = (data.content || []).find(b => b.type === 'tool_use');
+    return {
+      text: (textBlock && textBlock.text) || '',
+      toolInput: (toolBlock && toolBlock.input) || null
+    };
   }
-  const data = await resp.json();
-  const textBlock = (data.content || []).find(b => b.type === 'text');
-  const toolBlock = (data.content || []).find(b => b.type === 'tool_use');
-  return {
-    text: (textBlock && textBlock.text) || '',
-    toolInput: (toolBlock && toolBlock.input) || null
-  };
+  throw new Error('Anthropic: retries exhausted after rate limiting');
 }
 
 // JS regex doesn't support PCRE inline flags like `(?i)`. Patterns written
@@ -260,6 +298,29 @@ async function runOne(page, org, promptText) {
   }, promptText);
 }
 
+// Parse `--flag=value`, `--flag value`, and positional args. Used so the
+// harness accepts `node soql-eval.js --tier=smoke <orgName> <promptId>` and
+// the older positional-only form still works.
+function parseArgs(argv) {
+  const out = { positional: [] };
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a.startsWith('--')) {
+      const eq = a.indexOf('=');
+      if (eq > 0) {
+        out[a.slice(2, eq)] = a.slice(eq + 1);
+      } else {
+        const next = argv[i + 1];
+        if (next && !next.startsWith('--')) { out[a.slice(2)] = next; i++; }
+        else { out[a.slice(2)] = true; }
+      }
+    } else {
+      out.positional.push(a);
+    }
+  }
+  return out;
+}
+
 (async () => {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
@@ -271,8 +332,18 @@ async function runOne(page, org, promptText) {
   // for cross-model comparisons.
   const model = process.env.SOQL_EVAL_MODEL || 'claude-haiku-4-5-20251001';
 
-  const orgFilter = process.argv[2] || null;
-  const promptFilter = process.argv[3] || null;
+  const args = parseArgs(process.argv.slice(2));
+  const orgFilter = args.positional[0] || null;
+  const promptFilter = args.positional[1] || null;
+  const tierFilter = args.tier || null;
+  // Default throttle: 5s between cells on the heavy `full` tier (Anthropic
+  // free tier is 50K input tokens per minute, and the full fixture's schema
+  // dumps eat 5–15K per call); 0s on the smoke tier where calls are small
+  // enough that throttling just adds latency. Explicit --throttle=<ms>
+  // always wins.
+  const throttleMs = args.throttle != null
+    ? parseInt(args.throttle, 10)
+    : (tierFilter === 'smoke' ? 0 : 5000);
 
   const fixtureDirs = discoverFixtures();
   const orgNames = Object.keys(fixtureDirs);
@@ -280,9 +351,18 @@ async function runOne(page, org, promptText) {
 
   // Each fixture ships with its own prompts.json. Prompts default to targeting
   // the fixture they live in; an explicit `orgs` array overrides.
+  //
+  // Tier resolution per cell:
+  //   1. Explicit `tier` on the prompt itself (per-prompt override)
+  //   2. `tier` field on the fixture's meta.json
+  //   3. `full` if neither is set
+  // The --tier filter then keeps only matching cells.
   const cells = [];
   for (const name of orgNames) {
+    const fixtureTier = (orgs[name].meta && orgs[name].meta.tier) || 'full';
     for (const p of orgs[name].prompts) {
+      const cellTier = p.tier || fixtureTier;
+      if (tierFilter && tierFilter !== cellTier) continue;
       const targets = (p.orgs && p.orgs.length) ? p.orgs : [name];
       for (const orgName of targets) {
         if (orgFilter && orgFilter !== orgName) continue;
@@ -292,7 +372,7 @@ async function runOne(page, org, promptText) {
           continue;
         }
         const expect = (p.expect && p.expect[orgName]) || {};
-        cells.push({ prompt: p, org: orgs[orgName], expect });
+        cells.push({ prompt: p, org: orgs[orgName], expect, tier: cellTier });
       }
     }
   }
@@ -351,13 +431,21 @@ async function runOne(page, org, promptText) {
     };
   });
 
-  console.log(`\n${BOLD}SOQL grounding eval${RESET}  ${DIM}(model: ${model})${RESET}\n`);
+  const tierLabel = tierFilter ? `tier=${tierFilter}` : 'all tiers';
+  const throttleLabel = throttleMs > 0 ? `${throttleMs}ms throttle` : 'no throttle';
+  console.log(`\n${BOLD}SOQL grounding eval${RESET}  ${DIM}(model: ${model}, ${tierLabel}, ${throttleLabel}, ${cells.length} cells)${RESET}\n`);
 
   let passed = 0;
   let failed = 0;
   const failures = [];
 
-  for (const cell of cells) {
+  for (let i = 0; i < cells.length; i++) {
+    const cell = cells[i];
+    // Throttle BEFORE each cell except the first. Putting it before (rather
+    // than after) means a single-cell invocation has no delay, and the wait
+    // happens at a clearer point in the output stream than a trailing pause.
+    if (i > 0 && throttleMs > 0) await sleep(throttleMs);
+
     const label = `${cell.prompt.id} × ${cell.org.name}`;
     process.stdout.write(`  ${label} ${DIM}...${RESET} `);
     const t0 = Date.now();
