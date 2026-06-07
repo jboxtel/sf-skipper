@@ -69,7 +69,8 @@ function toPermsetResult(ps) {
   return {
     label: ps.label,
     sublabel: sub,
-    url: getOrgBase() + '/lightning/setup/PermSets/page?address=%2F' + encodeURIComponent(ps.id),
+    // PermSets/page only resolves the 15-char ID; the 18-char form returns Insufficient Privileges.
+    url: getOrgBase() + '/lightning/setup/PermSets/page?address=%2F' + encodeURIComponent(ps.id.slice(0, 15)),
     type: 'permset',
     permset: ps,
   };

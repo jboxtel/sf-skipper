@@ -1,12 +1,13 @@
-// IsOwnedByProfile = true is the hidden permset that backs each Profile — we
-// want only real, admin-managed permission sets here.
+// IsOwnedByProfile = true is the hidden permset that backs each Profile.
+// Type = 'Group' is the auto-generated shadow permset behind each Permission Set Group —
+// it has no navigable detail page (PermSets/page returns Insufficient Privileges).
 var _permsetsCache = createSfCache({
   name: 'permsets',
   storageKey: 'sfnavPermsets',
   errorLabel: 'Permission Set',
   soql:
     'SELECT Id, Name, Label, Description, IsCustom, NamespacePrefix ' +
-    'FROM PermissionSet WHERE IsOwnedByProfile = false ' +
+    "FROM PermissionSet WHERE IsOwnedByProfile = false AND Type != 'Group' " +
     'ORDER BY Label LIMIT 2000',
   parse: function (records) {
     return records.map(function (r) {
