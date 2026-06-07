@@ -133,6 +133,8 @@ label.fl {
 
 input[type=text],
 input[type=password],
+input[type=email],
+textarea,
 select {
   width: 100%;
   border: 1px solid var(--border2);
@@ -144,8 +146,14 @@ select {
   background: var(--surface);
   outline: none;
   transition: border-color .12s;
+  box-sizing: border-box;
 }
-input:focus, select:focus {
+textarea {
+  resize: vertical;
+  min-height: 120px;
+  line-height: 1.5;
+}
+input:focus, select:focus, textarea:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px rgba(0,0,0,.06);
 }
