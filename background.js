@@ -233,7 +233,13 @@ chrome.runtime.onMessage.addListener(function (req, sender, sendResponse) {
     return true;
   }
   if (req.type === 'openOptions') {
-    chrome.runtime.openOptionsPage();
+    if (req.pane) {
+      // openOptionsPage() ignores hash/query, so build the URL ourselves
+      // when a specific pane is requested.
+      chrome.tabs.create({ url: chrome.runtime.getURL('options.html#' + req.pane) });
+    } else {
+      chrome.runtime.openOptionsPage();
+    }
     sendResponse({ ok: true });
     return false;
   }

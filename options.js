@@ -161,18 +161,29 @@ chrome.storage.local.get('sfnavOptions', function (data) {
 
 // ─── Pane switching ─────────────────────────────────────────────────────────
 
-navEl.addEventListener('click', function (e) {
-  var item = e.target.closest('.ni');
-  if (!item) return;
-  var pane = item.getAttribute('data-pane');
-  if (!pane) return;
+function activatePane(pane) {
   Array.prototype.forEach.call(navEl.querySelectorAll('.ni'), function (n) {
-    n.classList.toggle('on', n === item);
+    n.classList.toggle('on', n.getAttribute('data-pane') === pane);
   });
   Array.prototype.forEach.call(document.querySelectorAll('.pane'), function (p) {
     p.classList.toggle('on', p.id === 'pane-' + pane);
   });
+}
+
+navEl.addEventListener('click', function (e) {
+  var item = e.target.closest('.ni');
+  if (!item) return;
+  var pane = item.getAttribute('data-pane');
+  if (pane) activatePane(pane);
 });
+
+// Deep-link via #pane (e.g. options.html#account opens the Account pane).
+// The palette's "Sign in to Skipper" banner uses this to land the user
+// directly on the sign-in form.
+(function () {
+  var hash = (location.hash || '').replace(/^#/, '');
+  if (hash && document.getElementById('pane-' + hash)) activatePane(hash);
+})();
 
 // ─── Rendering ──────────────────────────────────────────────────────────────
 
@@ -358,6 +369,128 @@ replayEl.addEventListener('click', async function () {
     });
   });
 });
+
+// ─── Account (Skipper sign-in) ──────────────────────────────────────────────
+
+var acctSignedOutEl   = document.getElementById('acctSignedOut');
+var acctCodeEntryEl   = document.getElementById('acctCodeEntry');
+var acctSignedInEl    = document.getElementById('acctSignedIn');
+var acctEmailEl       = document.getElementById('acctEmail');
+var acctSendCodeEl    = document.getElementById('acctSendCode');
+var acctStatusEl      = document.getElementById('acctStatus');
+var acctCodeEl        = document.getElementById('acctCode');
+var acctVerifyEl      = document.getElementById('acctVerify');
+var acctResendEl      = document.getElementById('acctResend');
+var acctCodeStatusEl  = document.getElementById('acctCodeStatus');
+var acctEmailShownEl  = document.getElementById('acctEmailShown');
+var acctSignOutEl     = document.getElementById('acctSignOut');
+var acctSignedInStatusEl = document.getElementById('acctSignedInStatus');
+
+// Email captured at "Send code" time — code verification needs the same
+// address Supabase sent the OTP to.
+var acctPendingEmail = '';
+
+function setAcctStatus(el, text, kind) {
+  if (!el) return;
+  el.textContent = text || '';
+  el.className = kind ? ('walk-status ' + kind) : '';
+}
+
+function showAcctState(state) {
+  acctSignedOutEl.hidden = state !== 'signed-out';
+  acctCodeEntryEl.hidden = state !== 'code-entry';
+  acctSignedInEl.hidden  = state !== 'signed-in';
+}
+
+function renderAccount() {
+  if (!window.SkipperAuth) return;
+  SkipperAuth.getSession().then(function (skipper) {
+    if (skipper && skipper.accessToken) {
+      acctEmailShownEl.textContent = skipper.email || '(unknown)';
+      showAcctState('signed-in');
+    } else {
+      showAcctState('signed-out');
+    }
+  });
+}
+
+if (acctSendCodeEl) {
+  acctSendCodeEl.addEventListener('click', function () {
+    var email = (acctEmailEl.value || '').trim();
+    if (!email || email.indexOf('@') === -1) {
+      setAcctStatus(acctStatusEl, 'Enter a valid email.', 'err');
+      acctEmailEl.focus();
+      return;
+    }
+    acctSendCodeEl.disabled = true;
+    setAcctStatus(acctStatusEl, 'Sending code…', 'loading');
+    SkipperAuth.requestOtp(email).then(function () {
+      acctPendingEmail = email;
+      setAcctStatus(acctStatusEl, '');
+      setAcctStatus(acctCodeStatusEl, 'Code sent to ' + email + '. Check your inbox.', 'ok');
+      acctSendCodeEl.disabled = false;
+      showAcctState('code-entry');
+      setTimeout(function () { acctCodeEl && acctCodeEl.focus(); }, 50);
+    }).catch(function (err) {
+      acctSendCodeEl.disabled = false;
+      setAcctStatus(acctStatusEl, 'Could not send: ' + err.message, 'err');
+    });
+  });
+}
+
+if (acctVerifyEl) {
+  acctVerifyEl.addEventListener('click', function () {
+    var code = (acctCodeEl.value || '').trim();
+    if (!/^\d{6}$/.test(code)) {
+      setAcctStatus(acctCodeStatusEl, 'Enter the 6-digit code.', 'err');
+      acctCodeEl.focus();
+      return;
+    }
+    acctVerifyEl.disabled = true;
+    setAcctStatus(acctCodeStatusEl, 'Verifying…', 'loading');
+    SkipperAuth.verifyOtp(acctPendingEmail, code).then(function () {
+      acctVerifyEl.disabled = false;
+      acctCodeEl.value = '';
+      setAcctStatus(acctCodeStatusEl, '');
+      setAcctStatus(acctSignedInStatusEl, 'Signed in.', 'ok');
+      setTimeout(function () { setAcctStatus(acctSignedInStatusEl, ''); }, 2500);
+      renderAccount();
+    }).catch(function (err) {
+      acctVerifyEl.disabled = false;
+      setAcctStatus(acctCodeStatusEl, 'Could not sign in: ' + err.message, 'err');
+    });
+  });
+}
+
+if (acctCodeEl) {
+  acctCodeEl.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); acctVerifyEl && acctVerifyEl.click(); }
+  });
+}
+
+if (acctResendEl) {
+  acctResendEl.addEventListener('click', function () {
+    acctPendingEmail = '';
+    acctCodeEl.value = '';
+    setAcctStatus(acctCodeStatusEl, '');
+    showAcctState('signed-out');
+    setTimeout(function () { acctEmailEl && acctEmailEl.focus(); }, 50);
+  });
+}
+
+if (acctSignOutEl) {
+  acctSignOutEl.addEventListener('click', function () {
+    acctSignOutEl.disabled = true;
+    setAcctStatus(acctSignedInStatusEl, 'Signing out…', 'loading');
+    SkipperAuth.signOut().then(function () {
+      acctSignOutEl.disabled = false;
+      setAcctStatus(acctSignedInStatusEl, '');
+      renderAccount();
+    });
+  });
+}
+
+renderAccount();
 
 // ─── Feedback ───────────────────────────────────────────────────────────────
 

@@ -28,6 +28,10 @@
             <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><circle cx="7" cy="7" r="2"/><path d="M7 1v2M7 11v2M1 7h2M11 7h2"/></svg>
             Walkthrough
           </div>
+          <div class="ni" data-pane="account">
+            <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2"><circle cx="7" cy="5" r="2.2"/><path d="M2.5 12c.6-2 2.3-3.2 4.5-3.2s3.9 1.2 4.5 3.2" stroke-linecap="round"/></svg>
+            Account
+          </div>
           <div class="ni" data-pane="feedback">
             <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><path d="M2 3h10v7H6l-3 2.5V10H2z"/></svg>
             Feedback
@@ -168,6 +172,60 @@
           </div>
         </div>
 
+        <!-- ACCOUNT -->
+        <div class="pane" id="pane-account">
+          <div class="ph">
+            <h1>Account</h1>
+            <p>Sign in with your email — we send a 6-digit code, no password. Your account lets us attribute feedback and (later) unlock hosted features.</p>
+          </div>
+
+          <!-- Signed-out state -->
+          <div class="sec" id="acctSignedOut">
+            <div class="fg">
+              <div>
+                <label class="fl" for="acctEmail">Email</label>
+                <input id="acctEmail" type="email" placeholder="you@company.com" autocomplete="email" />
+              </div>
+              <div class="actions">
+                <button id="acctSendCode" class="btn bp" type="button">Send code</button>
+                <span id="acctStatus"></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Code-entry state -->
+          <div class="sec" id="acctCodeEntry" hidden>
+            <div class="fg">
+              <div>
+                <label class="fl" for="acctCode">6-digit code</label>
+                <input id="acctCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="123456" spellcheck="false" />
+                <p class="field-warn" id="acctCodeHint" hidden></p>
+              </div>
+              <div class="actions">
+                <button id="acctVerify" class="btn bp" type="button">Sign in</button>
+                <button id="acctResend" class="btn bs bsm" type="button">Use a different email</button>
+                <span id="acctCodeStatus"></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Signed-in state -->
+          <div class="sec" id="acctSignedIn" hidden>
+            <div class="card">
+              <div class="cr">
+                <div class="crt">
+                  <div class="rl">Signed in as <span id="acctEmailShown">—</span></div>
+                  <div class="rd">Your session is stored locally in this browser. Sign out clears it.</div>
+                </div>
+                <div class="crc">
+                  <button id="acctSignOut" class="btn bs bsm" type="button">Sign out</button>
+                </div>
+              </div>
+            </div>
+            <div id="acctSignedInStatus" class="walk-status"></div>
+          </div>
+        </div>
+
         <!-- FEEDBACK -->
         <div class="pane" id="pane-feedback">
           <div class="ph">
@@ -225,6 +283,7 @@
         </div>
       </main>
     </div>
+    <script src="skipper-auth.js"></script>
     <script src="options.js"></script>
   </body>
 </html>

@@ -28,18 +28,34 @@
   var askHistoryEntries = [];
   var openInNewTabPref = true;
 
+  var skipperSignedIn = false;
+
   if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
     chrome.storage.local.get('sfnavOptions', function (data) {
       var opts = (data && data.sfnavOptions) || {};
       if (opts.openInNewTab === false) openInNewTabPref = false;
+      skipperSignedIn = !!(opts.skipper && opts.skipper.accessToken);
+      updateSignInBanner();
     });
     if (chrome.storage.onChanged && chrome.storage.onChanged.addListener) {
       chrome.storage.onChanged.addListener(function (changes, area) {
         if (area !== 'local' || !changes.sfnavOptions) return;
         var next = changes.sfnavOptions.newValue || {};
         openInNewTabPref = next.openInNewTab !== false;
+        skipperSignedIn = !!(next.skipper && next.skipper.accessToken);
+        updateSignInBanner();
       });
     }
+  }
+
+  // Visible only when not signed in AND we're in the root/picker view
+  // (results list showing — not inside a panel like @soql/@ask/@debug/feedback).
+  function updateSignInBanner() {
+    var banner = document.getElementById('sfnav-signin-banner');
+    if (!banner) return;
+    var resultsEl = document.getElementById('sfnav-results');
+    var resultsVisible = !!resultsEl && resultsEl.style.display !== 'none';
+    banner.style.display = (!skipperSignedIn && resultsVisible) ? 'flex' : 'none';
   }
 
   function openUrl(url) {
@@ -125,6 +141,10 @@
     overlay.id = 'sfnav-overlay';
     overlay.innerHTML =
       '<div id="sfnav-palette">' +
+        '<div id="sfnav-signin-banner" style="display:none">' +
+          '<span class="sfnav-signin-text">Sign in to Skipper</span>' +
+          '<button id="sfnav-signin-btn" type="button">Sign in</button>' +
+        '</div>' +
         '<div id="sfnav-breadcrumb"></div>' +
         '<input id="sfnav-input" type="text" placeholder="Search or pick a category below" autocomplete="off" spellcheck="false" />' +
         '<div id="sfnav-hint"></div>' +
@@ -208,6 +228,16 @@
         if (target && !target.disabled) target.focus();
       });
     });
+
+    var signInBtn = document.getElementById('sfnav-signin-btn');
+    if (signInBtn) {
+      signInBtn.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        try { chrome.runtime.sendMessage({ type: 'openOptions', pane: 'account' }); } catch (err) {}
+        hidePalette();
+      });
+    }
 
     var feedbackLink = document.getElementById('sfnav-feedback-link');
     if (feedbackLink) {
@@ -402,6 +432,7 @@
     input.value = '';
     input.placeholder = 'Describe what to query — e.g. all open cases assigned to me';
     document.getElementById('sfnav-results').style.display = 'none';
+    updateSignInBanner();
     document.getElementById('sfnav-hint').textContent = 'Press Enter to generate SOQL';
     document.getElementById('sfnav-breadcrumb').innerHTML = renderBreadcrumbHtml([{ text: '@soql' }]);
     document.getElementById('sfnav-breadcrumb').style.display = 'flex';
@@ -629,6 +660,7 @@
     input.value = '';
     input.placeholder = flowId ? 'Paste the Debug panel output below, then press ⌘↵' : 'Open a flow first to use this';
     document.getElementById('sfnav-results').style.display = 'none';
+    updateSignInBanner();
     document.getElementById('sfnav-hint').textContent = '';
     document.getElementById('sfnav-breadcrumb').innerHTML = renderBreadcrumbHtml([{ text: '@flow-debug' }]);
     document.getElementById('sfnav-breadcrumb').style.display = 'flex';
@@ -817,6 +849,7 @@
     input.placeholder = 'Use the box below to describe what you’re seeing';
     input.disabled = true;
     document.getElementById('sfnav-results').style.display = 'none';
+    updateSignInBanner();
     document.getElementById('sfnav-hint').textContent = '';
     document.getElementById('sfnav-breadcrumb').innerHTML = renderBreadcrumbHtml([{ text: '@ask' }]);
     document.getElementById('sfnav-breadcrumb').style.display = 'flex';
@@ -1266,6 +1299,7 @@
     input.value = '';
     input.placeholder = 'Send feedback to the Skipper team';
     document.getElementById('sfnav-results').style.display = 'none';
+    updateSignInBanner();
     var hintEl = document.getElementById('sfnav-hint');
     hintEl.textContent = '';
     hintEl.style.display = 'none';
@@ -1377,6 +1411,7 @@
     if (resultsEl) resultsEl.style.display = '';
     var hintEl = document.getElementById('sfnav-hint');
     if (hintEl) hintEl.style.display = '';
+    updateSignInBanner();
   }
 
   function hidePalette() {
