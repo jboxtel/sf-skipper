@@ -28,6 +28,10 @@
             <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><circle cx="7" cy="7" r="2"/><path d="M7 1v2M7 11v2M1 7h2M11 7h2"/></svg>
             Walkthrough
           </div>
+          <div class="ni" data-pane="feedback">
+            <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><path d="M2 3h10v7H6l-3 2.5V10H2z"/></svg>
+            Feedback
+          </div>
           <div class="ndiv"></div>
           <div class="ni" data-pane="about">
             <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2"><circle cx="7" cy="7" r="5.5"/><line x1="7" y1="6" x2="7" y2="10" stroke-linecap="round" stroke-width="1.3"/><circle cx="7" cy="4.2" r=".7" fill="currentColor" stroke="none"/></svg>
@@ -161,6 +165,30 @@
               </div>
             </div>
             <div id="walkthroughStatus" class="walk-status"></div>
+          </div>
+        </div>
+
+        <!-- FEEDBACK -->
+        <div class="pane" id="pane-feedback">
+          <div class="ph">
+            <h1>Send feedback</h1>
+            <p>Bug reports, feature requests, anything Skipper could do better. Goes straight to the maintainer.</p>
+          </div>
+          <div class="sec">
+            <div class="fg">
+              <div>
+                <label class="fl" for="fbMessage">Message</label>
+                <textarea id="fbMessage" rows="6" placeholder="What's broken, missing, or confusing?" spellcheck="false"></textarea>
+              </div>
+              <div>
+                <label class="fl" for="fbEmail">Email (optional)</label>
+                <input id="fbEmail" type="email" placeholder="Only if you’d like a reply" autocomplete="email" />
+              </div>
+              <div class="actions">
+                <button id="fbSend" class="btn bp" type="button">Send feedback</button>
+                <span id="fbStatus"></span>
+              </div>
+            </div>
           </div>
         </div>
 

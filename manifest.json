@@ -13,7 +13,8 @@
     "https://*.force.com/*",
     "https://api.anthropic.com/*",
     "https://api.openai.com/*",
-    "https://generativelanguage.googleapis.com/*"
+    "https://generativelanguage.googleapis.com/*",
+    "https://bdfndqbnuganvfdgtvcg.supabase.co/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -33,7 +34,7 @@
         "https://*.my.salesforce-setup.com/*",
         "https://*.force.com/*"
       ],
-      "js": ["salesforce-urls.js", "shared.js", "cache-factory.js", "objects.js", "cmdt.js", "flows.js", "apps.js", "labels.js", "permsets.js", "flow-debug.js", "commands.js", "org-glossary.js", "org-glossary-extractors.js", "soql.js", "ask.js", "markdown.js", "onboarding.js", "content.js"],
+      "js": ["salesforce-urls.js", "shared.js", "cache-factory.js", "objects.js", "cmdt.js", "flows.js", "apps.js", "labels.js", "permsets.js", "flow-debug.js", "commands.js", "org-glossary.js", "org-glossary-extractors.js", "soql.js", "ask.js", "feedback.js", "markdown.js", "onboarding.js", "content.js"],
       "css": ["content.css"],
       "run_at": "document_idle"
     }

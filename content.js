@@ -13,7 +13,7 @@
   var paletteVisible = false;
   var selectedIndex = -1;
   var currentResults = [];
-  var searchMode = 'root'; // 'root' | 'object-picker' | 'object-scoped' | 'flow-picker' | 'app-picker' | 'soql' | 'flow-debug' | 'cmd-picker' | 'cmd-scoped' | 'permset-picker'
+  var searchMode = 'root'; // 'root' | 'object-picker' | 'object-scoped' | 'flow-picker' | 'app-picker' | 'soql' | 'flow-debug' | 'cmd-picker' | 'cmd-scoped' | 'permset-picker' | 'feedback'
   var scopedObject = null;
   var scopedCmdt = null;
   var objectPickerFilter = '';
@@ -62,7 +62,8 @@
   var MODE_RUN_HANDLERS = {
     'soql':       function () { runSoqlGeneration(); },
     'flow-debug': function () { runFlowDebugAnalysis(); },
-    'ask':        function () { runAskQuery(); }
+    'ask':        function () { runAskQuery(); },
+    'feedback':   function () { runFeedbackSubmit(); }
   };
 
   // Modes that go back to a parent picker rather than root.
@@ -75,13 +76,15 @@
   var PANEL_PRIMARY_INPUTS = [
     { panelId: 'sfnav-soql',      inputId: 'sfnav-input' },
     { panelId: 'sfnav-flowdebug', inputId: 'sfnav-flowdebug-debug' },
-    { panelId: 'sfnav-ask',       inputId: 'sfnav-ask-question' }
+    { panelId: 'sfnav-ask',       inputId: 'sfnav-ask-question' },
+    { panelId: 'sfnav-feedback',  inputId: 'sfnav-feedback-message' }
   ];
 
   var FOOTER_HINTS = {
     'soql':       'Enter to generate · Esc to go back',
     'flow-debug': 'Enter to analyze · Shift+Enter for newline · Esc to go back',
-    'ask':        'Enter to ask · Shift+Enter for newline · Esc to go back'
+    'ask':        'Enter to ask · Shift+Enter for newline · Esc to go back',
+    'feedback':   'Cmd+Enter to send · Esc to go back'
   };
   var DEFAULT_FOOTER_HINT = '↑↓ navigate · Enter to select · Esc to close';
 
@@ -129,10 +132,12 @@
         '<div id="sfnav-soql" style="display:none">' +
           '<span id="sfnav-soql-apistat" class="sfnav-apistat"></span>' +
           '<div id="sfnav-soql-status"></div>' +
-          '<pre id="sfnav-soql-output"></pre>' +
-          '<div id="sfnav-soql-actions">' +
-            '<button id="sfnav-soql-copy" class="sfnav-soql-btn-primary">Copy</button>' +
-            '<button id="sfnav-soql-clear" class="sfnav-soql-btn-secondary">Clear</button>' +
+          '<div id="sfnav-soql-output-wrap">' +
+            '<pre id="sfnav-soql-output"></pre>' +
+            '<div id="sfnav-soql-actions">' +
+              '<button id="sfnav-soql-copy" class="sfnav-soql-btn-primary">Copy</button>' +
+              '<button id="sfnav-soql-clear" class="sfnav-soql-btn-secondary">Clear</button>' +
+            '</div>' +
           '</div>' +
           '<div id="sfnav-soql-history-label" class="sfnav-section-header">Recent</div>' +
           '<ul id="sfnav-soql-history"></ul>' +
@@ -169,7 +174,19 @@
           '<div id="sfnav-ask-history-label" class="sfnav-section-header" style="display:none">Recent</div>' +
           '<ul id="sfnav-ask-history"></ul>' +
         '</div>' +
-        '<div id="sfnav-footer"><span id="sfnav-brand">Skipper for Salesforce<span id="sfnav-brand-help">help</span></span><span id="sfnav-footer-hints"></span></div>' +
+        '<div id="sfnav-feedback" style="display:none">' +
+          '<div id="sfnav-feedback-context" style="display:none"></div>' +
+          '<textarea id="sfnav-feedback-message" placeholder="What’s broken, missing, or confusing? Anything Skipper could do better…" spellcheck="false"></textarea>' +
+          '<div class="sfnav-feedback-field">' +
+            '<label for="sfnav-feedback-email" class="sfnav-feedback-field-label">Reply to (optional)</label>' +
+            '<input id="sfnav-feedback-email" type="email" placeholder="your@email.com" autocomplete="email" />' +
+          '</div>' +
+          '<div id="sfnav-feedback-actions">' +
+            '<button id="sfnav-feedback-send" class="sfnav-soql-btn-primary">Send <span class="sfnav-kbd">⌘↵</span></button>' +
+            '<span id="sfnav-feedback-status"></span>' +
+          '</div>' +
+        '</div>' +
+        '<div id="sfnav-footer"><span id="sfnav-brand">Skipper for Salesforce<span id="sfnav-brand-help">help</span></span><a id="sfnav-feedback-link" href="#">feedback</a><span id="sfnav-footer-hints"></span></div>' +
       '</div>';
 
     document.body.appendChild(overlay);
@@ -191,6 +208,15 @@
         if (target && !target.disabled) target.focus();
       });
     });
+
+    var feedbackLink = document.getElementById('sfnav-feedback-link');
+    if (feedbackLink) {
+      feedbackLink.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        enterFeedbackMode();
+      });
+    }
 
     var input = document.getElementById('sfnav-input');
 
@@ -303,6 +329,9 @@
   // SHORTCUTS row + one case here (or none, if the shortcut is action-only
   // and handled by executeShortcut below).
   function enterShortcutMode(shortcut, filterText) {
+    // Hide any open panel before pivoting — otherwise typing @soql while
+    // the feedback (or any other) panel is open leaves both rendered.
+    hideSoqlPanel();
     switch (shortcut.id) {
       case 'object':  enterObjectPickerMode(filterText || '');  return;
       case 'flow':    enterFlowPickerMode(filterText || '');    return;
@@ -1122,6 +1151,219 @@
   // Lets onboarding.js read live shortcut metadata for the cheat sheet.
   window.__sfnavGetShortcuts = function () { return SHORTCUTS.slice(); };
 
+  var feedbackInFlight = false;
+  var feedbackContext = null;
+
+  function truncateForContext(s, max) {
+    if (!s) return '';
+    if (s.length <= max) return s;
+    return s.slice(0, max - 1) + '…';
+  }
+
+  // Snapshot whatever the user was looking at when they clicked the feedback
+  // link — almost always they want to tell us about that artifact, not file
+  // a generic note. Capture runs BEFORE the prior panel is torn down.
+  function captureFeedbackContext() {
+    if (searchMode === 'soql') {
+      var prompt = (document.getElementById('sfnav-input').value || '').trim();
+      var soqlEl = document.getElementById('sfnav-soql-output');
+      var statusEl = document.getElementById('sfnav-soql-status');
+      var soql = soqlEl ? (soqlEl.textContent || '').trim() : '';
+      var status = statusEl ? (statusEl.textContent || '').trim() : '';
+      if (!prompt && !soql) return null;
+      return {
+        mode: 'soql',
+        prompt: truncateForContext(prompt, 2000),
+        soql: truncateForContext(soql, 2000),
+        status: truncateForContext(status, 500)
+      };
+    }
+    if (searchMode === 'ask') {
+      var qEl = document.getElementById('sfnav-ask-question');
+      var aEl = document.querySelector('#sfnav-ask-output .sfnav-ask-answer');
+      var question = (qEl && qEl.value || '').trim();
+      var answer = (aEl && aEl.textContent || '').trim();
+      if ((!question || !answer) && askHistoryEntries && askHistoryEntries.length) {
+        var last = askHistoryEntries[0];
+        if (!question) question = ((last && last.question) || '').trim();
+        if (!answer)   answer   = ((last && last.answer)   || '').trim();
+      }
+      if (!question && !answer) return null;
+      return {
+        mode: 'ask',
+        question: truncateForContext(question, 2000),
+        answer:   truncateForContext(answer, 2000)
+      };
+    }
+    if (searchMode === 'flow-debug') {
+      var output = document.getElementById('sfnav-flowdebug-output');
+      if (!output || output.style.display === 'none') return null;
+      var summaryNode = output.querySelector('.sfnav-flowdebug-summary .sfnav-flowdebug-body');
+      var causeNode   = output.querySelector('.sfnav-flowdebug-cause .sfnav-flowdebug-body');
+      var summary = summaryNode ? (summaryNode.textContent || '').trim() : '';
+      var cause   = causeNode   ? (causeNode.textContent   || '').trim() : '';
+      if (!summary && !cause) return null;
+      var expEl = document.getElementById('sfnav-flowdebug-expectation');
+      var expectation = expEl ? (expEl.value || '').trim() : '';
+      var flowId = (typeof getFlowIdFromUrl === 'function') ? (getFlowIdFromUrl() || null) : null;
+      return {
+        mode: 'flow-debug',
+        flowId: flowId,
+        expectation: truncateForContext(expectation, 500),
+        summary: truncateForContext(summary, 2000),
+        cause:   truncateForContext(cause, 2000)
+      };
+    }
+    return null;
+  }
+
+  function renderFeedbackContextChip() {
+    var el = document.getElementById('sfnav-feedback-context');
+    if (!el) return;
+    if (!feedbackContext) {
+      el.style.display = 'none';
+      el.innerHTML = '';
+      return;
+    }
+    var actionLabel = '';
+    var snippet = '';
+    if (feedbackContext.mode === 'soql') {
+      actionLabel = 'Attaching your SOQL query';
+      snippet = feedbackContext.prompt || feedbackContext.soql || '';
+    } else if (feedbackContext.mode === 'ask') {
+      actionLabel = 'Attaching your @ask conversation';
+      snippet = feedbackContext.question || feedbackContext.answer || '';
+    } else if (feedbackContext.mode === 'flow-debug') {
+      actionLabel = 'Attaching your debug analysis';
+      snippet = feedbackContext.summary || feedbackContext.flowId || '';
+    } else {
+      actionLabel = 'Attaching context';
+    }
+    if (snippet.length > 70) snippet = snippet.slice(0, 69) + '…';
+    el.innerHTML =
+      '<span class="sfnav-feedback-ctx-icon" aria-hidden="true"></span>' +
+      '<span class="sfnav-feedback-ctx-text">' +
+        '<span class="sfnav-feedback-ctx-label">' + esc(actionLabel) + '</span>' +
+        (snippet ? '<span class="sfnav-feedback-ctx-snippet">' + esc(snippet) + '</span>' : '') +
+      '</span>' +
+      '<button class="sfnav-feedback-ctx-x" type="button" title="Don’t attach" aria-label="Don’t attach">×</button>';
+    el.style.display = 'flex';
+    var xBtn = el.querySelector('.sfnav-feedback-ctx-x');
+    if (xBtn) xBtn.onclick = function () {
+      feedbackContext = null;
+      renderFeedbackContextChip();
+      var msg = document.getElementById('sfnav-feedback-message');
+      if (msg) msg.focus();
+    };
+  }
+
+  function enterFeedbackMode() {
+    feedbackContext = captureFeedbackContext();
+    hideSoqlPanel();
+    searchMode = 'feedback';
+    setFooterHints('feedback');
+    var input = document.getElementById('sfnav-input');
+    input.value = '';
+    input.placeholder = 'Send feedback to the Skipper team';
+    document.getElementById('sfnav-results').style.display = 'none';
+    var hintEl = document.getElementById('sfnav-hint');
+    hintEl.textContent = '';
+    hintEl.style.display = 'none';
+    document.getElementById('sfnav-breadcrumb').innerHTML = renderBreadcrumbHtml([{ text: 'Feedback' }]);
+    document.getElementById('sfnav-breadcrumb').style.display = 'flex';
+    document.getElementById('sfnav-feedback').style.display = 'flex';
+
+    var statusEl = document.getElementById('sfnav-feedback-status');
+    statusEl.textContent = '';
+    statusEl.className = '';
+
+    var msgEl = document.getElementById('sfnav-feedback-message');
+    var emailEl = document.getElementById('sfnav-feedback-email');
+    msgEl.value = '';
+
+    chrome.storage.local.get('sfnavOptions', function (data) {
+      var opts = (data && data.sfnavOptions) || {};
+      var savedEmail = (opts.skipper && opts.skipper.email) || opts.feedbackEmail || '';
+      if (savedEmail && !emailEl.value) emailEl.value = savedEmail;
+    });
+
+    document.getElementById('sfnav-feedback-send').onclick = runFeedbackSubmit;
+
+    renderFeedbackContextChip();
+
+    msgEl.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        runFeedbackSubmit();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        handleBack();
+      }
+    });
+    emailEl.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        runFeedbackSubmit();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        handleBack();
+      }
+    });
+
+    msgEl.focus();
+  }
+
+  function runFeedbackSubmit() {
+    if (feedbackInFlight) return;
+    var msgEl = document.getElementById('sfnav-feedback-message');
+    var emailEl = document.getElementById('sfnav-feedback-email');
+    var statusEl = document.getElementById('sfnav-feedback-status');
+    var btn = document.getElementById('sfnav-feedback-send');
+
+    var message = msgEl.value.trim();
+    if (!message) {
+      statusEl.textContent = 'Type something first.';
+      statusEl.className = 'sfnav-soql-status-error';
+      msgEl.focus();
+      return;
+    }
+
+    feedbackInFlight = true;
+    btn.disabled = true;
+    msgEl.disabled = true;
+    emailEl.disabled = true;
+    statusEl.textContent = 'Sending';
+    statusEl.className = 'sfnav-soql-status-loading sfnav-progress-dots';
+
+    var email = emailEl.value.trim();
+    sendFeedback(message, email, feedbackContext).then(function () {
+      // Remember the email so the next feedback round doesn't ask again.
+      if (email) {
+        chrome.storage.local.get('sfnavOptions', function (data) {
+          var opts = (data && data.sfnavOptions) || {};
+          opts.feedbackEmail = email;
+          chrome.storage.local.set({ sfnavOptions: opts });
+        });
+      }
+      statusEl.textContent = 'Thanks — sent.';
+      statusEl.className = 'sfnav-soql-status-ok';
+      msgEl.value = '';
+      msgEl.disabled = false;
+      emailEl.disabled = false;
+      btn.disabled = false;
+      feedbackInFlight = false;
+      feedbackContext = null;
+      renderFeedbackContextChip();
+    }).catch(function (err) {
+      statusEl.textContent = 'Could not send: ' + err.message;
+      statusEl.className = 'sfnav-soql-status-error';
+      msgEl.disabled = false;
+      emailEl.disabled = false;
+      btn.disabled = false;
+      feedbackInFlight = false;
+    });
+  }
+
   function hideSoqlPanel() {
     var soqlEl = document.getElementById('sfnav-soql');
     if (soqlEl) soqlEl.style.display = 'none';
@@ -1129,8 +1371,12 @@
     if (fdEl) fdEl.style.display = 'none';
     var askEl = document.getElementById('sfnav-ask');
     if (askEl) askEl.style.display = 'none';
+    var fbEl = document.getElementById('sfnav-feedback');
+    if (fbEl) fbEl.style.display = 'none';
     var resultsEl = document.getElementById('sfnav-results');
     if (resultsEl) resultsEl.style.display = '';
+    var hintEl = document.getElementById('sfnav-hint');
+    if (hintEl) hintEl.style.display = '';
   }
 
   function hidePalette() {
