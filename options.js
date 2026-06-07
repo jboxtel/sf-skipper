@@ -359,6 +359,55 @@ replayEl.addEventListener('click', async function () {
   });
 });
 
+// ─── Feedback ───────────────────────────────────────────────────────────────
+
+var fbSendEl = document.getElementById('fbSend');
+var fbMessageEl = document.getElementById('fbMessage');
+var fbEmailEl = document.getElementById('fbEmail');
+var fbStatusEl = document.getElementById('fbStatus');
+
+chrome.storage.local.get('sfnavOptions', function (data) {
+  var opts = (data && data.sfnavOptions) || {};
+  var saved = (opts.skipper && opts.skipper.email) || opts.feedbackEmail || '';
+  if (saved && fbEmailEl && !fbEmailEl.value) fbEmailEl.value = saved;
+});
+
+function setFbStatus(text, kind) {
+  if (!fbStatusEl) return;
+  fbStatusEl.textContent = text || '';
+  fbStatusEl.className = kind ? ('walk-status ' + kind) : '';
+}
+
+if (fbSendEl) {
+  fbSendEl.addEventListener('click', function () {
+    var message = (fbMessageEl.value || '').trim();
+    if (!message) { setFbStatus('Type something first.', 'err'); fbMessageEl.focus(); return; }
+    if (message.length > 4000) { setFbStatus('Too long — keep it under 4000 characters.', 'err'); return; }
+
+    var email = (fbEmailEl.value || '').trim();
+    var manifest = chrome.runtime.getManifest();
+    var payload = {
+      message: message,
+      email: email || null,
+      url_host: null,
+      extension_ver: manifest.version,
+      user_agent: navigator.userAgent
+    };
+
+    fbSendEl.disabled = true;
+    setFbStatus('Sending…', 'loading');
+
+    chrome.runtime.sendMessage({ type: 'feedback.submit', payload: payload }, function (resp) {
+      fbSendEl.disabled = false;
+      if (chrome.runtime.lastError) { setFbStatus('Error: ' + chrome.runtime.lastError.message, 'err'); return; }
+      if (!resp || !resp.ok) { setFbStatus('Could not send: ' + ((resp && resp.error) || 'unknown'), 'err'); return; }
+      if (email) mergeOptions({ feedbackEmail: email });
+      fbMessageEl.value = '';
+      setFbStatus('Thanks — sent.', 'ok');
+    });
+  });
+}
+
 function mergeOptions(patch) {
   return new Promise(function (resolve) {
     chrome.storage.local.get('sfnavOptions', function (data) {

@@ -134,6 +134,63 @@ async function handleAskMessageStep(req, sendResponse) {
   }
 }
 
+// Forward a feedback payload to Supabase REST. The anon key + RLS handle
+// authorization: the policy on `feedback` allows INSERT for both anon and
+// authenticated, with WITH CHECK constraints preventing user_id spoofing.
+// If the user is signed in to Skipper, attach their access token as Bearer
+// so PostgREST treats the request as `authenticated` and auth.uid() works.
+async function handleFeedbackSubmit(req, sendResponse) {
+  try {
+    var SUPABASE_URL = 'https://bdfndqbnuganvfdgtvcg.supabase.co';
+    var SUPABASE_ANON_KEY = 'sb_publishable_Kt9RftY4MGU_QAkdjCzx-A_qij1Zl4F';
+
+    var opts = await loadOpts();
+    var skipper = opts.skipper || {};
+    var nowSec = Math.floor(Date.now() / 1000);
+    // Only attach a user JWT if it exists and isn't expired. A stale token
+    // would otherwise cause PostgREST to 401 with PGRST303 (JWT expired).
+    // Leave a 30s safety window so we don't send tokens that expire mid-flight.
+    var accessToken = (skipper.accessToken && skipper.expiresAt && skipper.expiresAt > nowSec + 30)
+      ? skipper.accessToken
+      : null;
+
+    var body = {
+      message: req.payload.message,
+      email: req.payload.email,
+      url_host: req.payload.url_host,
+      extension_ver: req.payload.extension_ver,
+      user_agent: req.payload.user_agent
+    };
+    if (req.payload.context && typeof req.payload.context === 'object') {
+      body.context = req.payload.context;
+    }
+    if (accessToken && skipper.userId) body.user_id = skipper.userId;
+
+    var headers = {
+      'Content-Type': 'application/json',
+      'apikey': SUPABASE_ANON_KEY,
+      'Prefer': 'return=minimal'
+    };
+    if (accessToken) headers['Authorization'] = 'Bearer ' + accessToken;
+
+    var resp = await fetch(SUPABASE_URL + '/rest/v1/feedback', {
+      method: 'POST',
+      headers: headers,
+      body: JSON.stringify(body)
+    });
+    if (!resp.ok) {
+      var text = '';
+      try { text = await resp.text(); } catch (e) {}
+      sendResponse({ ok: false, error: 'HTTP ' + resp.status + (text ? ': ' + text : '') });
+      return;
+    }
+    sendResponse({ ok: true });
+  } catch (err) {
+    console.error('sfnav: feedback submit failed', err);
+    sendResponse({ ok: false, error: err.message });
+  }
+}
+
 async function handleProviderTest(req, sendResponse) {
   try {
     // Caller may pass a transient opts override so the user can test without
@@ -169,6 +226,10 @@ chrome.runtime.onMessage.addListener(function (req, sender, sendResponse) {
   }
   if (req.type === 'provider.test') {
     handleProviderTest(req, sendResponse);
+    return true;
+  }
+  if (req.type === 'feedback.submit' && req.payload) {
+    handleFeedbackSubmit(req, sendResponse);
     return true;
   }
   if (req.type === 'openOptions') {
@@ -219,7 +280,7 @@ async function openPaletteInTab(tab) {
     await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       world: 'ISOLATED',
-      files: ['salesforce-urls.js', 'shared.js', 'cache-factory.js', 'objects.js', 'cmdt.js', 'flows.js', 'apps.js', 'labels.js', 'permsets.js', 'flow-debug.js', 'commands.js', 'soql.js', 'ask.js', 'markdown.js', 'onboarding.js', 'content.js'],
+      files: ['salesforce-urls.js', 'shared.js', 'cache-factory.js', 'objects.js', 'cmdt.js', 'flows.js', 'apps.js', 'labels.js', 'permsets.js', 'flow-debug.js', 'commands.js', 'soql.js', 'ask.js', 'feedback.js', 'markdown.js', 'onboarding.js', 'content.js'],
     });
     await new Promise(r => setTimeout(r, 80));
     await chrome.scripting.executeScript({
