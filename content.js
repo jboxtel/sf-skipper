@@ -134,6 +134,33 @@
     return null;
   }
 
+  // Used by the @soql, @debug, and @ask panels for their "API key connected /
+  // configure in settings" status pill above the input.
+  function renderApiKeyStat(elId) {
+    hasSoqlApiKey().then(function (ok) {
+      var el = document.getElementById(elId);
+      if (!el) return;
+      if (ok) {
+        el.textContent = 'API key connected';
+        el.className = 'sfnav-apistat sfnav-apistat-ok';
+      } else {
+        el.innerHTML = 'No API key — <a href="#" class="sfnav-settings-link">configure in settings</a>';
+        el.className = 'sfnav-apistat sfnav-apistat-missing';
+        var link = el.querySelector('.sfnav-settings-link');
+        if (link) link.onclick = function (e) { e.preventDefault(); openSoqlSettings(); };
+      }
+    });
+  }
+
+  // Used by the same three panels' run handlers when the user hits Enter with
+  // no key configured.
+  function showApiKeyMissing(statusEl, errorClass) {
+    statusEl.innerHTML = 'No API key configured. <a href="#" class="sfnav-settings-link">Open settings</a>.';
+    statusEl.className = errorClass;
+    var link = statusEl.querySelector('.sfnav-settings-link');
+    if (link) link.onclick = function (e) { e.preventDefault(); openSoqlSettings(); };
+  }
+
   function injectPalette() {
     if (document.getElementById('sfnav-overlay')) return;
 
@@ -460,19 +487,7 @@
       document.getElementById('sfnav-input').focus();
     };
 
-    hasSoqlApiKey().then(function (ok) {
-      var el = document.getElementById('sfnav-soql-apistat');
-      if (!el) return;
-      if (ok) {
-        el.textContent = 'API key connected';
-        el.className = 'sfnav-apistat sfnav-apistat-ok';
-      } else {
-        el.innerHTML = 'No API key — <a href="#" class="sfnav-settings-link">configure in settings</a>';
-        el.className = 'sfnav-apistat sfnav-apistat-missing';
-        var link = el.querySelector('.sfnav-settings-link');
-        if (link) link.onclick = function (e) { e.preventDefault(); openSoqlSettings(); };
-      }
-    });
+    renderApiKeyStat('sfnav-soql-apistat');
 
     input.focus();
   }
@@ -489,11 +504,8 @@
 
     var hasKey = await hasSoqlApiKey();
     if (!hasKey) {
-      statusEl.innerHTML = 'No API key configured. <a href="#" class="sfnav-settings-link">Open settings</a>.';
-      statusEl.className = 'sfnav-soql-status-error';
       actionsEl.style.display = 'none';
-      var link = statusEl.querySelector('.sfnav-settings-link');
-      if (link) link.onclick = function (e) { e.preventDefault(); openSoqlSettings(); };
+      showApiKeyMissing(statusEl, 'sfnav-soql-status-error');
       return;
     }
 
@@ -689,19 +701,7 @@
         });
     }
 
-    hasSoqlApiKey().then(function (ok) {
-      var el = document.getElementById('sfnav-flowdebug-apistat');
-      if (!el) return;
-      if (ok) {
-        el.textContent = 'API key connected';
-        el.className = 'sfnav-apistat sfnav-apistat-ok';
-      } else {
-        el.innerHTML = 'No API key — <a href="#" class="sfnav-settings-link">configure in settings</a>';
-        el.className = 'sfnav-apistat sfnav-apistat-missing';
-        var link = el.querySelector('.sfnav-settings-link');
-        if (link) link.onclick = function (e) { e.preventDefault(); openSoqlSettings(); };
-      }
-    });
+    renderApiKeyStat('sfnav-flowdebug-apistat');
 
     document.getElementById('sfnav-flowdebug-run').onclick = runFlowDebugAnalysis;
 
@@ -756,10 +756,7 @@
 
     var hasKey = await hasSoqlApiKey();
     if (!hasKey) {
-      statusEl.innerHTML = 'No API key configured. <a href="#" class="sfnav-settings-link">Open settings</a>.';
-      statusEl.className = 'sfnav-flowdebug-status-error';
-      var link = statusEl.querySelector('.sfnav-settings-link');
-      if (link) link.onclick = function (e) { e.preventDefault(); openSoqlSettings(); };
+      showApiKeyMissing(statusEl, 'sfnav-flowdebug-status-error');
       return;
     }
 
@@ -885,19 +882,7 @@
       metaEl.textContent = '';
     }
 
-    hasSoqlApiKey().then(function (ok) {
-      var el = document.getElementById('sfnav-ask-apistat');
-      if (!el) return;
-      if (ok) {
-        el.textContent = 'API key connected';
-        el.className = 'sfnav-apistat sfnav-apistat-ok';
-      } else {
-        el.innerHTML = 'No API key — <a href="#" class="sfnav-settings-link">configure in settings</a>';
-        el.className = 'sfnav-apistat sfnav-apistat-missing';
-        var link = el.querySelector('.sfnav-settings-link');
-        if (link) link.onclick = function (e) { e.preventDefault(); openSoqlSettings(); };
-      }
-    });
+    renderApiKeyStat('sfnav-ask-apistat');
 
     document.getElementById('sfnav-ask-run').onclick = runAskQuery;
 
@@ -932,10 +917,7 @@
 
     var hasKey = await hasSoqlApiKey();
     if (!hasKey) {
-      statusEl.innerHTML = 'No API key configured. <a href="#" class="sfnav-settings-link">Open settings</a>.';
-      statusEl.className = 'sfnav-ask-status-error';
-      var link = statusEl.querySelector('.sfnav-settings-link');
-      if (link) link.onclick = function (e) { e.preventDefault(); openSoqlSettings(); };
+      showApiKeyMissing(statusEl, 'sfnav-ask-status-error');
       return;
     }
 
