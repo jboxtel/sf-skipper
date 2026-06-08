@@ -118,7 +118,8 @@ var versionEl        = document.getElementById('version');
 var state = {
   provider: 'gemini',
   providers: { gemini: {}, anthropic: {}, openai: {} },
-  openInNewTab: true
+  openInNewTab: true,
+  skipper: null
 };
 
 // ─── Version stamp ──────────────────────────────────────────────────────────
@@ -151,9 +152,48 @@ chrome.storage.local.get('sfnavOptions', function (data) {
 
   state.openInNewTab = opts.openInNewTab !== false;
   setToggle(openInToggleEl, state.openInNewTab);
+  state.skipper = opts.skipper || null;
 
   renderProvider();
+  refreshSkipperQuota();
 });
+
+// Re-render when storage changes — proxy responses update sfnavOptions.skipper.quota
+// after every call, and the Account section may toggle signed-in state.
+if (chrome.storage && chrome.storage.onChanged) {
+  chrome.storage.onChanged.addListener(function (changes, area) {
+    if (area !== 'local' || !changes.sfnavOptions) return;
+    var newOpts = changes.sfnavOptions.newValue || {};
+    state.skipper = newOpts.skipper || null;
+    updateProviderSummary();
+  });
+}
+
+// Pull a fresh quota snapshot when the Options page opens. Header-driven
+// cache on proxy responses keeps the count live during a session; this is
+// the cold-start path.
+var SKIPPER_BACKEND_URL = 'http://localhost:3000';
+function refreshSkipperQuota() {
+  var skipper = state.skipper || {};
+  if (!skipper.accessToken) return;
+  // Skip if BYOK is set — the Free+ subtitle won't show anyway.
+  var entry = state.providers[state.provider] || {};
+  if (entry.apiKey) return;
+  fetch(SKIPPER_BACKEND_URL + '/api/quota', {
+    headers: { 'Authorization': 'Bearer ' + skipper.accessToken }
+  }).then(function (r) { return r.ok ? r.json() : null; }).then(function (q) {
+    if (!q) return;
+    var nextQuota = {};
+    Object.keys(q.limits || {}).forEach(function (feat) {
+      var lim = q.limits[feat];
+      var used = (q.used && q.used[feat]) || 0;
+      if (typeof lim === 'number') {
+        nextQuota[feat] = { remaining: Math.max(0, lim - used), limit: lim, ts: Date.now() };
+      }
+    });
+    mergeOptions({ skipper: Object.assign({}, skipper, { quota: nextQuota }) });
+  }).catch(function () { /* offline; subtitle just stays without count */ });
+}
 
 // ─── Expand/collapse rows ───────────────────────────────────────────────────
 
@@ -277,14 +317,26 @@ function updateProviderSummary() {
   if (!providerSummaryEl) return;
   var p = PROVIDERS[state.provider];
   var entry = state.providers[state.provider] || {};
-  if (!entry.apiKey) {
-    providerSummaryEl.textContent = 'Not configured';
+  if (entry.apiKey) {
+    var modelId = entry.model || p.defaultModel;
+    var modelMeta = p.models.find(function (m) { return m.id === modelId; });
+    var modelLabel = modelMeta ? modelMeta.label.split(' (')[0] : modelId;
+    providerSummaryEl.textContent = p.productName + ' · ' + modelLabel;
     return;
   }
-  var modelId = entry.model || p.defaultModel;
-  var modelMeta = p.models.find(function (m) { return m.id === modelId; });
-  var modelLabel = modelMeta ? modelMeta.label.split(' (')[0] : modelId;
-  providerSummaryEl.textContent = p.productName + ' · ' + modelLabel;
+  // No BYOK key. If signed in, the row represents the Skipper Free tier.
+  var skipper = state.skipper || {};
+  if (skipper.accessToken) {
+    var quota = skipper.quota || {};
+    var soql = quota.soql;
+    var bits = ['Skipper Free', 'Haiku 4.5'];
+    if (soql && typeof soql.remaining === 'number' && typeof soql.limit === 'number') {
+      bits.push(soql.remaining + '/' + soql.limit + ' @soql left');
+    }
+    providerSummaryEl.textContent = bits.join(' · ');
+    return;
+  }
+  providerSummaryEl.textContent = 'Not configured';
 }
 
 function validateKeyFormat() {

@@ -134,28 +134,71 @@
     return null;
   }
 
-  // Used by the @soql, @debug, and @ask panels for their "API key connected /
-  // configure in settings" status pill above the input.
-  function renderApiKeyStat(elId) {
-    hasSoqlApiKey().then(function (ok) {
+  // Used by the @soql, @debug, and @ask panels for the status pill above the
+  // input. Shows one of:
+  //   BYOK:            "API key connected"
+  //   Free+ (allowed): "Skipper Free · 17/20 left"  (or "Skipper Free" when
+  //                                                   quota hasn't been seen yet)
+  //   Free+ (not on tier): "BYOK required for @ask"
+  //   Neither:         "No API key — configure in settings"
+  function renderApiKeyStat(elId, feature) {
+    feature = feature || 'soql';
+    canCallAi(feature).then(function (r) {
       var el = document.getElementById(elId);
       if (!el) return;
-      if (ok) {
+
+      if (r.ok && r.mode === 'byok') {
         el.textContent = 'API key connected';
         el.className = 'sfnav-apistat sfnav-apistat-ok';
-      } else {
-        el.innerHTML = 'No API key — <a href="#" class="sfnav-settings-link">configure in settings</a>';
-        el.className = 'sfnav-apistat sfnav-apistat-missing';
-        var link = el.querySelector('.sfnav-settings-link');
-        if (link) link.onclick = function (e) { e.preventDefault(); openSoqlSettings(); };
+        return;
       }
+      if (r.ok && r.mode === 'free') {
+        var label = 'Skipper Free';
+        if (r.quota && typeof r.quota.remaining === 'number' && typeof r.quota.limit === 'number') {
+          label += ' · ' + r.quota.remaining + '/' + r.quota.limit + ' left';
+        }
+        el.textContent = label;
+        el.className = 'sfnav-apistat sfnav-apistat-ok';
+        return;
+      }
+      if (!r.ok && r.mode === 'free' && r.reason === 'not_on_tier') {
+        el.innerHTML = 'BYOK required for @' + feature + ' — <a href="#" class="sfnav-settings-link">add a key</a>';
+        el.className = 'sfnav-apistat sfnav-apistat-missing';
+        var l1 = el.querySelector('.sfnav-settings-link');
+        if (l1) l1.onclick = function (e) { e.preventDefault(); openSoqlSettings(); };
+        return;
+      }
+      el.innerHTML = 'No API key — <a href="#" class="sfnav-settings-link">configure in settings</a>';
+      el.className = 'sfnav-apistat sfnav-apistat-missing';
+      var l2 = el.querySelector('.sfnav-settings-link');
+      if (l2) l2.onclick = function (e) { e.preventDefault(); openSoqlSettings(); };
     });
   }
 
-  // Used by the same three panels' run handlers when the user hits Enter with
-  // no key configured.
-  function showApiKeyMissing(statusEl, errorClass) {
-    statusEl.innerHTML = 'No API key configured. <a href="#" class="sfnav-settings-link">Open settings</a>.';
+  // Run-handler pre-flight when canCallAi says "no". Renders feature-aware
+  // copy: "BYOK required for @ask" vs. generic "No API key configured."
+  function showAiUnavailable(statusEl, errorClass, feature, reason) {
+    var msg;
+    if (reason === 'not_on_tier') {
+      msg = '@' + feature + ' is not on the Skipper Free tier. ';
+    } else {
+      msg = 'No API key configured. ';
+    }
+    statusEl.innerHTML = msg + '<a href="#" class="sfnav-settings-link">Open settings</a>.';
+    statusEl.className = errorClass;
+    var link = statusEl.querySelector('.sfnav-settings-link');
+    if (link) link.onclick = function (e) { e.preventDefault(); openSoqlSettings(); };
+  }
+
+  // Catch-block helper. If err.skipperCode is set (quota, kill-switch,
+  // session-expired) we render a tailored message with a settings link.
+  function renderAiError(statusEl, errorClass, err) {
+    if (!err || !err.skipperCode) {
+      statusEl.textContent = 'Error: ' + ((err && err.message) || 'unknown');
+      statusEl.className = errorClass;
+      return;
+    }
+    statusEl.innerHTML = (err.message || 'Error') + ' <a href="#" class="sfnav-settings-link">Open settings</a>.';
     statusEl.className = errorClass;
     var link = statusEl.querySelector('.sfnav-settings-link');
     if (link) link.onclick = function (e) { e.preventDefault(); openSoqlSettings(); };
@@ -487,7 +530,7 @@
       document.getElementById('sfnav-input').focus();
     };
 
-    renderApiKeyStat('sfnav-soql-apistat');
+    renderApiKeyStat('sfnav-soql-apistat', 'soql');
 
     input.focus();
   }
@@ -502,10 +545,10 @@
     var outputEl = document.getElementById('sfnav-soql-output');
     var actionsEl = document.getElementById('sfnav-soql-actions');
 
-    var hasKey = await hasSoqlApiKey();
-    if (!hasKey) {
+    var access = await canCallAi('soql');
+    if (!access.ok) {
       actionsEl.style.display = 'none';
-      showApiKeyMissing(statusEl, 'sfnav-soql-status-error');
+      showAiUnavailable(statusEl, 'sfnav-soql-status-error', 'soql', access.reason);
       return;
     }
 
@@ -531,9 +574,10 @@
       actionsEl.style.display = 'flex';
       addToSoqlHistory({ prompt: prompt, soql: result.soql, objectName: result.objectName }).then(renderSoqlHistory);
     } catch (err) {
-      statusEl.textContent = 'Error: ' + err.message;
-      statusEl.className = 'sfnav-soql-status-error';
+      renderAiError(statusEl, 'sfnav-soql-status-error', err);
       actionsEl.style.display = 'none';
+      // Refresh the connected-status pill so quota count moves down on 402.
+      renderApiKeyStat('sfnav-soql-apistat', 'soql');
       console.warn('sfnav: SOQL generation failed —', err);
     } finally {
       soqlInFlight = false;
@@ -701,7 +745,7 @@
         });
     }
 
-    renderApiKeyStat('sfnav-flowdebug-apistat');
+    renderApiKeyStat('sfnav-flowdebug-apistat', 'debug');
 
     document.getElementById('sfnav-flowdebug-run').onclick = runFlowDebugAnalysis;
 
@@ -754,9 +798,9 @@
       return;
     }
 
-    var hasKey = await hasSoqlApiKey();
-    if (!hasKey) {
-      showApiKeyMissing(statusEl, 'sfnav-flowdebug-status-error');
+    var access = await canCallAi('debug');
+    if (!access.ok) {
+      showAiUnavailable(statusEl, 'sfnav-flowdebug-status-error', 'debug', access.reason);
       return;
     }
 
@@ -776,9 +820,9 @@
         : 'Done';
       statusEl.className = 'sfnav-flowdebug-status-ok';
     } catch (err) {
-      statusEl.textContent = 'Error: ' + err.message;
-      statusEl.className = 'sfnav-flowdebug-status-error';
+      renderAiError(statusEl, 'sfnav-flowdebug-status-error', err);
       outputEl.style.display = 'none';
+      renderApiKeyStat('sfnav-flowdebug-apistat', 'debug');
       console.warn('sfnav: flow-debug analysis failed —', err);
     } finally {
       flowDebugInFlight = false;
@@ -882,7 +926,7 @@
       metaEl.textContent = '';
     }
 
-    renderApiKeyStat('sfnav-ask-apistat');
+    renderApiKeyStat('sfnav-ask-apistat', 'ask');
 
     document.getElementById('sfnav-ask-run').onclick = runAskQuery;
 
@@ -915,9 +959,9 @@
       return;
     }
 
-    var hasKey = await hasSoqlApiKey();
-    if (!hasKey) {
-      showApiKeyMissing(statusEl, 'sfnav-ask-status-error');
+    var access = await canCallAi('ask');
+    if (!access.ok) {
+      showAiUnavailable(statusEl, 'sfnav-ask-status-error', 'ask', access.reason);
       return;
     }
 
@@ -994,9 +1038,9 @@
       statusEl.className = 'sfnav-ask-status-ok';
     } catch (err) {
       restoreOverlay();
-      statusEl.textContent = 'Error: ' + err.message;
-      statusEl.className = 'sfnav-ask-status-error';
+      renderAiError(statusEl, 'sfnav-ask-status-error', err);
       outputEl.style.display = 'none';
+      renderApiKeyStat('sfnav-ask-apistat', 'ask');
       console.warn('sfnav: ask failed —', err);
     } finally {
       askInFlight = false;

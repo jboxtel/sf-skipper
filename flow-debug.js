@@ -566,7 +566,8 @@ async function analyzeFlowDebug(flowId, debugText, expectation) {
     parsed = await callClaude(sysPrompt, userMsg, {
       cacheSystem: true,
       tools: [FLOW_DEBUG_TOOL],
-      toolChoice: { type: 'tool', name: FLOW_DEBUG_TOOL.name }
+      toolChoice: { type: 'tool', name: FLOW_DEBUG_TOOL.name },
+      feature: 'debug'
     });
     if (!Array.isArray(parsed.fix)) parsed.fix = [];
 

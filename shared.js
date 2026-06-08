@@ -86,6 +86,49 @@ async function sfRestPreamble() {
 //     resolves to the tool's parsed input object (already a JS object) instead
 //     of a string. Use this whenever you need a JSON-shaped response — far
 //     more robust than asking the model to emit JSON and then JSON.parse-ing.
+// Returns whether the user can invoke an AI feature, and how. Shape:
+//   { ok: true,  mode: 'byok' }                       — has API key (any feature)
+//   { ok: true,  mode: 'free', quota: {remaining,limit} | null }
+//                                                     — signed in to Skipper, feature is on Free+
+//   { ok: false, mode: 'free', reason: 'not_on_tier' } — signed in, but feature is BYOK-only
+//   { ok: false, mode: 'none', reason: 'no_key'      } — neither key nor session
+//
+// quota.remaining/limit come from the cached headers of the last proxy call
+// (cacheSkipperQuota in providers.js); it's optional — null means "we haven't
+// seen a response yet, defer to the proxy."
+function canCallAi(feature) {
+  feature = feature || 'soql';
+  var ASK_ALLOWED_ON_FREE = false; // matches backend tier.js limits.ask = 0
+  return new Promise(function (resolve) {
+    if (typeof chrome === 'undefined' || !chrome.storage) {
+      resolve({ ok: false, mode: 'none', reason: 'no_key' });
+      return;
+    }
+    chrome.storage.local.get('sfnavOptions', function (data) {
+      var opts = data.sfnavOptions || {};
+      // BYOK: legacy shape OR active provider has a key
+      if (opts.anthropicApiKey) { resolve({ ok: true, mode: 'byok' }); return; }
+      var active = opts.provider || 'gemini';
+      var p = (opts.providers && opts.providers[active]) || {};
+      if (p.apiKey) { resolve({ ok: true, mode: 'byok' }); return; }
+
+      // Free+: signed in to Skipper, feature allowed on tier
+      var skipper = opts.skipper || {};
+      if (skipper.accessToken) {
+        if (feature === 'ask' && !ASK_ALLOWED_ON_FREE) {
+          resolve({ ok: false, mode: 'free', reason: 'not_on_tier' });
+          return;
+        }
+        var quota = (skipper.quota || {})[feature] || null;
+        resolve({ ok: true, mode: 'free', quota: quota });
+        return;
+      }
+
+      resolve({ ok: false, mode: 'none', reason: 'no_key' });
+    });
+  });
+}
+
 function callClaude(systemPrompt, userMessage, opts) {
   opts = opts || {};
   return new Promise(function (resolve, reject) {
@@ -96,12 +139,21 @@ function callClaude(systemPrompt, userMessage, opts) {
         user: userMessage,
         cacheSystem: !!opts.cacheSystem,
         tools: opts.tools || null,
-        toolChoice: opts.toolChoice || null
+        toolChoice: opts.toolChoice || null,
+        // Free+ quota bucket. Defaults to 'soql' when omitted so existing
+        // callers (soql.js) keep working without modification; flow-debug.js
+        // passes 'debug' explicitly.
+        feature: opts.feature || 'soql'
       },
       function (resp) {
         if (chrome.runtime.lastError) { reject(new Error(chrome.runtime.lastError.message)); return; }
         if (!resp) { reject(new Error('No response from background')); return; }
-        if (!resp.ok) { reject(new Error(resp.error || 'Unknown error')); return; }
+        if (!resp.ok) {
+          var err = new Error(resp.error || 'Unknown error');
+          if (resp.skipperCode) err.skipperCode = resp.skipperCode;
+          reject(err);
+          return;
+        }
         if (opts.tools && opts.tools.length) {
           if (!resp.toolInput) { reject(new Error('Model did not call the requested tool')); return; }
           resolve(resp.toolInput);

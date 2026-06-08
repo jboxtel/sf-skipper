@@ -46,11 +46,26 @@ function missingKeyError(providerName) {
   return 'No ' + label + ' API key configured. Open the extension Options and paste your key.';
 }
 
+// Free+ proxy endpoint. Dev points at the local backend; prod URL lands when
+// the domain does and gets added to manifest host_permissions alongside this.
+var SKIPPER_PROXY_BASE = 'http://localhost:3000';
+var SKIPPER_PROXY_URL = SKIPPER_PROXY_BASE + '/api/proxy/anthropic';
+
+var FREE_TIER_FEATURES = { soql: 1, debug: 1, ask: 1 };
+
 // ─── Public entry point ─────────────────────────────────────────────────────
 // `body` is Anthropic-shaped: { system, messages, tools, tool_choice, max_tokens, model }
+// Plus an optional `skipperFeature` ('soql' | 'debug' | 'ask') that selects the
+// Free+ quota bucket when the call is routed through Skipper.
 // Returns Anthropic-shaped { content, stop_reason }.
 async function providerMessageStep(opts, body) {
   var resolved = resolveProvider(opts);
+
+  // Routed path: signed in, no BYOK key for the active provider.
+  if (!resolved.apiKey && opts && opts.skipper && opts.skipper.accessToken) {
+    return callSkipperProxy(opts, body);
+  }
+
   if (!resolved.apiKey) throw new Error(missingKeyError(resolved.provider));
   if (!body.model) body.model = resolved.model;
   if (!body.max_tokens) body.max_tokens = 2048;
@@ -68,6 +83,99 @@ async function providerMessageStep(opts, body) {
   if (resolved.provider === 'openai')    return callOpenAI(resolved, body);
   if (resolved.provider === 'gemini')    return callGemini(resolved, body);
   throw new Error('Unknown provider: ' + resolved.provider);
+}
+
+// ─── Skipper Free+ proxy ────────────────────────────────────────────────────
+// The backend gates on quota + tier, overrides body.model to Haiku, and
+// forwards to Anthropic. Errors map to typed Errors so the panels can render
+// them distinctly:
+//   .skipperCode = 'over_quota'         (HTTP 402) — show usage + upgrade
+//   .skipperCode = 'feature_not_on_tier'(HTTP 403) — show BYOK-required
+//   .skipperCode = 'kill_switch_active' (HTTP 503) — show "paused, try later"
+//   .skipperCode = 'session_expired'    (HTTP 401) — prompt re-sign-in
+
+async function callSkipperProxy(opts, body) {
+  var feature = (body && body.skipperFeature) || 'soql';
+  if (!FREE_TIER_FEATURES[feature]) feature = 'soql';
+
+  var session = await SkipperAuth.getValidSession();
+  if (!session || !session.accessToken) {
+    var sessErr = new Error('Your Skipper session expired. Sign in again from Options.');
+    sessErr.skipperCode = 'session_expired';
+    throw sessErr;
+  }
+
+  // Strip our private hint so it doesn't ride along to Anthropic.
+  var sendBody = Object.assign({}, body);
+  delete sendBody.skipperFeature;
+  if (!sendBody.max_tokens) sendBody.max_tokens = 2048;
+
+  var res = await timedFetch(SKIPPER_PROXY_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer ' + session.accessToken,
+      'X-Skipper-Feature': feature
+    },
+    body: JSON.stringify(sendBody)
+  });
+
+  // Cache live quota off response headers — Options page reads this to render
+  // the "Skipper Free · N/M left" subtitle without a fresh GET /api/quota.
+  var remaining = res.headers.get('X-Skipper-Quota-Remaining');
+  var limit = res.headers.get('X-Skipper-Quota-Limit');
+  if (remaining !== null && limit !== null) {
+    cacheSkipperQuota(feature, parseInt(remaining, 10), parseInt(limit, 10));
+  }
+
+  var raw = await res.text();
+  var parsed = null;
+  try { parsed = JSON.parse(raw); } catch (_) { /* non-JSON, leave null */ }
+
+  if (!res.ok) {
+    var code = (parsed && parsed.error) || ('http_' + res.status);
+    var msg;
+    if (res.status === 402) {
+      var u = (parsed && parsed.used) || 0;
+      var lim = (parsed && parsed.limit) || 0;
+      msg = 'You have used ' + u + '/' + lim + ' free @' + feature + ' calls this month. '
+          + 'Add your own AI key in Options for unlimited.';
+    } else if (res.status === 403 && code === 'feature_not_on_tier') {
+      msg = '@' + feature + ' is not available on the Skipper Free tier. '
+          + 'Add your own AI key in Options to use it.';
+    } else if (res.status === 503) {
+      msg = 'Skipper Free is paused right now. Try again later or add your own AI key in Options.';
+    } else if (res.status === 401) {
+      msg = 'Your Skipper session expired. Sign in again from Options.';
+    } else if (res.status === 502) {
+      msg = 'The AI provider returned an error. Try again in a moment.';
+    } else {
+      msg = (parsed && parsed.error) || ('Proxy ' + res.status);
+    }
+    var err = new Error(msg);
+    err.skipperCode = code;
+    err.status = res.status;
+    err.detail = parsed;
+    throw err;
+  }
+
+  return {
+    content: (parsed && parsed.content) || [],
+    stop_reason: (parsed && parsed.stop_reason) || 'end_turn'
+  };
+}
+
+function cacheSkipperQuota(feature, remaining, limit) {
+  if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) return;
+  chrome.storage.local.get('sfnavOptions', function (data) {
+    var next = Object.assign({}, data.sfnavOptions || {});
+    var skipper = Object.assign({}, next.skipper || {});
+    var quota = Object.assign({}, skipper.quota || {});
+    quota[feature] = { remaining: remaining, limit: limit, ts: Date.now() };
+    skipper.quota = quota;
+    next.skipper = skipper;
+    chrome.storage.local.set({ sfnavOptions: next });
+  });
 }
 
 // ─── Anthropic (passthrough) ────────────────────────────────────────────────

@@ -1,6 +1,8 @@
-// Supabase Auth REST client for Skipper. Loaded by options.html only — the
-// palette banner (content.js) just reads opts.skipper from storage and links
-// out to Options for the actual sign-in flow.
+// Supabase Auth REST client for Skipper. Loaded by:
+//   - options.html (sign-in UI)
+//   - background.js via importScripts (Free+ proxy needs a valid bearer token)
+// Binds to globalThis so it works in both the Options window and the MV3
+// service worker.
 //
 // Email-OTP flow:
 //   requestOtp(email)        Supabase emails a 6-digit code
@@ -120,11 +122,28 @@
     return opts.skipper || null;
   }
 
-  window.SkipperAuth = {
+  // Return a session whose accessToken is good for at least 60 more seconds,
+  // refreshing in-flight if expiry is closer than that. Returns null when no
+  // session exists or refresh fails — caller should treat that as "sign in
+  // again from Options."
+  async function getValidSession() {
+    var skipper = await getSession();
+    if (!skipper || !skipper.accessToken) return null;
+    var nowSec = Math.floor(Date.now() / 1000);
+    if (skipper.expiresAt && skipper.expiresAt > nowSec + 60) return skipper;
+    try {
+      return await refreshSession();
+    } catch (e) {
+      return null;
+    }
+  }
+
+  globalThis.SkipperAuth = {
     requestOtp: requestOtp,
     verifyOtp: verifyOtp,
     refreshSession: refreshSession,
     signOut: signOut,
-    getSession: getSession
+    getSession: getSession,
+    getValidSession: getValidSession
   };
 })();

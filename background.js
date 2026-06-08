@@ -1,6 +1,8 @@
 // LLM provider adapters — translation between Anthropic-shaped requests and
 // OpenAI/Gemini. Loaded as a classic worker so importScripts is available.
-importScripts('providers.js');
+// skipper-auth.js exposes globalThis.SkipperAuth which providers.js uses for
+// the Free+ proxy bearer token (auto-refreshes when close to expiry).
+importScripts('skipper-auth.js', 'providers.js');
 
 // Look up the `sid` cookie for the requested Salesforce host. Cookie is
 // HttpOnly so the page can't read it directly. If the exact host has no
@@ -57,7 +59,10 @@ async function handleSoqlGenerate(req, sendResponse) {
     var body = {
       system: system,
       messages: [{ role: 'user', content: req.user }],
-      max_tokens: 1024
+      max_tokens: 1024,
+      // Free+ quota bucket — providers.js strips this before sending to
+      // Anthropic/OpenAI/Gemini; only the Skipper proxy reads it.
+      skipperFeature: req.feature || 'soql'
     };
     if (req.tools && req.tools.length) body.tools = req.tools;
     if (req.toolChoice) body.tool_choice = req.toolChoice;
@@ -76,7 +81,7 @@ async function handleSoqlGenerate(req, sendResponse) {
       return;
     }
     console.error('sfnav: provider call threw', err);
-    sendResponse({ ok: false, error: err.message });
+    sendResponse({ ok: false, error: err.message, skipperCode: err && err.skipperCode || null });
   }
 }
 
@@ -121,8 +126,10 @@ async function handleAskMessageStep(req, sendResponse) {
   try {
     var opts = await loadOpts();
     var body = Object.assign({}, req.body || {});
+    // Free+ quota bucket. @ask is not on the free tier today; the proxy will
+    // return 403 and ask.js handles it as "BYOK required".
+    if (!body.skipperFeature) body.skipperFeature = 'ask';
     var resp = await providerMessageStep(opts, body);
-    // ask.js expects { content, stop_reason } under .response
     sendResponse({ ok: true, response: resp });
   } catch (err) {
     if (err && err.name === 'AbortError') {
@@ -130,7 +137,7 @@ async function handleAskMessageStep(req, sendResponse) {
       return;
     }
     console.error('sfnav: provider call threw', err);
-    sendResponse({ ok: false, error: err.message });
+    sendResponse({ ok: false, error: err.message, skipperCode: err && err.skipperCode || null });
   }
 }
 
