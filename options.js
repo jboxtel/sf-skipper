@@ -95,7 +95,6 @@ var PROVIDERS = {
 
 // ─── DOM refs ───────────────────────────────────────────────────────────────
 
-var navEl         = document.getElementById('nav');
 var cardsEl       = document.getElementById('providerCards');
 var stepsEl       = document.getElementById('providerSteps');
 var noteEl        = document.getElementById('providerNote');
@@ -108,15 +107,13 @@ var eyeHideEl     = document.getElementById('eyeHide');
 var modelEl       = document.getElementById('model');
 var saveEl        = document.getElementById('save');
 var statusEl      = document.getElementById('status');
-var openInEl      = document.getElementById('openIn');
-var replayEl      = document.getElementById('replayWalkthrough');
-var walkStatusEl  = document.getElementById('walkthroughStatus');
-var versionEl     = document.getElementById('version');
-var aboutVerEl    = document.getElementById('aboutVersion');
-var connectedEl   = document.getElementById('connectedStatus');
-var csProviderEl  = document.getElementById('csProvider');
-var csKeyEl       = document.getElementById('csKey');
-var csStateEl     = document.getElementById('csState');
+var providerSummaryEl = document.getElementById('providerSummary');
+
+var openInToggleEl   = document.getElementById('openInToggle');
+var shortcutRowEl    = document.getElementById('shortcutRow');
+var walkthroughRowEl = document.getElementById('walkthroughRow');
+var walkSubEl        = document.getElementById('walkSub');
+var versionEl        = document.getElementById('version');
 
 var state = {
   provider: 'gemini',
@@ -128,8 +125,7 @@ var state = {
 
 try {
   var version = chrome.runtime.getManifest().version;
-  if (versionEl)  versionEl.textContent = 'v' + version;
-  if (aboutVerEl) aboutVerEl.textContent = version;
+  if (versionEl) versionEl.textContent = 'v' + version;
 } catch (e) { /* non-extension preview */ }
 
 // ─── Load + migrate stored options ──────────────────────────────────────────
@@ -150,42 +146,82 @@ chrome.storage.local.get('sfnavOptions', function (data) {
   } else if (opts.anthropicApiKey) {
     state.provider = 'anthropic';
   } else {
-    state.provider = 'gemini'; // fresh install default
+    state.provider = 'gemini';
   }
 
   state.openInNewTab = opts.openInNewTab !== false;
-  openInEl.value = state.openInNewTab ? 'new' : 'same';
+  setToggle(openInToggleEl, state.openInNewTab);
 
   renderProvider();
 });
 
-// ─── Pane switching ─────────────────────────────────────────────────────────
+// ─── Expand/collapse rows ───────────────────────────────────────────────────
 
-function activatePane(pane) {
-  Array.prototype.forEach.call(navEl.querySelectorAll('.ni'), function (n) {
-    n.classList.toggle('on', n.getAttribute('data-pane') === pane);
-  });
-  Array.prototype.forEach.call(document.querySelectorAll('.pane'), function (p) {
-    p.classList.toggle('on', p.id === 'pane-' + pane);
+function setExpanded(rowEl, open) {
+  if (!rowEl) return;
+  rowEl.classList.toggle('open', !!open);
+}
+
+function isExpanded(rowEl) {
+  return rowEl && rowEl.classList.contains('open');
+}
+
+// Header click toggles the row. Clicks inside the body shouldn't collapse it,
+// and inputs inside the body shouldn't either — so we only listen on .row-main.
+document.addEventListener('click', function (e) {
+  var head = e.target.closest('.row.expandable > .row-main');
+  if (!head) return;
+  var row = head.parentElement;
+  setExpanded(row, !isExpanded(row));
+});
+
+// Deep-link via #hash — legacy pane names map to the new expandable rows.
+(function () {
+  var hash = (location.hash || '').replace(/^#/, '');
+  if (!hash) return;
+  var map = {
+    account:  'acctRowOut',
+    provider: 'providerRow',
+    feedback: 'feedbackRow'
+  };
+  var id = map[hash];
+  if (!id) return;
+  var el = document.getElementById(id);
+  if (el) {
+    setExpanded(el, true);
+    el.scrollIntoView({ block: 'start' });
+  }
+})();
+
+// ─── Toggle (Open links in new tab) ─────────────────────────────────────────
+
+function setToggle(el, on) {
+  if (!el) return;
+  el.setAttribute('aria-checked', on ? 'true' : 'false');
+}
+
+if (openInToggleEl) {
+  openInToggleEl.addEventListener('click', function () {
+    var next = openInToggleEl.getAttribute('aria-checked') !== 'true';
+    setToggle(openInToggleEl, next);
+    state.openInNewTab = next;
+    mergeOptions({ openInNewTab: next });
   });
 }
 
-navEl.addEventListener('click', function (e) {
-  var item = e.target.closest('.ni');
-  if (!item) return;
-  var pane = item.getAttribute('data-pane');
-  if (pane) activatePane(pane);
-});
+// ─── Navigation shortcut row → opens chrome://extensions/shortcuts ──────────
+// <a href="#"> won't navigate to chrome:// URLs from a regular link click,
+// so we intercept and use chrome.tabs.create.
 
-// Deep-link via #pane (e.g. options.html#account opens the Account pane).
-// The palette's "Sign in to Skipper" banner uses this to land the user
-// directly on the sign-in form.
-(function () {
-  var hash = (location.hash || '').replace(/^#/, '');
-  if (hash && document.getElementById('pane-' + hash)) activatePane(hash);
-})();
+if (shortcutRowEl) {
+  shortcutRowEl.addEventListener('click', function (e) {
+    e.preventDefault();
+    var url = shortcutRowEl.getAttribute('data-link') || 'chrome://extensions/shortcuts';
+    chrome.tabs.create({ url: url });
+  });
+}
 
-// ─── Rendering ──────────────────────────────────────────────────────────────
+// ─── Provider rendering ─────────────────────────────────────────────────────
 
 function esc(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -193,12 +229,6 @@ function esc(s) {
 
 function linkHtml(label, url) {
   return '<a href="' + esc(url) + '" target="_blank" rel="noopener">' + esc(label) + ' &nearr;</a>';
-}
-
-function maskKey(key) {
-  if (!key) return '';
-  if (key.length <= 8) return '••••' + key.slice(-2);
-  return key.slice(0, 8) + '••••••••••••' + key.slice(-4);
 }
 
 function renderProvider() {
@@ -209,15 +239,9 @@ function renderProvider() {
 
   var p = PROVIDERS[state.provider];
 
-  // Subscription warning (anthropic / openai only)
-  if (p.note) {
-    noteEl.textContent = p.note;
-    noteEl.hidden = false;
-  } else {
-    noteEl.hidden = true;
-  }
+  if (p.note) { noteEl.textContent = p.note; noteEl.hidden = false; }
+  else { noteEl.hidden = true; }
 
-  // 3-step "how to get a key"
   stepsEl.innerHTML = '';
   p.steps(linkHtml).forEach(function (line) {
     var li = document.createElement('li');
@@ -227,17 +251,14 @@ function renderProvider() {
     stepsEl.appendChild(li);
   });
 
-  // Key field rebinding
   keyLabelEl.textContent = p.keyLabel;
   apiKeyEl.placeholder = p.keyPlaceholder;
   apiKeyEl.value = (state.providers[state.provider] && state.providers[state.provider].apiKey) || '';
-  // Reset reveal to masked on provider switch
   apiKeyEl.type = 'password';
   eyeShowEl.hidden = false;
   eyeHideEl.hidden = true;
   validateKeyFormat();
 
-  // Model dropdown
   modelEl.innerHTML = '';
   p.models.forEach(function (m) {
     var opt = document.createElement('option');
@@ -248,49 +269,43 @@ function renderProvider() {
   var savedModel = (state.providers[state.provider] && state.providers[state.provider].model) || p.defaultModel;
   modelEl.value = savedModel;
 
-  renderConnectedStatus();
+  updateProviderSummary();
   setStatus('');
 }
 
-function renderConnectedStatus() {
+function updateProviderSummary() {
+  if (!providerSummaryEl) return;
   var p = PROVIDERS[state.provider];
-  var key = state.providers[state.provider] && state.providers[state.provider].apiKey;
-  if (!key) {
-    connectedEl.hidden = true;
+  var entry = state.providers[state.provider] || {};
+  if (!entry.apiKey) {
+    providerSummaryEl.textContent = 'Not configured';
     return;
   }
-  connectedEl.hidden = false;
-  csProviderEl.textContent = p.badge;
-  csKeyEl.textContent = maskKey(key);
-  csStateEl.textContent = 'Saved';
+  var modelId = entry.model || p.defaultModel;
+  var modelMeta = p.models.find(function (m) { return m.id === modelId; });
+  var modelLabel = modelMeta ? modelMeta.label.split(' (')[0] : modelId;
+  providerSummaryEl.textContent = p.productName + ' · ' + modelLabel;
 }
 
 function validateKeyFormat() {
   var p = PROVIDERS[state.provider];
   var msg = p.validate(apiKeyEl.value.trim());
-  if (msg) {
-    keyWarnEl.textContent = msg;
-    keyWarnEl.hidden = false;
-  } else {
-    keyWarnEl.hidden = true;
-  }
+  if (msg) { keyWarnEl.textContent = msg; keyWarnEl.hidden = false; }
+  else { keyWarnEl.hidden = true; }
 }
 
 function setStatus(text, kind) {
-  statusEl.textContent = text;
-  statusEl.className = kind || '';
+  if (!statusEl) return;
+  statusEl.textContent = text || '';
+  statusEl.className = 'msg' + (kind ? ' ' + kind : '');
 }
 
-function setWalkStatus(text, kind) {
-  walkStatusEl.textContent = text;
-  walkStatusEl.className = 'walk-status' + (kind ? ' ' + kind : '');
-}
-
-// ─── Event handlers ─────────────────────────────────────────────────────────
+// ─── Provider event handlers ────────────────────────────────────────────────
 
 cardsEl.addEventListener('click', function (e) {
   var card = e.target.closest('.pc');
   if (!card) return;
+  e.stopPropagation();
   var name = card.getAttribute('data-provider');
   if (!name || name === state.provider) return;
   // Persist the in-flight key for the previous provider so switching back
@@ -304,14 +319,16 @@ cardsEl.addEventListener('click', function (e) {
 
 apiKeyEl.addEventListener('input', validateKeyFormat);
 
-revealEl.addEventListener('click', function () {
+revealEl.addEventListener('click', function (e) {
+  e.stopPropagation();
   var hidden = apiKeyEl.type === 'password';
   apiKeyEl.type = hidden ? 'text' : 'password';
   eyeShowEl.hidden = hidden;
   eyeHideEl.hidden = !hidden;
 });
 
-saveEl.addEventListener('click', async function () {
+saveEl.addEventListener('click', async function (e) {
+  e.stopPropagation();
   var key = apiKeyEl.value.trim();
   if (!key) { setStatus('Enter an API key first', 'err'); return; }
 
@@ -321,7 +338,7 @@ saveEl.addEventListener('click', async function () {
   await mergeOptions({
     provider: state.provider,
     providers: state.providers,
-    openInNewTab: openInEl.value !== 'same'
+    openInNewTab: state.openInNewTab
   });
 
   saveEl.disabled = true;
@@ -336,45 +353,56 @@ saveEl.addEventListener('click', async function () {
     if (!resp.ok) { setStatus('Failed: ' + resp.error, 'err'); return; }
     var p = PROVIDERS[state.provider];
     setStatus('Connected to ' + p.productName + ' (' + (resp.model || '—') + ')', 'ok');
-    renderConnectedStatus();
+    updateProviderSummary();
   });
-});
-
-openInEl.addEventListener('change', function () {
-  mergeOptions({ openInNewTab: openInEl.value !== 'same' });
 });
 
 modelEl.addEventListener('change', function () {
   state.providers[state.provider] = state.providers[state.provider] || {};
   state.providers[state.provider].model = modelEl.value;
+  updateProviderSummary();
 });
 
-replayEl.addEventListener('click', async function () {
-  setWalkStatus('Looking for a Salesforce tab…', 'loading');
-  await mergeOptions({ onboardingDone: false, walkthroughSeen: false });
+// ─── Walkthrough replay ─────────────────────────────────────────────────────
 
-  chrome.tabs.query({}, function (tabs) {
-    var sfTabs = (tabs || []).filter(function (t) { return t.url && SF_HOST_RE.test(t.url); });
-    if (!sfTabs.length) {
-      setWalkStatus('Open a Salesforce tab, then click again.', 'err');
-      return;
-    }
-    var target = sfTabs.find(function (t) { return t.active; }) || sfTabs[0];
-    chrome.tabs.update(target.id, { active: true }, function () {
-      if (target.windowId != null) chrome.windows.update(target.windowId, { focused: true });
-      chrome.runtime.sendMessage({ type: 'openPalette', tabId: target.id }, function () {
-        setWalkStatus('Walkthrough opened in your Salesforce tab.', 'ok');
-        setTimeout(function () { setWalkStatus(''); }, 2500);
+var DEFAULT_WALK_SUB = walkSubEl ? walkSubEl.textContent : '';
+
+function setWalkSub(text, kind) {
+  if (!walkSubEl) return;
+  walkSubEl.textContent = text;
+  walkSubEl.className = 'row-sub' + (kind ? ' ' + kind : '');
+}
+
+if (walkthroughRowEl) {
+  walkthroughRowEl.addEventListener('click', async function () {
+    setWalkSub('Looking for a Salesforce tab…', 'loading');
+    await mergeOptions({ onboardingDone: false, walkthroughSeen: false });
+
+    chrome.tabs.query({}, function (tabs) {
+      var sfTabs = (tabs || []).filter(function (t) { return t.url && SF_HOST_RE.test(t.url); });
+      if (!sfTabs.length) {
+        setWalkSub('Open a Salesforce tab, then click again.', 'err');
+        setTimeout(function () { setWalkSub(DEFAULT_WALK_SUB); }, 4000);
+        return;
+      }
+      var target = sfTabs.find(function (t) { return t.active; }) || sfTabs[0];
+      chrome.tabs.update(target.id, { active: true }, function () {
+        if (target.windowId != null) chrome.windows.update(target.windowId, { focused: true });
+        chrome.runtime.sendMessage({ type: 'openPalette', tabId: target.id }, function () {
+          setWalkSub('Walkthrough opened in your Salesforce tab.', 'ok');
+          setTimeout(function () { setWalkSub(DEFAULT_WALK_SUB); }, 2500);
+        });
       });
     });
   });
-});
+}
 
 // ─── Account (Skipper sign-in) ──────────────────────────────────────────────
 
+var acctRowOutEl      = document.getElementById('acctRowOut');
+var acctRowInEl       = document.getElementById('acctRowIn');
 var acctSignedOutEl   = document.getElementById('acctSignedOut');
 var acctCodeEntryEl   = document.getElementById('acctCodeEntry');
-var acctSignedInEl    = document.getElementById('acctSignedIn');
 var acctEmailEl       = document.getElementById('acctEmail');
 var acctSendCodeEl    = document.getElementById('acctSendCode');
 var acctStatusEl      = document.getElementById('acctStatus');
@@ -383,6 +411,7 @@ var acctVerifyEl      = document.getElementById('acctVerify');
 var acctResendEl      = document.getElementById('acctResend');
 var acctCodeStatusEl  = document.getElementById('acctCodeStatus');
 var acctEmailShownEl  = document.getElementById('acctEmailShown');
+var acctAvatarEl      = document.getElementById('acctAvatar');
 var acctSignOutEl     = document.getElementById('acctSignOut');
 var acctSignedInStatusEl = document.getElementById('acctSignedInStatus');
 
@@ -390,16 +419,29 @@ var acctSignedInStatusEl = document.getElementById('acctSignedInStatus');
 // address Supabase sent the OTP to.
 var acctPendingEmail = '';
 
-function setAcctStatus(el, text, kind) {
+function setMsg(el, text, kind) {
   if (!el) return;
   el.textContent = text || '';
-  el.className = kind ? ('walk-status ' + kind) : '';
+  el.className = 'msg' + (kind ? ' ' + kind : '');
 }
 
-function showAcctState(state) {
-  acctSignedOutEl.hidden = state !== 'signed-out';
-  acctCodeEntryEl.hidden = state !== 'code-entry';
-  acctSignedInEl.hidden  = state !== 'signed-in';
+function setLineStatus(el, text, kind) {
+  if (!el) return;
+  el.textContent = text || '';
+  el.className = 'status-line' + (kind ? ' ' + kind : '');
+}
+
+function showAcctSubState(s) {
+  acctSignedOutEl.hidden = s !== 'signed-out';
+  acctCodeEntryEl.hidden = s !== 'code-entry';
+}
+
+function initialsFor(email) {
+  if (!email) return '?';
+  var name = (email.split('@')[0] || '').trim();
+  var parts = name.split(/[._\-+]+/).filter(Boolean);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]);
+  return name.slice(0, 2) || '?';
 }
 
 function renderAccount() {
@@ -407,57 +449,63 @@ function renderAccount() {
   SkipperAuth.getSession().then(function (skipper) {
     if (skipper && skipper.accessToken) {
       acctEmailShownEl.textContent = skipper.email || '(unknown)';
-      showAcctState('signed-in');
+      acctAvatarEl.textContent = initialsFor(skipper.email);
+      acctRowOutEl.hidden = true;
+      acctRowInEl.hidden = false;
     } else {
-      showAcctState('signed-out');
+      acctRowOutEl.hidden = false;
+      acctRowInEl.hidden = true;
+      showAcctSubState('signed-out');
     }
   });
 }
 
 if (acctSendCodeEl) {
-  acctSendCodeEl.addEventListener('click', function () {
+  acctSendCodeEl.addEventListener('click', function (e) {
+    e.stopPropagation();
     var email = (acctEmailEl.value || '').trim();
     if (!email || email.indexOf('@') === -1) {
-      setAcctStatus(acctStatusEl, 'Enter a valid email.', 'err');
+      setMsg(acctStatusEl, 'Enter a valid email.', 'err');
       acctEmailEl.focus();
       return;
     }
     acctSendCodeEl.disabled = true;
-    setAcctStatus(acctStatusEl, 'Sending code…', 'loading');
+    setMsg(acctStatusEl, 'Sending code…', 'loading');
     SkipperAuth.requestOtp(email).then(function () {
       acctPendingEmail = email;
-      setAcctStatus(acctStatusEl, '');
-      setAcctStatus(acctCodeStatusEl, 'Code sent to ' + email + '. Check your inbox.', 'ok');
+      setMsg(acctStatusEl, '');
+      setMsg(acctCodeStatusEl, 'Code sent to ' + email + '. Check your inbox.', 'ok');
       acctSendCodeEl.disabled = false;
-      showAcctState('code-entry');
+      showAcctSubState('code-entry');
       setTimeout(function () { acctCodeEl && acctCodeEl.focus(); }, 50);
     }).catch(function (err) {
       acctSendCodeEl.disabled = false;
-      setAcctStatus(acctStatusEl, 'Could not send: ' + err.message, 'err');
+      setMsg(acctStatusEl, 'Could not send: ' + err.message, 'err');
     });
   });
 }
 
 if (acctVerifyEl) {
-  acctVerifyEl.addEventListener('click', function () {
+  acctVerifyEl.addEventListener('click', function (e) {
+    e.stopPropagation();
     var code = (acctCodeEl.value || '').trim();
     if (!/^\d{6}$/.test(code)) {
-      setAcctStatus(acctCodeStatusEl, 'Enter the 6-digit code.', 'err');
+      setMsg(acctCodeStatusEl, 'Enter the 6-digit code.', 'err');
       acctCodeEl.focus();
       return;
     }
     acctVerifyEl.disabled = true;
-    setAcctStatus(acctCodeStatusEl, 'Verifying…', 'loading');
+    setMsg(acctCodeStatusEl, 'Verifying…', 'loading');
     SkipperAuth.verifyOtp(acctPendingEmail, code).then(function () {
       acctVerifyEl.disabled = false;
       acctCodeEl.value = '';
-      setAcctStatus(acctCodeStatusEl, '');
-      setAcctStatus(acctSignedInStatusEl, 'Signed in.', 'ok');
-      setTimeout(function () { setAcctStatus(acctSignedInStatusEl, ''); }, 2500);
+      setMsg(acctCodeStatusEl, '');
+      setLineStatus(acctSignedInStatusEl, 'Signed in.', 'ok');
+      setTimeout(function () { setLineStatus(acctSignedInStatusEl, ''); }, 2500);
       renderAccount();
     }).catch(function (err) {
       acctVerifyEl.disabled = false;
-      setAcctStatus(acctCodeStatusEl, 'Could not sign in: ' + err.message, 'err');
+      setMsg(acctCodeStatusEl, 'Could not sign in: ' + err.message, 'err');
     });
   });
 }
@@ -469,22 +517,24 @@ if (acctCodeEl) {
 }
 
 if (acctResendEl) {
-  acctResendEl.addEventListener('click', function () {
+  acctResendEl.addEventListener('click', function (e) {
+    e.stopPropagation();
     acctPendingEmail = '';
     acctCodeEl.value = '';
-    setAcctStatus(acctCodeStatusEl, '');
-    showAcctState('signed-out');
+    setMsg(acctCodeStatusEl, '');
+    showAcctSubState('signed-out');
     setTimeout(function () { acctEmailEl && acctEmailEl.focus(); }, 50);
   });
 }
 
 if (acctSignOutEl) {
-  acctSignOutEl.addEventListener('click', function () {
+  acctSignOutEl.addEventListener('click', function (e) {
+    e.stopPropagation();
     acctSignOutEl.disabled = true;
-    setAcctStatus(acctSignedInStatusEl, 'Signing out…', 'loading');
+    setLineStatus(acctSignedInStatusEl, 'Signing out…', 'loading');
     SkipperAuth.signOut().then(function () {
       acctSignOutEl.disabled = false;
-      setAcctStatus(acctSignedInStatusEl, '');
+      setLineStatus(acctSignedInStatusEl, '');
       renderAccount();
     });
   });
@@ -505,14 +555,11 @@ chrome.storage.local.get('sfnavOptions', function (data) {
   if (saved && fbEmailEl && !fbEmailEl.value) fbEmailEl.value = saved;
 });
 
-function setFbStatus(text, kind) {
-  if (!fbStatusEl) return;
-  fbStatusEl.textContent = text || '';
-  fbStatusEl.className = kind ? ('walk-status ' + kind) : '';
-}
+function setFbStatus(text, kind) { setMsg(fbStatusEl, text, kind); }
 
 if (fbSendEl) {
-  fbSendEl.addEventListener('click', function () {
+  fbSendEl.addEventListener('click', function (e) {
+    e.stopPropagation();
     var message = (fbMessageEl.value || '').trim();
     if (!message) { setFbStatus('Type something first.', 'err'); fbMessageEl.focus(); return; }
     if (message.length > 4000) { setFbStatus('Too long — keep it under 4000 characters.', 'err'); return; }
