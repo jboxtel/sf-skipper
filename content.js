@@ -134,13 +134,30 @@
     return null;
   }
 
+  // Settings links inside the AI panels. pane: 'provider' (BYOK form) or
+  // 'account' (Skipper sign-in). Mirrors the sign-in banner button.
+  function openSoqlSettings(pane) {
+    try { chrome.runtime.sendMessage({ type: 'openOptions', pane: pane || 'provider' }); } catch (err) {}
+    hidePalette();
+  }
+
+  function wireSettingsLinks(el) {
+    el.querySelectorAll('.sfnav-settings-link').forEach(function (link) {
+      link.onclick = function (e) {
+        e.preventDefault();
+        openSoqlSettings(link.getAttribute('data-pane'));
+      };
+    });
+  }
+
   // Used by the @soql, @debug, and @ask panels for the status pill above the
   // input. Shows one of:
   //   BYOK:            "API key connected"
   //   Free+ (allowed): "Skipper Free · 17/20 left"  (or "Skipper Free" when
   //                                                   quota hasn't been seen yet)
   //   Free+ (not on tier): "BYOK required for @ask"
-  //   Neither:         "No API key — configure in settings"
+  //   Signed out, feature on Free+: "Try @soql free — sign in · use your own key"
+  //   Signed out, @ask:             "No API key — configure in settings"
   function renderApiKeyStat(elId, feature) {
     feature = feature || 'soql';
     canCallAi(feature).then(function (r) {
@@ -162,32 +179,39 @@
         return;
       }
       if (!r.ok && r.mode === 'free' && r.reason === 'not_on_tier') {
-        el.innerHTML = 'BYOK required for @' + feature + ' — <a href="#" class="sfnav-settings-link">add a key</a>';
+        el.innerHTML = 'BYOK required for @' + feature + ' — <a href="#" data-pane="provider" class="sfnav-settings-link">add a key</a>';
         el.className = 'sfnav-apistat sfnav-apistat-missing';
-        var l1 = el.querySelector('.sfnav-settings-link');
-        if (l1) l1.onclick = function (e) { e.preventDefault(); openSoqlSettings(); };
+        wireSettingsLinks(el);
         return;
       }
-      el.innerHTML = 'No API key — <a href="#" class="sfnav-settings-link">configure in settings</a>';
+      if (feature === 'ask') {
+        // Signing in doesn't unlock @ask (BYOK-only on Free+), so don't pitch it.
+        el.innerHTML = 'No API key — <a href="#" data-pane="provider" class="sfnav-settings-link">configure in settings</a>';
+        el.className = 'sfnav-apistat sfnav-apistat-missing';
+        wireSettingsLinks(el);
+        return;
+      }
+      el.innerHTML = 'Try @' + feature + ' free — <a href="#" data-pane="account" class="sfnav-settings-link">sign in</a> · <a href="#" data-pane="provider" class="sfnav-settings-link">use your own key</a>';
       el.className = 'sfnav-apistat sfnav-apistat-missing';
-      var l2 = el.querySelector('.sfnav-settings-link');
-      if (l2) l2.onclick = function (e) { e.preventDefault(); openSoqlSettings(); };
+      wireSettingsLinks(el);
     });
   }
 
-  // Run-handler pre-flight when canCallAi says "no". Renders feature-aware
-  // copy: "BYOK required for @ask" vs. generic "No API key configured."
+  // Run-handler pre-flight when canCallAi says "no". Signed-out users on a
+  // Free+ feature get the sign-up pitch; @ask (BYOK-only) and not_on_tier get
+  // the key-focused copy.
   function showAiUnavailable(statusEl, errorClass, feature, reason) {
-    var msg;
     if (reason === 'not_on_tier') {
-      msg = '@' + feature + ' is not on the Skipper Free tier. ';
+      statusEl.innerHTML = '@' + feature + ' is not on the Skipper Free tier. <a href="#" data-pane="provider" class="sfnav-settings-link">Open settings</a>.';
+    } else if (feature === 'ask') {
+      statusEl.innerHTML = 'No API key configured. <a href="#" data-pane="provider" class="sfnav-settings-link">Open settings</a>.';
     } else {
-      msg = 'No API key configured. ';
+      statusEl.innerHTML = 'Run @' + feature + ' free with a Skipper account — no API key needed. '
+        + '<a href="#" data-pane="account" class="sfnav-settings-link">Sign in</a> · '
+        + '<a href="#" data-pane="provider" class="sfnav-settings-link">add your own key</a>.';
     }
-    statusEl.innerHTML = msg + '<a href="#" class="sfnav-settings-link">Open settings</a>.';
     statusEl.className = errorClass;
-    var link = statusEl.querySelector('.sfnav-settings-link');
-    if (link) link.onclick = function (e) { e.preventDefault(); openSoqlSettings(); };
+    wireSettingsLinks(statusEl);
   }
 
   // Catch-block helper. If err.skipperCode is set (quota, kill-switch,
@@ -198,10 +222,11 @@
       statusEl.className = errorClass;
       return;
     }
-    statusEl.innerHTML = (err.message || 'Error') + ' <a href="#" class="sfnav-settings-link">Open settings</a>.';
+    // Expired session → land on the Account row; everything else → BYOK form.
+    var pane = err.skipperCode === 'session_expired' ? 'account' : 'provider';
+    statusEl.innerHTML = (err.message || 'Error') + ' <a href="#" data-pane="' + pane + '" class="sfnav-settings-link">Open settings</a>.';
     statusEl.className = errorClass;
-    var link = statusEl.querySelector('.sfnav-settings-link');
-    if (link) link.onclick = function (e) { e.preventDefault(); openSoqlSettings(); };
+    wireSettingsLinks(statusEl);
   }
 
   function injectPalette() {
