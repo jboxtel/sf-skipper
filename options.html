@@ -54,8 +54,8 @@
               <!-- Code-entry -->
               <div class="fg" id="acctCodeEntry" hidden>
                 <div>
-                  <label class="fl" for="acctCode">6-digit code</label>
-                  <input id="acctCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="123456" spellcheck="false" />
+                  <label class="fl" for="acctCode">One-time code</label>
+                  <input id="acctCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="10" placeholder="12345678" spellcheck="false" />
                   <p class="field-warn" id="acctCodeHint" hidden></p>
                 </div>
                 <div class="actions">
@@ -96,61 +96,74 @@
                 <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="10" height="10" rx="2"/><path d="M6 6.5h4M6 9.5h4"/></svg>
               </div>
               <div class="row-text">
-                <div class="row-title">AI provider</div>
+                <div class="row-title"><span id="planTitle">AI provider</span><span class="pill-active" id="activePill" hidden><span class="pdot"></span>Active</span></div>
                 <div class="row-sub" id="providerSummary">Not configured</div>
               </div>
               <div class="row-aff"><svg class="chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4l4 4-4 4"/></svg></div>
             </div>
             <div class="row-body">
-              <p class="body-lead">Powers @soql, @debug, and @ask. Your key is stored locally in this browser — never sent anywhere except the provider you choose.</p>
-
-              <div class="sub-label">Choose provider</div>
-              <div class="pg" id="providerCards" role="radiogroup" aria-label="AI provider">
-                <button type="button" class="pc" data-provider="gemini" role="radio" aria-checked="false">
-                  <span class="sdot"></span>
-                  <span class="pn">Gemini</span>
-                  <span class="ps">Google</span>
+              <div class="seg" id="planSeg" role="group" aria-label="AI plan">
+                <button type="button" class="seg-btn" id="segFree" aria-pressed="false">
+                  <span class="seg-title">Skipper Free</span>
+                  <span class="seg-sub">20 @soql/mo · no setup</span>
                 </button>
-                <button type="button" class="pc" data-provider="anthropic" role="radio" aria-checked="false">
-                  <span class="sdot"></span>
-                  <span class="pn">Claude</span>
-                  <span class="ps">Anthropic</span>
-                </button>
-                <button type="button" class="pc" data-provider="openai" role="radio" aria-checked="false">
-                  <span class="sdot"></span>
-                  <span class="pn">GPT</span>
-                  <span class="ps">OpenAI</span>
+                <button type="button" class="seg-btn" id="segByok" aria-pressed="false">
+                  <span class="seg-title">Your own key</span>
+                  <span class="seg-sub">Unlimited · Gemini, Claude or GPT</span>
                 </button>
               </div>
 
-              <div class="callout a" id="providerNote" hidden></div>
-
-              <div class="how">
-                <div class="hw-lbl">How to get a key</div>
-                <ol class="hs" id="providerSteps"></ol>
+              <!-- Free pane -->
+              <div class="plan-pane" id="freePane" hidden>
+                <div class="quota-meter" id="quotaMeter" role="img"></div>
+                <div class="quota-caption">
+                  <span id="quotaUsedLbl"></span>
+                  <span id="quotaLeftLbl"></span>
+                </div>
+                <p class="pane-hint" id="freeHint"></p>
+                <div class="actions" id="freeActions" hidden>
+                  <button id="switchFree" class="btn bp" type="button">Switch to Skipper Free</button>
+                  <span id="freeStatus" class="msg status-slot"></span>
+                </div>
               </div>
 
-              <div class="fg">
-                <div>
-                  <label class="fl" id="apiKeyLabel" for="apiKey">API key</label>
-                  <div class="iw">
-                    <input id="apiKey" type="password" placeholder="" autocomplete="off" spellcheck="false" />
-                    <button class="ir" id="revealKey" type="button" aria-label="Show key">
-                      <svg id="eyeShow" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M1 7s2.2-4.5 6-4.5S13 7 13 7s-2.2 4.5-6 4.5S1 7 1 7z"/><circle cx="7" cy="7" r="1.7"/></svg>
-                      <svg id="eyeHide" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2" hidden><path d="M2 2l10 10M5.5 5.8A1.8 1.8 0 0 0 8.2 8.5M3.5 4C2.2 5 1 7 1 7s2.2 4.5 6 4.5c1.3 0 2.5-.4 3.4-1M5.5 2.8C6 2.6 6.5 2.5 7 2.5c3.8 0 6 4.5 6 4.5s-.6 1.2-1.7 2.3" stroke-linecap="round"/></svg>
-                    </button>
+              <!-- BYOK pane -->
+              <div class="plan-pane" id="byokPane" hidden>
+                <div class="fg">
+                  <div class="two-col">
+                    <div>
+                      <label class="fl" for="providerSelect">Provider</label>
+                      <select id="providerSelect" aria-label="AI provider">
+                        <option value="gemini">Gemini — Google</option>
+                        <option value="anthropic">Claude — Anthropic</option>
+                        <option value="openai">GPT — OpenAI</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label class="fl" for="model">Model</label>
+                      <select id="model"></select>
+                    </div>
                   </div>
-                  <p class="field-warn" id="keyFormatWarn" hidden></p>
-                </div>
 
-                <div>
-                  <label class="fl" for="model">Model</label>
-                  <select id="model"></select>
-                </div>
+                  <div>
+                    <label class="fl" id="apiKeyLabel" for="apiKey">API key</label>
+                    <div class="iw">
+                      <input id="apiKey" type="password" placeholder="" autocomplete="off" spellcheck="false" />
+                      <button class="ir" id="revealKey" type="button" aria-label="Show key">
+                        <svg id="eyeShow" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M1 7s2.2-4.5 6-4.5S13 7 13 7s-2.2 4.5-6 4.5S1 7 1 7z"/><circle cx="7" cy="7" r="1.7"/></svg>
+                        <svg id="eyeHide" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2" hidden><path d="M2 2l10 10M5.5 5.8A1.8 1.8 0 0 0 8.2 8.5M3.5 4C2.2 5 1 7 1 7s2.2 4.5 6 4.5c1.3 0 2.5-.4 3.4-1M5.5 2.8C6 2.6 6.5 2.5 7 2.5c3.8 0 6 4.5 6 4.5s-.6 1.2-1.7 2.3" stroke-linecap="round"/></svg>
+                      </button>
+                    </div>
+                    <p class="field-warn" id="keyFormatWarn" hidden></p>
+                    <p class="key-hint"><span id="keyHintText"></span> <a id="keyDocsLink" href="#" target="_blank" rel="noopener">Get a key &rarr;</a></p>
+                  </div>
 
-                <div class="actions">
-                  <button id="save" class="btn bp" type="button">Save and test</button>
-                  <span id="status" class="msg"></span>
+                  <div class="callout a" id="providerNote" hidden></div>
+
+                  <div class="actions">
+                    <button id="save" class="btn bp" type="button" disabled>Save and test</button>
+                    <span id="status" class="msg status-slot"></span>
+                  </div>
                 </div>
               </div>
             </div>

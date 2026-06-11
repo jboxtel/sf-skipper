@@ -18,13 +18,7 @@ var PROVIDERS = {
       }
       return null;
     },
-    steps: function (a) {
-      return [
-        'Open ' + a('aistudio.google.com/apikey', 'https://aistudio.google.com/apikey') + ' and sign in with any Google account.',
-        'Click <strong>Create API key</strong>.',
-        'Copy the key (starts with <code>AIza</code>) and paste it below.'
-      ];
-    },
+    keyUrl: 'https://aistudio.google.com/apikey',
     note: null,
     defaultModel: 'gemini-2.5-flash',
     models: [
@@ -45,13 +39,7 @@ var PROVIDERS = {
       }
       return null;
     },
-    steps: function (a) {
-      return [
-        'Open ' + a('console.anthropic.com/settings/keys', 'https://console.anthropic.com/settings/keys') + ' and sign in (create an account if you don’t have one).',
-        'Add a payment method under Billing — Anthropic API is pay-as-you-go, billed separately from Claude Pro.',
-        'Click <strong>Create Key</strong>, copy it (starts with <code>sk-ant-</code>), and paste it below.'
-      ];
-    },
+    keyUrl: 'https://console.anthropic.com/settings/keys',
     note: 'This is separate from your Claude Pro / Max subscription — API access is billed separately on console.anthropic.com.',
     defaultModel: 'claude-haiku-4-5-20251001',
     models: [
@@ -76,13 +64,7 @@ var PROVIDERS = {
       }
       return null;
     },
-    steps: function (a) {
-      return [
-        'Open ' + a('platform.openai.com/api-keys', 'https://platform.openai.com/api-keys') + ' and sign in (create an account if you don’t have one).',
-        'Add a payment method under Billing — the API is billed separately from ChatGPT Plus.',
-        'Click <strong>Create new secret key</strong>, copy it (starts with <code>sk-</code>), and paste it below.'
-      ];
-    },
+    keyUrl: 'https://platform.openai.com/api-keys',
     note: 'This is separate from your ChatGPT Plus subscription — API access is billed separately on platform.openai.com.',
     defaultModel: 'gpt-4.1-mini',
     models: [
@@ -95,8 +77,7 @@ var PROVIDERS = {
 
 // ─── DOM refs ───────────────────────────────────────────────────────────────
 
-var cardsEl       = document.getElementById('providerCards');
-var stepsEl       = document.getElementById('providerSteps');
+var providerSelectEl = document.getElementById('providerSelect');
 var noteEl        = document.getElementById('providerNote');
 var keyLabelEl    = document.getElementById('apiKeyLabel');
 var apiKeyEl      = document.getElementById('apiKey');
@@ -109,6 +90,22 @@ var saveEl        = document.getElementById('save');
 var statusEl      = document.getElementById('status');
 var providerSummaryEl = document.getElementById('providerSummary');
 
+var planTitleEl   = document.getElementById('planTitle');
+var activePillEl  = document.getElementById('activePill');
+var segFreeEl     = document.getElementById('segFree');
+var segByokEl     = document.getElementById('segByok');
+var freePaneEl    = document.getElementById('freePane');
+var byokPaneEl    = document.getElementById('byokPane');
+var quotaMeterEl  = document.getElementById('quotaMeter');
+var quotaUsedLblEl = document.getElementById('quotaUsedLbl');
+var quotaLeftLblEl = document.getElementById('quotaLeftLbl');
+var freeHintEl    = document.getElementById('freeHint');
+var freeActionsEl = document.getElementById('freeActions');
+var switchFreeEl  = document.getElementById('switchFree');
+var freeStatusEl  = document.getElementById('freeStatus');
+var keyHintTextEl = document.getElementById('keyHintText');
+var keyDocsLinkEl = document.getElementById('keyDocsLink');
+
 var openInToggleEl   = document.getElementById('openInToggle');
 var shortcutRowEl    = document.getElementById('shortcutRow');
 var walkthroughRowEl = document.getElementById('walkthroughRow');
@@ -119,8 +116,16 @@ var state = {
   provider: 'gemini',
   providers: { gemini: {}, anthropic: {}, openai: {} },
   openInNewTab: true,
-  skipper: null
+  skipper: null,
+  // 'free' | 'byok' | undefined. Explicit 'free' routes through the proxy even
+  // when a key is stored (the key is kept so switching back needs no re-paste).
+  // Undefined = legacy installs: key wins, else free when signed in.
+  plan: undefined
 };
+
+// Which segment the user is looking at — independent of what's active.
+// The header/pill derive only from saved state; this only picks the pane.
+var viewedSegment = 'free';
 
 // ─── Version stamp ──────────────────────────────────────────────────────────
 
@@ -153,7 +158,9 @@ chrome.storage.local.get('sfnavOptions', function (data) {
   state.openInNewTab = opts.openInNewTab !== false;
   setToggle(openInToggleEl, state.openInNewTab);
   state.skipper = opts.skipper || null;
+  state.plan = opts.plan;
 
+  viewedSegment = activePlanKind() === 'byok' ? 'byok' : 'free';
   renderProvider();
   refreshSkipperQuota();
 });
@@ -165,7 +172,8 @@ if (chrome.storage && chrome.storage.onChanged) {
     if (area !== 'local' || !changes.sfnavOptions) return;
     var newOpts = changes.sfnavOptions.newValue || {};
     state.skipper = newOpts.skipper || null;
-    updateProviderSummary();
+    state.plan = newOpts.plan;
+    renderPlanUI();
   });
 }
 
@@ -176,9 +184,9 @@ var SKIPPER_BACKEND_URL = 'http://localhost:3000';
 function refreshSkipperQuota() {
   var skipper = state.skipper || {};
   if (!skipper.accessToken) return;
-  // Skip if BYOK is set — the Free+ subtitle won't show anyway.
-  var entry = state.providers[state.provider] || {};
-  if (entry.apiKey) return;
+  // Skip only when BYOK is the active plan — a stashed key with plan='free'
+  // still needs fresh numbers for the quota meter.
+  if (activePlanKind() === 'byok') return;
   fetch(SKIPPER_BACKEND_URL + '/api/quota', {
     headers: { 'Authorization': 'Bearer ' + skipper.accessToken }
   }).then(function (r) { return r.ok ? r.json() : null; }).then(function (q) {
@@ -261,35 +269,115 @@ if (shortcutRowEl) {
   });
 }
 
-// ─── Provider rendering ─────────────────────────────────────────────────────
+// ─── Plan switcher rendering ────────────────────────────────────────────────
+//
+// Two independent pieces of state:
+//   activePlanKind()  what's saved and powering requests — drives the header
+//                     title, subtitle, and the green Active pill
+//   viewedSegment     which pane the user is looking at — drives panes only
+// Typing a key or switching segments must never move the pill; only a
+// successful Save-and-test (or "Switch to Skipper Free") changes the header.
 
 function esc(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-function linkHtml(label, url) {
-  return '<a href="' + esc(url) + '" target="_blank" rel="noopener">' + esc(label) + ' &nearr;</a>';
+function isSignedIn() {
+  return !!(state.skipper && state.skipper.accessToken);
 }
 
-function renderProvider() {
-  Array.prototype.forEach.call(cardsEl.querySelectorAll('.pc'), function (el) {
-    var match = el.getAttribute('data-provider') === state.provider;
-    el.setAttribute('aria-checked', match ? 'true' : 'false');
-  });
+function activePlanKind() {
+  if (state.plan === 'free') return isSignedIn() ? 'free' : 'none';
+  var entry = state.providers[state.provider] || {};
+  if (entry.apiKey) return 'byok';
+  if (isSignedIn()) return 'free';
+  return 'none';
+}
 
+// First of next month, UTC — quota periods are UTC months on the backend.
+function quotaResetLabel() {
+  var d = new Date();
+  var next = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1));
+  return next.toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' });
+}
+
+function modelLabelFor(providerName, modelId) {
+  var p = PROVIDERS[providerName];
+  var meta = p.models.find(function (m) { return m.id === modelId; });
+  return meta ? meta.label.split(' (')[0] : modelId;
+}
+
+function renderHeader() {
+  var kind = activePlanKind();
+  if (kind === 'byok') {
+    var p = PROVIDERS[state.provider];
+    var entry = state.providers[state.provider] || {};
+    planTitleEl.textContent = p.productName;
+    providerSummaryEl.textContent =
+      modelLabelFor(state.provider, entry.model || p.defaultModel) + ' · your ' + p.label + ' key';
+    activePillEl.hidden = false;
+  } else if (kind === 'free') {
+    planTitleEl.textContent = 'Skipper Free';
+    providerSummaryEl.textContent = 'Haiku 4.5 · powers @soql and @debug';
+    activePillEl.hidden = false;
+  } else {
+    planTitleEl.textContent = 'AI provider';
+    providerSummaryEl.textContent = 'Not configured';
+    activePillEl.hidden = true;
+  }
+}
+
+function renderSegments() {
+  segFreeEl.setAttribute('aria-pressed', viewedSegment === 'free' ? 'true' : 'false');
+  segByokEl.setAttribute('aria-pressed', viewedSegment === 'byok' ? 'true' : 'false');
+  freePaneEl.hidden = viewedSegment !== 'free';
+  byokPaneEl.hidden = viewedSegment !== 'byok';
+}
+
+function renderFreePane() {
+  var quota = (state.skipper && state.skipper.quota && state.skipper.quota.soql) || null;
+  var limit = (quota && quota.limit) || 20;
+  var remaining = quota ? quota.remaining : null;
+  var used = remaining === null ? 0 : Math.max(0, limit - remaining);
+
+  quotaMeterEl.innerHTML = '';
+  for (var i = 0; i < limit; i++) {
+    var segSpan = document.createElement('span');
+    if (isSignedIn() && i < used) segSpan.className = 'on';
+    quotaMeterEl.appendChild(segSpan);
+  }
+
+  if (!isSignedIn()) {
+    quotaMeterEl.setAttribute('aria-label', 'Skipper Free quota — sign in to activate');
+    quotaUsedLblEl.textContent = '—';
+    quotaLeftLblEl.textContent = limit + ' @soql/mo after sign-in';
+    freeHintEl.innerHTML = 'Sign in under <strong>Account</strong> above to activate Skipper Free — no API key needed.';
+    freeActionsEl.hidden = true;
+    return;
+  }
+
+  quotaMeterEl.setAttribute('aria-label', used + ' of ' + limit + ' free @soql requests used this month');
+  quotaUsedLblEl.textContent = remaining === null ? '— used' : used + ' used';
+  quotaLeftLblEl.textContent = remaining === null
+    ? 'resets ' + quotaResetLabel()
+    : remaining + ' left · resets ' + quotaResetLabel();
+
+  var debugQ = state.skipper.quota && state.skipper.quota.debug;
+  var debugBit = debugQ && typeof debugQ.remaining === 'number'
+    ? '@debug has its own pool (' + debugQ.remaining + '/' + debugQ.limit + ' left). '
+    : '@debug has its own monthly pool. ';
+  freeHintEl.textContent = '@soql runs on Claude Haiku 4.5 through Skipper. ' + debugBit + '@ask needs your own key.';
+
+  // The switch button is the action; selecting this segment is just looking.
+  freeActionsEl.hidden = activePlanKind() !== 'byok';
+}
+
+function renderByokPane() {
+  providerSelectEl.value = state.provider;
   var p = PROVIDERS[state.provider];
 
   if (p.note) { noteEl.textContent = p.note; noteEl.hidden = false; }
   else { noteEl.hidden = true; }
-
-  stepsEl.innerHTML = '';
-  p.steps(linkHtml).forEach(function (line) {
-    var li = document.createElement('li');
-    var span = document.createElement('span');
-    span.innerHTML = line;
-    li.appendChild(span);
-    stepsEl.appendChild(li);
-  });
 
   keyLabelEl.textContent = p.keyLabel;
   apiKeyEl.placeholder = p.keyPlaceholder;
@@ -298,6 +386,9 @@ function renderProvider() {
   eyeShowEl.hidden = false;
   eyeHideEl.hidden = true;
   validateKeyFormat();
+
+  keyHintTextEl.textContent = 'Stored only in this browser, sent only to ' + p.label + '.';
+  keyDocsLinkEl.href = p.keyUrl;
 
   modelEl.innerHTML = '';
   p.models.forEach(function (m) {
@@ -309,34 +400,19 @@ function renderProvider() {
   var savedModel = (state.providers[state.provider] && state.providers[state.provider].model) || p.defaultModel;
   modelEl.value = savedModel;
 
-  updateProviderSummary();
-  setStatus('');
+  saveEl.disabled = !apiKeyEl.value.trim();
 }
 
-function updateProviderSummary() {
-  if (!providerSummaryEl) return;
-  var p = PROVIDERS[state.provider];
-  var entry = state.providers[state.provider] || {};
-  if (entry.apiKey) {
-    var modelId = entry.model || p.defaultModel;
-    var modelMeta = p.models.find(function (m) { return m.id === modelId; });
-    var modelLabel = modelMeta ? modelMeta.label.split(' (')[0] : modelId;
-    providerSummaryEl.textContent = p.productName + ' · ' + modelLabel;
-    return;
-  }
-  // No BYOK key. If signed in, the row represents the Skipper Free tier.
-  var skipper = state.skipper || {};
-  if (skipper.accessToken) {
-    var quota = skipper.quota || {};
-    var soql = quota.soql;
-    var bits = ['Skipper Free', 'Haiku 4.5'];
-    if (soql && typeof soql.remaining === 'number' && typeof soql.limit === 'number') {
-      bits.push(soql.remaining + '/' + soql.limit + ' @soql left');
-    }
-    providerSummaryEl.textContent = bits.join(' · ');
-    return;
-  }
-  providerSummaryEl.textContent = 'Not configured';
+function renderPlanUI() {
+  renderHeader();
+  renderSegments();
+  renderFreePane();
+}
+
+function renderProvider() {
+  renderByokPane();
+  renderPlanUI();
+  setStatus('');
 }
 
 function validateKeyFormat() {
@@ -352,24 +428,43 @@ function setStatus(text, kind) {
   statusEl.className = 'msg' + (kind ? ' ' + kind : '');
 }
 
-// ─── Provider event handlers ────────────────────────────────────────────────
+// ─── Plan switcher event handlers ───────────────────────────────────────────
 
-cardsEl.addEventListener('click', function (e) {
-  var card = e.target.closest('.pc');
-  if (!card) return;
-  e.stopPropagation();
-  var name = card.getAttribute('data-provider');
-  if (!name || name === state.provider) return;
-  // Persist the in-flight key for the previous provider so switching back
-  // doesn't lose what the user typed.
-  state.providers[state.provider] = state.providers[state.provider] || {};
-  state.providers[state.provider].apiKey = apiKeyEl.value.trim();
-  state.providers[state.provider].model = modelEl.value;
-  state.provider = name;
-  renderProvider();
+function selectSegment(seg) {
+  if (seg === viewedSegment) return;
+  viewedSegment = seg;
+  setMsg(freeStatusEl, '');
+  setStatus('');
+  renderPlanUI();
+}
+
+segFreeEl.addEventListener('click', function () { selectSegment('free'); });
+segByokEl.addEventListener('click', function () { selectSegment('byok'); });
+
+// Arrow keys move between the two segments (and focus follows).
+document.getElementById('planSeg').addEventListener('keydown', function (e) {
+  if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+  e.preventDefault();
+  var next = e.key === 'ArrowLeft' ? 'free' : 'byok';
+  selectSegment(next);
+  (next === 'free' ? segFreeEl : segByokEl).focus();
 });
 
-apiKeyEl.addEventListener('input', validateKeyFormat);
+switchFreeEl.addEventListener('click', async function (e) {
+  e.stopPropagation();
+  if (!isSignedIn()) return;
+  // Keep the stored key — only the routing flag changes, so switching back
+  // to BYOK doesn't require re-pasting.
+  state.plan = 'free';
+  await mergeOptions({ plan: 'free' });
+  setMsg(freeStatusEl, 'Switched — Skipper Free is active.', 'ok');
+  renderPlanUI();
+});
+
+apiKeyEl.addEventListener('input', function () {
+  validateKeyFormat();
+  saveEl.disabled = !apiKeyEl.value.trim();
+});
 
 revealEl.addEventListener('click', function (e) {
   e.stopPropagation();
@@ -379,40 +474,65 @@ revealEl.addEventListener('click', function (e) {
   eyeHideEl.hidden = !hidden;
 });
 
-saveEl.addEventListener('click', async function (e) {
+providerSelectEl.addEventListener('change', function () {
+  var name = providerSelectEl.value;
+  if (!name || name === state.provider) return;
+  // Stash the in-flight key for the previous provider so switching back
+  // doesn't lose what the user typed. In-memory only — nothing persists
+  // until Save and test succeeds.
+  state.providers[state.provider] = state.providers[state.provider] || {};
+  state.providers[state.provider].apiKey = apiKeyEl.value.trim();
+  state.providers[state.provider].model = modelEl.value;
+  state.provider = name;
+  renderByokPane();
+  setStatus('');
+});
+
+function friendlyTestError(message) {
+  var m = String(message || '');
+  if (/401|invalid|unauthorized|authentication|api key/i.test(m)) return 'Invalid key.';
+  if (/network|fetch|timed? ?out|failed to/i.test(m)) return 'Network error — retry.';
+  return 'Failed: ' + m;
+}
+
+saveEl.addEventListener('click', function (e) {
   e.stopPropagation();
   var key = apiKeyEl.value.trim();
-  if (!key) { setStatus('Enter an API key first', 'err'); return; }
+  if (!key) return;
 
-  state.providers[state.provider] = state.providers[state.provider] || {};
-  state.providers[state.provider].apiKey = key;
-  state.providers[state.provider].model = modelEl.value;
-  await mergeOptions({
-    provider: state.provider,
-    providers: state.providers,
-    openInNewTab: state.openInNewTab
-  });
+  // Test with a transient opts override; storage (and therefore the Active
+  // pill and routing) only changes after the test succeeds.
+  var candidate = Object.assign({}, state.providers);
+  candidate[state.provider] = { apiKey: key, model: modelEl.value };
 
   saveEl.disabled = true;
-  setStatus('Saving + testing…', 'loading');
-  chrome.runtime.sendMessage({ type: 'provider.test' }, function (resp) {
-    saveEl.disabled = false;
-    if (chrome.runtime.lastError) {
-      setStatus('Error: ' + chrome.runtime.lastError.message, 'err');
-      return;
+  setStatus('Testing…', 'loading');
+  chrome.runtime.sendMessage(
+    { type: 'provider.test', opts: { provider: state.provider, providers: candidate } },
+    async function (resp) {
+      saveEl.disabled = !apiKeyEl.value.trim();
+      if (chrome.runtime.lastError) { setStatus('Network error — retry.', 'err'); return; }
+      if (!resp) { setStatus('Network error — retry.', 'err'); return; }
+      if (!resp.ok) { setStatus(friendlyTestError(resp.error), 'err'); return; }
+
+      state.providers = candidate;
+      state.plan = 'byok';
+      await mergeOptions({ provider: state.provider, providers: state.providers, plan: 'byok' });
+      setStatus('✓ Connected — Skipper is now using ' + PROVIDERS[state.provider].productName + '.', 'ok');
+      renderPlanUI();
     }
-    if (!resp) { setStatus('No response from background', 'err'); return; }
-    if (!resp.ok) { setStatus('Failed: ' + resp.error, 'err'); return; }
-    var p = PROVIDERS[state.provider];
-    setStatus('Connected to ' + p.productName + ' (' + (resp.model || '—') + ')', 'ok');
-    updateProviderSummary();
-  });
+  );
 });
 
 modelEl.addEventListener('change', function () {
   state.providers[state.provider] = state.providers[state.provider] || {};
   state.providers[state.provider].model = modelEl.value;
-  updateProviderSummary();
+  // If this provider's key is already saved and active, persist the model
+  // change directly — re-testing the same key for a model swap is noise.
+  if (activePlanKind() === 'byok' && state.providers[state.provider].apiKey) {
+    mergeOptions({ providers: state.providers });
+  }
+  renderPlanUI();
 });
 
 // ─── Walkthrough replay ─────────────────────────────────────────────────────
@@ -541,8 +661,10 @@ if (acctVerifyEl) {
   acctVerifyEl.addEventListener('click', function (e) {
     e.stopPropagation();
     var code = (acctCodeEl.value || '').trim();
-    if (!/^\d{6}$/.test(code)) {
-      setMsg(acctCodeStatusEl, 'Enter the 6-digit code.', 'err');
+    // Supabase email-OTP length is a dashboard setting (6-10 digits) — don't
+    // assume 6 or a longer code gets silently truncated and always fails.
+    if (!/^\d{6,10}$/.test(code)) {
+      setMsg(acctCodeStatusEl, 'Enter the code from the email.', 'err');
       acctCodeEl.focus();
       return;
     }

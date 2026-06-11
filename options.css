@@ -26,6 +26,8 @@
 
   /* Status */
   --green: #1a6e40;
+  --gbg: #f0f7f2;
+  --gborder: #cde3d5;
   --amber: #8a5c08;
   --abg: #fef9ec;
   --red: #b54040;
@@ -374,44 +376,108 @@ input:focus, select:focus, textarea:focus {
 .bs:hover { background: var(--surface-2); }
 .bsm { padding: 5px 11px; font-size: 12px; }
 
-/* ─── Provider cards (inside expandable body) ─────────── */
+/* ─── Plan switcher ───────────────────────────────────── */
 
-.pg {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-  margin-bottom: 16px;
+.pill-active {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--gbg);
+  border: 0.5px solid var(--gborder);
+  color: var(--green);
+  font-size: 11px;
+  font-weight: 500;
+  vertical-align: 1px;
 }
-.pc {
-  position: relative;
-  border: 0.5px solid var(--border-strong);
-  border-radius: var(--r-sm);
-  padding: 12px;
-  cursor: pointer;
-  background: var(--surface);
-  text-align: left;
-  font-family: inherit;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  transition: border-color .12s, box-shadow .12s;
-}
-.pc:hover { border-color: var(--ink-3); }
-.pc[aria-checked="true"] {
-  border-color: var(--indigo);
-  box-shadow: 0 0 0 1px var(--indigo);
-}
-.pc .pn { font-weight: 500; font-size: 13px; color: var(--ink); }
-.pc .ps { font-size: 11px; color: var(--ink-3); margin-top: 1px; }
-.sdot {
-  position: absolute;
-  top: 9px; right: 9px;
+.pill-active .pdot {
   width: 6px; height: 6px;
   border-radius: 50%;
-  background: var(--indigo);
-  display: none;
+  background: var(--green);
 }
-.pc[aria-checked="true"] .sdot { display: block; }
+
+.seg {
+  display: flex;
+  gap: 3px;
+  padding: 3px;
+  background: var(--surface-2);
+  border: 0.5px solid var(--border);
+  border-radius: 10px;
+  margin-bottom: 16px;
+}
+.seg-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: center;
+}
+.seg-btn[aria-pressed="true"] {
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgba(17, 17, 17, .08), 0 0 0 0.5px var(--border-strong);
+}
+.seg-title { font-size: 13px; font-weight: 500; color: var(--ink); }
+.seg-sub { font-size: 11px; color: var(--ink-3); }
+
+.plan-pane { padding-top: 2px; }
+
+.quota-meter { display: flex; gap: 3px; margin: 6px 0 8px; }
+.quota-meter span {
+  flex: 1;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--border);
+}
+.quota-meter span.on { background: var(--indigo); }
+.quota-caption {
+  display: flex;
+  justify-content: space-between;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  color: var(--ink-2);
+  margin-bottom: 12px;
+}
+.pane-hint {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink-2);
+  margin-bottom: 14px;
+}
+
+.two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+@media (max-width: 560px) {
+  .two-col { grid-template-columns: 1fr; }
+}
+
+.key-hint { font-size: 12px; color: var(--ink-3); margin-top: 6px; line-height: 1.5; }
+.key-hint a { color: var(--indigo); }
+
+/* Inline test result lives next to the button; flex+min-height reserves the
+   line so "Testing…" → success/error never shifts the layout. */
+.status-slot { flex: 1; min-width: 0; min-height: 1.4em; }
+
+.seg-btn:focus-visible,
+select:focus-visible,
+input:focus-visible,
+.btn:focus-visible {
+  outline: 2px solid var(--indigo);
+  outline-offset: 1px;
+}
+
+#apiKey { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 
 /* ─── Callouts ────────────────────────────────────────── */
 
@@ -424,50 +490,7 @@ input:focus, select:focus, textarea:focus {
 }
 .callout.a { background: var(--abg); color: var(--amber); border: 0.5px solid #f0d680; }
 
-/* ─── "How to get a key" box ──────────────────────────── */
-
-.how {
-  background: var(--surface-2);
-  border: 0.5px solid var(--border);
-  border-radius: var(--r-sm);
-  padding: 14px 16px;
-  margin-bottom: 18px;
-}
-.hw-lbl {
-  font-size: 11px;
-  letter-spacing: .06em;
-  text-transform: uppercase;
-  color: var(--ink-3);
-  font-weight: 500;
-  margin-bottom: 9px;
-}
-.hs { list-style: none; display: flex; flex-direction: column; gap: 8px; counter-reset: step; }
-.hs li {
-  counter-increment: step;
-  display: flex;
-  gap: 10px;
-  align-items: flex-start;
-  font-size: 13px;
-  line-height: 1.5;
-}
-.hs li::before {
-  content: counter(step);
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: var(--indigo);
-  color: #fff;
-  font-size: 10px;
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  margin-top: 2px;
-}
-.hs a { color: var(--indigo); text-decoration: underline; text-decoration-color: rgba(67, 56, 202, .3); }
-.hs a:hover { text-decoration-color: var(--indigo); }
-.hs code, .row code {
+.row code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11.5px;
   background: var(--surface);

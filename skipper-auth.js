@@ -5,7 +5,7 @@
 // service worker.
 //
 // Email-OTP flow:
-//   requestOtp(email)        Supabase emails a 6-digit code
+//   requestOtp(email)        Supabase emails a one-time code (length set in dashboard)
 //   verifyOtp(email, code)   exchanges code for a session, persists it
 //
 // Session shape under sfnavOptions.skipper (matches what background.js's
