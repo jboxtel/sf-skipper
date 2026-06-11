@@ -20,12 +20,17 @@ var DEFAULT_MODEL = {
 function resolveProvider(opts) {
   opts = opts || {};
   var providers = opts.providers || {};
+  // plan === 'free' routes through the Skipper proxy even when a key is
+  // stored: the Options plan switcher keeps the key on file so the user can
+  // switch back without re-pasting, and blanks it here so providerMessageStep
+  // takes the proxy branch.
+  var freePlan = opts.plan === 'free';
 
   // Legacy install: top-level anthropicApiKey + no providers map.
   if (!opts.provider && opts.anthropicApiKey && !providers.anthropic) {
     return {
       provider: 'anthropic',
-      apiKey: opts.anthropicApiKey,
+      apiKey: freePlan ? '' : opts.anthropicApiKey,
       model: opts.model || DEFAULT_MODEL.anthropic,
       debug: !!opts.debug
     };
@@ -35,7 +40,7 @@ function resolveProvider(opts) {
   var p = providers[name] || {};
   return {
     provider: name,
-    apiKey: p.apiKey || '',
+    apiKey: freePlan ? '' : (p.apiKey || ''),
     model: p.model || DEFAULT_MODEL[name] || '',
     debug: !!opts.debug
   };
@@ -93,6 +98,7 @@ async function providerMessageStep(opts, body) {
 //   .skipperCode = 'feature_not_on_tier'(HTTP 403) — show BYOK-required
 //   .skipperCode = 'kill_switch_active' (HTTP 503) — show "paused, try later"
 //   .skipperCode = 'session_expired'    (HTTP 401) — prompt re-sign-in
+//   .skipperCode = 'rate_limited'       (HTTP 429) — show "slow down"
 
 async function callSkipperProxy(opts, body) {
   var feature = (body && body.skipperFeature) || 'soql';
@@ -143,6 +149,8 @@ async function callSkipperProxy(opts, body) {
     } else if (res.status === 403 && code === 'feature_not_on_tier') {
       msg = '@' + feature + ' is not available on the Skipper Free tier. '
           + 'Add your own AI key in Options to use it.';
+    } else if (res.status === 429) {
+      msg = 'Slow down — too many AI calls at once. Try again in a minute.';
     } else if (res.status === 503) {
       msg = 'Skipper Free is paused right now. Try again later or add your own AI key in Options.';
     } else if (res.status === 401) {

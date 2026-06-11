@@ -106,11 +106,14 @@ function canCallAi(feature) {
     }
     chrome.storage.local.get('sfnavOptions', function (data) {
       var opts = data.sfnavOptions || {};
+      // plan === 'free' means a stored key is parked, not active — skip the
+      // BYOK checks so routing matches resolveProvider in providers.js.
+      var freePlan = opts.plan === 'free';
       // BYOK: legacy shape OR active provider has a key
-      if (opts.anthropicApiKey) { resolve({ ok: true, mode: 'byok' }); return; }
+      if (!freePlan && opts.anthropicApiKey) { resolve({ ok: true, mode: 'byok' }); return; }
       var active = opts.provider || 'gemini';
       var p = (opts.providers && opts.providers[active]) || {};
-      if (p.apiKey) { resolve({ ok: true, mode: 'byok' }); return; }
+      if (!freePlan && p.apiKey) { resolve({ ok: true, mode: 'byok' }); return; }
 
       // Free+: signed in to Skipper, feature allowed on tier
       var skipper = opts.skipper || {};
