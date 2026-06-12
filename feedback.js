@@ -13,12 +13,9 @@ function buildFeedbackPayload(message, email, context) {
   var manifest = (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.getManifest)
     ? chrome.runtime.getManifest()
     : null;
-  var host = '';
-  try { host = window.location.hostname || ''; } catch (e) { host = ''; }
   return {
     message: String(message || '').trim(),
     email: (email && String(email).trim()) || null,
-    url_host: host || null,
     extension_ver: (manifest && manifest.version) || null,
     user_agent: (typeof navigator !== 'undefined' && navigator.userAgent) || null,
     context: (context && typeof context === 'object') ? context : null

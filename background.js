@@ -157,7 +157,6 @@ async function handleFeedbackSubmit(req, sendResponse) {
     var body = {
       message: req.payload.message,
       email: req.payload.email,
-      url_host: req.payload.url_host,
       extension_ver: req.payload.extension_ver,
       user_agent: req.payload.user_agent
     };

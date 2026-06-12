@@ -1,13 +1,13 @@
 # Privacy Policy — Skipper for Salesforce
 
-_Last updated: 2026-05-25_
+_Last updated: 2026-06-12_
 
 Skipper for Salesforce ("the extension") is a Chrome extension that adds a keyboard command palette to Salesforce, plus three optional AI assistants. This document describes what data the extension touches, where it goes, and what we (don't) do with it.
 
 ## TL;DR
 
-- **No backend.** The extension has no server. There is no analytics, no telemetry, no usage reporting.
-- **Two destinations.** Network traffic only ever goes to (a) the Salesforce org you are already signed into and (b) the AI provider you yourself configure. Nothing else.
+- **No backend for the palette or AI features.** Those have no server of ours in the path — no analytics, no telemetry, no usage tracking. The one exception is the optional feedback form: if you choose to submit feedback, your message is sent to a backend we control (see "Feedback you submit" below).
+- **Destinations.** Network traffic only ever goes to (a) the Salesforce org you are already signed into, (b) the AI provider you yourself configure, and (c) — only when you submit the feedback form — our feedback backend. Nothing else.
 - **Local storage only.** Your API key, settings, and the small per-org caches stay in `chrome.storage.local` on your machine. Not synced, not uploaded.
 - **Read-only on Salesforce.** Hard-enforced in code: only `GET` requests against a small allowlist of read endpoints. No DML, no anonymous Apex, no metadata writes.
 
@@ -40,10 +40,20 @@ This data is transmitted directly from your browser to your chosen provider's AP
 
 The extension's developer has no access to this traffic, no copy of your prompts, and no relationship with the provider on your behalf.
 
+### Feedback you submit (optional)
+The Options page and the command palette include a feedback form. It is entirely optional, and nothing is sent unless you type a message and click submit. When you do, the following is sent to our feedback backend (hosted on Supabase):
+
+- the message you wrote;
+- an email address — only if you choose to enter one (used solely so we can reply);
+- the extension version and your browser's user-agent string (OS family and Chrome major version — a coarse signal used to triage compatibility bugs);
+- optional context, only when you open the form from within an AI feature and the form shows an "Attaching…" chip: this can include the `@soql` prompt/query, `@ask` question/answer, or `@debug` summary you were working on. If you don't want it included, submit feedback from the Options page instead.
+
+This is the only data the extension ever sends to a server we control, and only at the moment you press submit. It is used solely to read and act on your feedback. It is never sold, never used for advertising, and not shared beyond the hosting provider needed to store it.
+
 ## What the extension does NOT do
 
-- Does **not** send any data to any server controlled by the developer. There is no developer-controlled backend.
-- Does **not** collect analytics, usage metrics, or crash reports.
+- Does **not** send any data to a server we control, **except** the feedback you explicitly submit via the feedback form (see "Feedback you submit"). The palette, caching, and AI features involve no developer-controlled backend.
+- Does **not** collect analytics, usage metrics, or crash reports — nothing is sent automatically; the feedback form only sends what you type and submit.
 - Does **not** track which features you use, which orgs you connect to, or what queries you run.
 - Does **not** read or transmit any content from non-Salesforce tabs. Content scripts only load on Salesforce hosts (declared in `manifest.json` `content_scripts.matches`).
 - Does **not** make writes to your Salesforce org. The extension's transport layer (`sfFetch` / `askFetch`) hard-rejects any non-`GET` request and any request body before the call leaves the browser.
@@ -58,12 +68,13 @@ The extension's developer has no access to this traffic, no copy of your prompts
 | `scripting` + `activeTab` | Inject the palette UI into the active Salesforce tab when you press the keyboard shortcut. |
 | `host_permissions` for Salesforce hosts (`*.lightning.force.com`, `*.my.salesforce.com`, etc.) | Make read-only REST and Tooling API requests against the org you're using. |
 | `host_permissions` for `generativelanguage.googleapis.com`, `api.anthropic.com`, `api.openai.com` | Send your AI prompt (and, for `@ask`, a screenshot of your current Salesforce tab) to whichever provider you selected and configured a key for. Traffic only goes to providers you have explicitly configured. |
+| `host_permissions` for `bdfndqbnuganvfdgtvcg.supabase.co` | Deliver the optional feedback form to our backend, only when you submit it. No other traffic goes to this host. |
 
 ## Data retention
 
 All data the extension stores is in `chrome.storage.local` on your device. To clear it: remove the extension via `chrome://extensions`, or open the Options page and clear individual fields, or use Chrome's developer tools to inspect `chrome.storage.local` directly.
 
-The extension's developer has no copy of your data and cannot remove anything on your behalf — there is nothing on a server to remove.
+The only exception is feedback you submit: those messages are stored on our feedback backend (Supabase) so we can read and act on them. To request deletion of feedback you've sent, email the address below and we'll remove it. Everything else the extension touches stays in `chrome.storage.local` on your device, with no server-side copy to remove.
 
 ## Changes to this policy
 
