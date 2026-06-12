@@ -48,6 +48,7 @@ FILES=(
   org-glossary-extractors.js
   soql.js
   ask.js
+  feedback.js
   markdown.js
   onboarding.js
   content.js
