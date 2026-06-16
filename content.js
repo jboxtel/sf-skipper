@@ -69,8 +69,15 @@
   // Modes that go back to a parent picker rather than root.
   var MODE_BACK_HANDLERS = {
     'object-scoped': function () { enterObjectPickerMode(objectPickerFilter); },
-    'cmd-scoped':    function () { enterCmdPickerMode(cmdtPickerFilter); }
+    'cmd-scoped':    function () { enterCmdPickerMode(cmdtPickerFilter); },
   };
+
+  var PANEL_MODES = { soql: 1, ask: 1, 'flow-debug': 1, feedback: 1 };
+
+  function isFeedbackPanelOpen() {
+    var el = document.getElementById('sfnav-feedback');
+    return !!el && el.style.display !== 'none';
+  }
 
   // Where to bounce focus when the user clicks dead space inside a panel mode.
   var PANEL_PRIMARY_INPUTS = [
@@ -196,8 +203,13 @@
 
     document.body.appendChild(overlay);
 
+    var overlayMouseDownOnBackdrop = false;
+    overlay.addEventListener('mousedown', function (e) {
+      overlayMouseDownOnBackdrop = (e.target === overlay);
+    });
     overlay.addEventListener('click', function (e) {
-      if (e.target === overlay) hidePalette();
+      if (e.target === overlay && overlayMouseDownOnBackdrop) hidePalette();
+      overlayMouseDownOnBackdrop = false;
     });
 
     // Clicking dead space inside a panel mode (the breadcrumb, meta line,
@@ -213,6 +225,36 @@
         if (target && !target.disabled) target.focus();
       });
     });
+
+    var feedbackPanel = document.getElementById('sfnav-feedback');
+    if (feedbackPanel) {
+      feedbackPanel.addEventListener('keydown', function (e) {
+        if (e.key !== 'Escape') return;
+        if (!isFeedbackPanelOpen() && searchMode !== 'feedback') return;
+        e.preventDefault();
+        e.stopPropagation();
+        handleBack();
+      }, true);
+
+      var feedbackMsgEl = document.getElementById('sfnav-feedback-message');
+      var feedbackEmailEl = document.getElementById('sfnav-feedback-email');
+      if (feedbackMsgEl) {
+        feedbackMsgEl.addEventListener('keydown', function (e) {
+          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+            e.preventDefault();
+            runFeedbackSubmit();
+          }
+        });
+      }
+      if (feedbackEmailEl) {
+        feedbackEmailEl.addEventListener('keydown', function (e) {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            runFeedbackSubmit();
+          }
+        });
+      }
+    }
 
     var feedbackSendKbd = document.querySelector('#sfnav-feedback-send .sfnav-kbd');
     if (feedbackSendKbd) feedbackSendKbd.textContent = sfnavModEnterKbd();
@@ -300,6 +342,10 @@
   }
 
   function handleBack() {
+    if (PANEL_MODES[searchMode] || isFeedbackPanelOpen()) {
+      goToRoot();
+      return;
+    }
     if (searchMode === 'root') { hidePalette(); return; }
     var custom = MODE_BACK_HANDLERS[searchMode];
     if (custom) { custom(); return; }
@@ -1132,9 +1178,6 @@
     }
   }
 
-  // Minimal Markdown-ish renderer: paragraphs, bullets, inline code, bold.
-  // We deliberately don't pull in a full Markdown lib — this keeps the answer
-  // readable when Claude uses light formatting, without HTML-injection risk.
   function showPalette() {
     injectPalette();
     searchMode = 'root';
@@ -1275,6 +1318,7 @@
     var input = document.getElementById('sfnav-input');
     input.value = '';
     input.placeholder = 'Send feedback to the Skipper team';
+    input.disabled = true;
     document.getElementById('sfnav-results').style.display = 'none';
     var hintEl = document.getElementById('sfnav-hint');
     hintEl.textContent = '';
@@ -1300,25 +1344,6 @@
     document.getElementById('sfnav-feedback-send').onclick = runFeedbackSubmit;
 
     renderFeedbackContextChip();
-
-    msgEl.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-        e.preventDefault();
-        runFeedbackSubmit();
-      } else if (e.key === 'Escape') {
-        e.preventDefault();
-        handleBack();
-      }
-    });
-    emailEl.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        runFeedbackSubmit();
-      } else if (e.key === 'Escape') {
-        e.preventDefault();
-        handleBack();
-      }
-    });
 
     msgEl.focus();
   }
