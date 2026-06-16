@@ -84,7 +84,7 @@
     'soql':       'Enter to generate · Esc to go back',
     'flow-debug': 'Enter to analyze · Shift+Enter for newline · Esc to go back',
     'ask':        'Enter to ask · Shift+Enter for newline · Esc to go back',
-    'feedback':   'Cmd+Enter to send · Esc to go back'
+    'feedback':   null
   };
   var DEFAULT_FOOTER_HINT = '↑↓ navigate · Enter to select · Esc to close';
 
@@ -182,7 +182,7 @@
             '<input id="sfnav-feedback-email" type="email" placeholder="your@email.com" autocomplete="email" />' +
           '</div>' +
           '<div id="sfnav-feedback-actions">' +
-            '<button id="sfnav-feedback-send" class="sfnav-soql-btn-primary">Send <span class="sfnav-kbd">⌘↵</span></button>' +
+            '<button id="sfnav-feedback-send" class="sfnav-soql-btn-primary">Send <span class="sfnav-kbd"></span></button>' +
             '<span id="sfnav-feedback-status"></span>' +
           '</div>' +
         '</div>' +
@@ -208,6 +208,9 @@
         if (target && !target.disabled) target.focus();
       });
     });
+
+    var feedbackSendKbd = document.querySelector('#sfnav-feedback-send .sfnav-kbd');
+    if (feedbackSendKbd) feedbackSendKbd.textContent = sfnavModEnterKbd();
 
     var feedbackLink = document.getElementById('sfnav-feedback-link');
     if (feedbackLink) {
@@ -627,7 +630,9 @@
     var flowId = (typeof getFlowIdFromUrl === 'function') ? getFlowIdFromUrl() : null;
 
     input.value = '';
-    input.placeholder = flowId ? 'Paste the Debug panel output below, then press ⌘↵' : 'Open a flow first to use this';
+    input.placeholder = flowId
+      ? 'Paste the Debug panel output below, then press ' + sfnavModEnterKbd()
+      : 'Open a flow first to use this';
     document.getElementById('sfnav-results').style.display = 'none';
     document.getElementById('sfnav-hint').textContent = '';
     document.getElementById('sfnav-breadcrumb').innerHTML = renderBreadcrumbHtml([{ text: '@flow-debug' }]);
@@ -1618,6 +1623,10 @@
   function setFooterHints(mode) {
     var el = document.getElementById('sfnav-footer-hints');
     if (!el) return;
+    if (mode === 'feedback') {
+      el.textContent = sfnavModEnterHint() + ' to send · Esc to go back';
+      return;
+    }
     el.textContent = FOOTER_HINTS[mode] || DEFAULT_FOOTER_HINT;
   }
 
