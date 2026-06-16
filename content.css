@@ -292,7 +292,7 @@
 
 #sfnav-soql-status a,
 #sfnav-flowdebug-status a,
-.sfnav-settings-link {
+.sfnav-options-link {
   color: var(--sf-link) !important;
   text-decoration: none !important;
   font-weight: 500;
@@ -301,7 +301,7 @@
 
 #sfnav-soql-status a:hover,
 #sfnav-flowdebug-status a:hover,
-.sfnav-settings-link:hover {
+.sfnav-options-link:hover {
   text-decoration: underline !important;
 }
 
