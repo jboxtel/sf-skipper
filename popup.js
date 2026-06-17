@@ -2,9 +2,8 @@
   const SF_HOST_RE = /^https:\/\/[^/]+\.(lightning\.force\.com|salesforce\.com|salesforce-setup\.com|force\.com)\//;
 
   const kbdEl = document.getElementById('kbd');
-  if (kbdEl) {
-    const isMac = /Mac/i.test(navigator.platform);
-    kbdEl.textContent = isMac ? '⌘⇧K' : 'Ctrl+Shift+K';
+  if (kbdEl && typeof sfnavPaletteShortcut === 'function') {
+    kbdEl.textContent = sfnavPaletteShortcut();
   }
 
   const noteEl = document.getElementById('note');

@@ -104,7 +104,7 @@
         '<button class="sfnav-hp-close" type="button">Close</button>' +
       '</div>' +
       '<div class="sfnav-hp-cols">' +
-        '<div class="sfnav-hp-row"><span class="sfnav-hp-cmd sfnav-hp-plain">⌘⇧K</span><span class="sfnav-hp-desc">Open from any page</span></div>';
+        '<div class="sfnav-hp-row"><span class="sfnav-hp-cmd sfnav-hp-plain">' + esc(sfnavPaletteShortcut()) + '</span><span class="sfnav-hp-desc">Open from any page</span></div>';
 
     browse.forEach(function (s) {
       html += '<div class="sfnav-hp-row"><span class="sfnav-hp-cmd">' + esc(s.label) + '</span><span class="sfnav-hp-desc">' + esc(s.sublabel) + '</span></div>';
@@ -313,7 +313,7 @@
             '<span class="sfnav-cm-kbd">K</span>' +
           '</div>' +
           '<div class="sfnav-cm-shortcut-row">' +
-            '<span class="sfnav-cm-platform">Windows</span>' +
+            '<span class="sfnav-cm-platform">Windows &amp; Linux</span>' +
             '<span class="sfnav-cm-kbd">Ctrl</span>' +
             '<span class="sfnav-cm-kbd">Shift</span>' +
             '<span class="sfnav-cm-kbd">K</span>' +

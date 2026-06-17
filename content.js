@@ -69,8 +69,15 @@
   // Modes that go back to a parent picker rather than root.
   var MODE_BACK_HANDLERS = {
     'object-scoped': function () { enterObjectPickerMode(objectPickerFilter); },
-    'cmd-scoped':    function () { enterCmdPickerMode(cmdtPickerFilter); }
+    'cmd-scoped':    function () { enterCmdPickerMode(cmdtPickerFilter); },
   };
+
+  var PANEL_MODES = { soql: 1, ask: 1, 'flow-debug': 1, feedback: 1 };
+
+  function isFeedbackPanelOpen() {
+    var el = document.getElementById('sfnav-feedback');
+    return !!el && el.style.display !== 'none';
+  }
 
   // Where to bounce focus when the user clicks dead space inside a panel mode.
   var PANEL_PRIMARY_INPUTS = [
@@ -84,7 +91,7 @@
     'soql':       'Enter to generate · Esc to go back',
     'flow-debug': 'Enter to analyze · Shift+Enter for newline · Esc to go back',
     'ask':        'Enter to ask · Shift+Enter for newline · Esc to go back',
-    'feedback':   'Cmd+Enter to send · Esc to go back'
+    'feedback':   null
   };
   var DEFAULT_FOOTER_HINT = '↑↓ navigate · Enter to select · Esc to close';
 
@@ -117,6 +124,11 @@
     }
     return null;
   }
+
+  function openOptions() {
+    try { chrome.runtime.sendMessage({ type: 'openOptions' }); } catch (err) {}
+  }
+
 
   function injectPalette() {
     if (document.getElementById('sfnav-overlay')) return;
@@ -182,7 +194,7 @@
             '<input id="sfnav-feedback-email" type="email" placeholder="your@email.com" autocomplete="email" />' +
           '</div>' +
           '<div id="sfnav-feedback-actions">' +
-            '<button id="sfnav-feedback-send" class="sfnav-soql-btn-primary">Send <span class="sfnav-kbd">⌘↵</span></button>' +
+            '<button id="sfnav-feedback-send" class="sfnav-soql-btn-primary">Send <span class="sfnav-kbd"></span></button>' +
             '<span id="sfnav-feedback-status"></span>' +
           '</div>' +
         '</div>' +
@@ -191,8 +203,13 @@
 
     document.body.appendChild(overlay);
 
+    var overlayMouseDownOnBackdrop = false;
+    overlay.addEventListener('mousedown', function (e) {
+      overlayMouseDownOnBackdrop = (e.target === overlay);
+    });
     overlay.addEventListener('click', function (e) {
-      if (e.target === overlay) hidePalette();
+      if (e.target === overlay && overlayMouseDownOnBackdrop) hidePalette();
+      overlayMouseDownOnBackdrop = false;
     });
 
     // Clicking dead space inside a panel mode (the breadcrumb, meta line,
@@ -208,6 +225,39 @@
         if (target && !target.disabled) target.focus();
       });
     });
+
+    var feedbackPanel = document.getElementById('sfnav-feedback');
+    if (feedbackPanel) {
+      feedbackPanel.addEventListener('keydown', function (e) {
+        if (e.key !== 'Escape') return;
+        if (!isFeedbackPanelOpen() && searchMode !== 'feedback') return;
+        e.preventDefault();
+        e.stopPropagation();
+        handleBack();
+      }, true);
+
+      var feedbackMsgEl = document.getElementById('sfnav-feedback-message');
+      var feedbackEmailEl = document.getElementById('sfnav-feedback-email');
+      if (feedbackMsgEl) {
+        feedbackMsgEl.addEventListener('keydown', function (e) {
+          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+            e.preventDefault();
+            runFeedbackSubmit();
+          }
+        });
+      }
+      if (feedbackEmailEl) {
+        feedbackEmailEl.addEventListener('keydown', function (e) {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            runFeedbackSubmit();
+          }
+        });
+      }
+    }
+
+    var feedbackSendKbd = document.querySelector('#sfnav-feedback-send .sfnav-kbd');
+    if (feedbackSendKbd) feedbackSendKbd.textContent = sfnavModEnterKbd();
 
     var feedbackLink = document.getElementById('sfnav-feedback-link');
     if (feedbackLink) {
@@ -292,6 +342,10 @@
   }
 
   function handleBack() {
+    if (PANEL_MODES[searchMode] || isFeedbackPanelOpen()) {
+      goToRoot();
+      return;
+    }
     if (searchMode === 'root') { hidePalette(); return; }
     var custom = MODE_BACK_HANDLERS[searchMode];
     if (custom) { custom(); return; }
@@ -436,10 +490,10 @@
         el.textContent = 'API key connected';
         el.className = 'sfnav-apistat sfnav-apistat-ok';
       } else {
-        el.innerHTML = 'No API key — <a href="#" class="sfnav-settings-link">configure in settings</a>';
+        el.innerHTML = 'No API key — <a href="#" class="sfnav-options-link">configure in Options</a>';
         el.className = 'sfnav-apistat sfnav-apistat-missing';
-        var link = el.querySelector('.sfnav-settings-link');
-        if (link) link.onclick = function (e) { e.preventDefault(); openSoqlSettings(); };
+        var link = el.querySelector('.sfnav-options-link');
+        if (link) link.onclick = function (e) { e.preventDefault(); openOptions(); };
       }
     });
 
@@ -458,11 +512,11 @@
 
     var hasKey = await hasSoqlApiKey();
     if (!hasKey) {
-      statusEl.innerHTML = 'No API key configured. <a href="#" class="sfnav-settings-link">Open settings</a>.';
+      statusEl.innerHTML = 'No API key configured. <a href="#" class="sfnav-options-link">Open Options</a>.';
       statusEl.className = 'sfnav-soql-status-error';
       actionsEl.style.display = 'none';
-      var link = statusEl.querySelector('.sfnav-settings-link');
-      if (link) link.onclick = function (e) { e.preventDefault(); openSoqlSettings(); };
+      var link = statusEl.querySelector('.sfnav-options-link');
+      if (link) link.onclick = function (e) { e.preventDefault(); openOptions(); };
       return;
     }
 
@@ -627,7 +681,9 @@
     var flowId = (typeof getFlowIdFromUrl === 'function') ? getFlowIdFromUrl() : null;
 
     input.value = '';
-    input.placeholder = flowId ? 'Paste the Debug panel output below, then press ⌘↵' : 'Open a flow first to use this';
+    input.placeholder = flowId
+      ? 'Paste the Debug panel output below, then press ' + sfnavModEnterKbd()
+      : 'Open a flow first to use this';
     document.getElementById('sfnav-results').style.display = 'none';
     document.getElementById('sfnav-hint').textContent = '';
     document.getElementById('sfnav-breadcrumb').innerHTML = renderBreadcrumbHtml([{ text: '@flow-debug' }]);
@@ -664,10 +720,10 @@
         el.textContent = 'API key connected';
         el.className = 'sfnav-apistat sfnav-apistat-ok';
       } else {
-        el.innerHTML = 'No API key — <a href="#" class="sfnav-settings-link">configure in settings</a>';
+        el.innerHTML = 'No API key — <a href="#" class="sfnav-options-link">configure in Options</a>';
         el.className = 'sfnav-apistat sfnav-apistat-missing';
-        var link = el.querySelector('.sfnav-settings-link');
-        if (link) link.onclick = function (e) { e.preventDefault(); openSoqlSettings(); };
+        var link = el.querySelector('.sfnav-options-link');
+        if (link) link.onclick = function (e) { e.preventDefault(); openOptions(); };
       }
     });
 
@@ -724,10 +780,10 @@
 
     var hasKey = await hasSoqlApiKey();
     if (!hasKey) {
-      statusEl.innerHTML = 'No API key configured. <a href="#" class="sfnav-settings-link">Open settings</a>.';
+      statusEl.innerHTML = 'No API key configured. <a href="#" class="sfnav-options-link">Open Options</a>.';
       statusEl.className = 'sfnav-flowdebug-status-error';
-      var link = statusEl.querySelector('.sfnav-settings-link');
-      if (link) link.onclick = function (e) { e.preventDefault(); openSoqlSettings(); };
+      var link = statusEl.querySelector('.sfnav-options-link');
+      if (link) link.onclick = function (e) { e.preventDefault(); openOptions(); };
       return;
     }
 
@@ -859,10 +915,10 @@
         el.textContent = 'API key connected';
         el.className = 'sfnav-apistat sfnav-apistat-ok';
       } else {
-        el.innerHTML = 'No API key — <a href="#" class="sfnav-settings-link">configure in settings</a>';
+        el.innerHTML = 'No API key — <a href="#" class="sfnav-options-link">configure in Options</a>';
         el.className = 'sfnav-apistat sfnav-apistat-missing';
-        var link = el.querySelector('.sfnav-settings-link');
-        if (link) link.onclick = function (e) { e.preventDefault(); openSoqlSettings(); };
+        var link = el.querySelector('.sfnav-options-link');
+        if (link) link.onclick = function (e) { e.preventDefault(); openOptions(); };
       }
     });
 
@@ -899,10 +955,10 @@
 
     var hasKey = await hasSoqlApiKey();
     if (!hasKey) {
-      statusEl.innerHTML = 'No API key configured. <a href="#" class="sfnav-settings-link">Open settings</a>.';
+      statusEl.innerHTML = 'No API key configured. <a href="#" class="sfnav-options-link">Open Options</a>.';
       statusEl.className = 'sfnav-ask-status-error';
-      var link = statusEl.querySelector('.sfnav-settings-link');
-      if (link) link.onclick = function (e) { e.preventDefault(); openSoqlSettings(); };
+      var link = statusEl.querySelector('.sfnav-options-link');
+      if (link) link.onclick = function (e) { e.preventDefault(); openOptions(); };
       return;
     }
 
@@ -1122,9 +1178,6 @@
     }
   }
 
-  // Minimal Markdown-ish renderer: paragraphs, bullets, inline code, bold.
-  // We deliberately don't pull in a full Markdown lib — this keeps the answer
-  // readable when Claude uses light formatting, without HTML-injection risk.
   function showPalette() {
     injectPalette();
     searchMode = 'root';
@@ -1265,6 +1318,7 @@
     var input = document.getElementById('sfnav-input');
     input.value = '';
     input.placeholder = 'Send feedback to the Skipper team';
+    input.disabled = true;
     document.getElementById('sfnav-results').style.display = 'none';
     var hintEl = document.getElementById('sfnav-hint');
     hintEl.textContent = '';
@@ -1290,25 +1344,6 @@
     document.getElementById('sfnav-feedback-send').onclick = runFeedbackSubmit;
 
     renderFeedbackContextChip();
-
-    msgEl.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-        e.preventDefault();
-        runFeedbackSubmit();
-      } else if (e.key === 'Escape') {
-        e.preventDefault();
-        handleBack();
-      }
-    });
-    emailEl.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        runFeedbackSubmit();
-      } else if (e.key === 'Escape') {
-        e.preventDefault();
-        handleBack();
-      }
-    });
 
     msgEl.focus();
   }
@@ -1618,6 +1653,10 @@
   function setFooterHints(mode) {
     var el = document.getElementById('sfnav-footer-hints');
     if (!el) return;
+    if (mode === 'feedback') {
+      el.textContent = sfnavModEnterHint() + ' to send · Esc to go back';
+      return;
+    }
     el.textContent = FOOTER_HINTS[mode] || DEFAULT_FOOTER_HINT;
   }
 

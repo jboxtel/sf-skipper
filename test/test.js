@@ -72,7 +72,6 @@ async function injectExtension(page) {
       window.getPermsetsError = () => '';
       window.resolvePermsetPicker = () => ({ mode: 'permset-picker', results: [], hint: '' });
       window.hasSoqlApiKey = () => Promise.resolve(false);
-      window.openSoqlSettings = () => {};
       window.generateSoql = () => Promise.reject(new Error('not stubbed'));
       window.getSoqlHistory = () => Promise.resolve([]);
       window.addToSoqlHistory = () => Promise.resolve();

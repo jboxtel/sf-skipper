@@ -1,5 +1,33 @@
 // Cross-file utilities: session lookup + cached Salesforce REST basePath.
 // Loaded as the first content script so flows.js / objects.js / soql.js can rely on it.
+// Also loaded by popup.html and options.html for platform-aware shortcut labels.
+
+// ─── Platform-aware shortcut labels ───────────────────────────────────────
+
+function sfnavIsMac() {
+  try {
+    if (navigator.userAgentData && typeof navigator.userAgentData.platform === 'string') {
+      return /mac/i.test(navigator.userAgentData.platform);
+    }
+  } catch (_) {}
+  return /Mac|iPhone|iPod|iPad/i.test(navigator.platform || '');
+}
+
+function sfnavPaletteShortcut() {
+  return sfnavIsMac() ? '⌘⇧K' : 'Ctrl+Shift+K';
+}
+
+function sfnavPaletteShortcutParts() {
+  return sfnavIsMac() ? ['⌘', '⇧', 'K'] : ['Ctrl', 'Shift', 'K'];
+}
+
+function sfnavModEnterKbd() {
+  return sfnavIsMac() ? '⌘↵' : 'Ctrl+↵';
+}
+
+function sfnavModEnterHint() {
+  return sfnavIsMac() ? '⌘+Enter' : 'Ctrl+Enter';
+}
 
 // HARD safety gate: every Salesforce HTTP request issued from a content script
 // MUST go through sfFetch. The wrapper hard-rejects any method other than GET

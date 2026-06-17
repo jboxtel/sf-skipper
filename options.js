@@ -117,6 +117,7 @@ var connectedEl   = document.getElementById('connectedStatus');
 var csProviderEl  = document.getElementById('csProvider');
 var csKeyEl       = document.getElementById('csKey');
 var csStateEl     = document.getElementById('csState');
+var paletteShortcutChipEl = document.getElementById('paletteShortcutChip');
 
 var state = {
   provider: 'gemini',
@@ -188,6 +189,12 @@ function maskKey(key) {
   if (!key) return '';
   if (key.length <= 8) return '••••' + key.slice(-2);
   return key.slice(0, 8) + '••••••••••••' + key.slice(-4);
+}
+
+if (paletteShortcutChipEl && typeof sfnavPaletteShortcutParts === 'function') {
+  paletteShortcutChipEl.innerHTML = sfnavPaletteShortcutParts()
+    .map(function (part) { return '<kbd>' + esc(part) + '</kbd>'; })
+    .join('');
 }
 
 function renderProvider() {
