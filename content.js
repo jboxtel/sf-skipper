@@ -211,7 +211,7 @@
       var panel = document.getElementById(entry.panelId);
       if (!panel) return;
       panel.addEventListener('click', function (e) {
-        if (e.target.closest('button, a, textarea, input, [contenteditable="true"]')) return;
+        if (e.target.closest('button, a, textarea, input, [contenteditable="true"], #sfnav-ask-output')) return;
         var target = document.getElementById(entry.inputId);
         if (target && !target.disabled) target.focus();
       });
