@@ -731,12 +731,20 @@ ol.sfnav-flowdebug-steps li::before {
 .sfnav-ask-status-error   { color: var(--sf-error); }
 
 #sfnav-ask-output {
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* One Q&A turn in the conversation thread. Holds its own copy button, so it
+   must be the positioned ancestor (the container can stack several turns). */
+.sfnav-ask-turn {
   border: 1px solid var(--sf-rule);
   background: var(--sf-rule-soft);
   border-radius: var(--sf-radius);
   padding: 12px 14px;
   position: relative;
-  margin-top: 4px;
   padding-right: 100px;
 }
 
