@@ -1,3 +1,5 @@
+var SF_ID_RE = /^[a-zA-Z0-9]{15}([a-zA-Z0-9]{3})?$/;
+
 function fuzzyScore(query, target) {
   const q = query.toLowerCase();
   const t = target.toLowerCase();
@@ -447,6 +449,16 @@ function resolveInput(rawInput) {
       hint: shortcutMatches.length
         ? 'Pick a shortcut or keep typing'
         : 'No matching shortcut — drop the @ to search objects and setup'
+    };
+  }
+
+  // Bare record ID (15 or 18 alphanumeric chars) — navigate directly to the record
+  var trimmed = rawInput.trim();
+  if (SF_ID_RE.test(trimmed)) {
+    return {
+      mode: 'search',
+      results: [{ label: trimmed, sublabel: 'Go to record', url: getOrgBase() + '/lightning/r/' + trimmed + '/view' }],
+      hint: null
     };
   }
 
