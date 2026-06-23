@@ -787,9 +787,10 @@ function buildInitialUserContent(image, ctx, question) {
 // context }. When present we skip screenshot capture and context enrichment —
 // the turn-1 snapshot already lives in the message history (and the prompt
 // cache), and the model can still pull fresh org data through its tools.
-async function runAsk(question, onActivity, conversation) {
+async function runAsk(question, onActivity, conversation, options) {
   if (!question || !question.trim()) throw new Error('Type a question first');
   function emit(ev) { if (typeof onActivity === 'function') { try { onActivity(ev); } catch (_) {} } }
+  var includeScreenshot = !options || options.includeScreenshot !== false;
 
   var systemBlocks, messages, enrichedCtx;
   if (conversation && conversation.messages && conversation.messages.length) {
@@ -802,7 +803,9 @@ async function runAsk(question, onActivity, conversation) {
     messages.push({ role: 'user', content: question });
   } else {
     var ctx = getAskOrgContext();
-    var imageP = captureVisibleTab().then(function (img) { emit({ kind: 'captured' }); return img; });
+    var imageP = includeScreenshot
+      ? captureVisibleTab().then(function (img) { emit({ kind: 'captured' }); return img; })
+      : Promise.resolve(null);
     var ctxP = enrichAskContext(ctx).then(function (enriched) { emit({ kind: 'enriched', ctx: enriched }); return enriched; });
     var both = await Promise.all([imageP, ctxP]);
     var image = both[0];
@@ -923,12 +926,16 @@ function addToAskHistory(entry) {
     var key = getOrgCacheKey(ASK_HISTORY_KEY);
     chrome.storage.local.get(key, function (data) {
       var list = data[key] || [];
-      list.unshift({
-        question: entry.question,
-        answer: entry.answer,
+      var record = {
+        turns: entry.turns,
         contextLine: entry.contextLine || '',
-        timestamp: Date.now()
-      });
+        timestamp: entry.update && list.length ? list[0].timestamp : Date.now()
+      };
+      if (entry.update && list.length) {
+        list[0] = record;
+      } else {
+        list.unshift(record);
+      }
       list = list.slice(0, ASK_HISTORY_MAX);
       var payload = {};
       payload[key] = list;
