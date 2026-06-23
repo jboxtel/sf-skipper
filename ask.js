@@ -783,24 +783,39 @@ function buildInitialUserContent(image, ctx, question) {
 //   { kind: 'tool_call', name, input, iteration }
 //   { kind: 'tool_result', name, ok, summary, iteration }
 //   { kind: 'interim_text', text }
-async function runAsk(question, onActivity) {
+// `conversation` (optional) continues a prior turn: { messages, systemBlocks,
+// context }. When present we skip screenshot capture and context enrichment —
+// the turn-1 snapshot already lives in the message history (and the prompt
+// cache), and the model can still pull fresh org data through its tools.
+async function runAsk(question, onActivity, conversation) {
   if (!question || !question.trim()) throw new Error('Type a question first');
   function emit(ev) { if (typeof onActivity === 'function') { try { onActivity(ev); } catch (_) {} } }
 
-  var ctx = getAskOrgContext();
-  var imageP = captureVisibleTab().then(function (img) { emit({ kind: 'captured' }); return img; });
-  var ctxP = enrichAskContext(ctx).then(function (enriched) { emit({ kind: 'enriched', ctx: enriched }); return enriched; });
-  var both = await Promise.all([imageP, ctxP]);
-  var image = both[0];
-  var enrichedCtx = both[1];
+  var systemBlocks, messages, enrichedCtx;
+  if (conversation && conversation.messages && conversation.messages.length) {
+    // Clone so a mid-loop failure leaves the caller's stored thread untouched —
+    // the new turn is only committed by the caller on success. Message objects
+    // are shared (never mutated), only appended to.
+    messages = conversation.messages.slice();
+    systemBlocks = conversation.systemBlocks;
+    enrichedCtx = conversation.context;
+    messages.push({ role: 'user', content: question });
+  } else {
+    var ctx = getAskOrgContext();
+    var imageP = captureVisibleTab().then(function (img) { emit({ kind: 'captured' }); return img; });
+    var ctxP = enrichAskContext(ctx).then(function (enriched) { emit({ kind: 'enriched', ctx: enriched }); return enriched; });
+    var both = await Promise.all([imageP, ctxP]);
+    var image = both[0];
+    enrichedCtx = both[1];
 
-  var systemPrompt = buildAskSystemPrompt();
-  var systemBlocks = [
-    { type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }
-  ];
-  var messages = [
-    { role: 'user', content: buildInitialUserContent(image, enrichedCtx, question) }
-  ];
+    var systemPrompt = buildAskSystemPrompt();
+    systemBlocks = [
+      { type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }
+    ];
+    messages = [
+      { role: 'user', content: buildInitialUserContent(image, enrichedCtx, question) }
+    ];
+  }
 
   var finalText = '';
   var toolCallCount = 0;
@@ -819,6 +834,9 @@ async function runAsk(question, onActivity) {
 
     if (response.stop_reason !== 'tool_use' || !toolUses.length) {
       finalText = textParts.join('\n').trim();
+      // Keep the assistant's final answer in the thread so a follow-up turn
+      // continues from a valid (…user, assistant, user…) sequence.
+      messages.push({ role: 'assistant', content: blocks });
       break;
     }
 
@@ -879,11 +897,14 @@ async function runAsk(question, onActivity) {
       lines.push(escalate.suggestedFollowup);
     }
     finalText = lines.join('\n');
+    // Escalation can break mid tool-use, leaving the thread in a non-continuable
+    // state — the caller treats `escalate` as terminal and won't follow up.
   } else if (!finalText) {
     finalText = '(Reached the ' + ASK_MAX_TOOL_ITERATIONS + '-iteration tool-use cap without a final answer. Try a more specific question.)';
+    messages.push({ role: 'assistant', content: [{ type: 'text', text: finalText }] });
   }
 
-  return { text: finalText, context: enrichedCtx, toolCallCount: toolCallCount, escalate: escalate };
+  return { text: finalText, context: enrichedCtx, toolCallCount: toolCallCount, escalate: escalate, messages: messages, systemBlocks: systemBlocks };
 }
 
 function getAskHistory() {

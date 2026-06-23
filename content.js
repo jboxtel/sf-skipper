@@ -26,6 +26,10 @@
   var flowDebugInFlight = false;
   var askInFlight = false;
   var askHistoryEntries = [];
+  // Live @ask conversation: { messages, systemBlocks, context, turns, ended }.
+  // Null between conversations. Lets follow-up turns continue the same thread.
+  var askConversation = null;
+  var MAX_ASK_TURNS = 3;
   var openInNewTabPref = true;
 
   if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
@@ -166,11 +170,7 @@
           '</div>' +
           '<div id="sfnav-ask-status"></div>' +
           '<ul id="sfnav-ask-activity" style="display:none"></ul>' +
-          '<div id="sfnav-ask-output" style="display:none">' +
-            '<div class="sfnav-ask-output-question" style="display:none"></div>' +
-            '<div class="sfnav-ask-answer"></div>' +
-            '<button class="sfnav-ask-copy">Copy answer</button>' +
-          '</div>' +
+          '<div id="sfnav-ask-output" style="display:none"></div>' +
           '<div id="sfnav-ask-history-label" class="sfnav-section-header" style="display:none">Recent</div>' +
           '<ul id="sfnav-ask-history"></ul>' +
         '</div>' +
@@ -813,6 +813,8 @@
     setFooterHints('ask');
     var input = document.getElementById('sfnav-input');
 
+    askConversation = null; // each @ask entry starts a fresh conversation
+
     input.value = '';
     input.placeholder = 'Use the box below to describe what you’re seeing';
     input.disabled = true;
@@ -823,11 +825,17 @@
     document.getElementById('sfnav-ask').style.display = 'flex';
     document.getElementById('sfnav-ask-status').textContent = '';
     document.getElementById('sfnav-ask-status').className = '';
-    document.getElementById('sfnav-ask-output').style.display = 'none';
+    var outEl = document.getElementById('sfnav-ask-output');
+    outEl.innerHTML = '';
+    outEl.style.display = 'none';
     var actEl = document.getElementById('sfnav-ask-activity');
     actEl.innerHTML = '';
     actEl.style.display = 'none';
-    document.getElementById('sfnav-ask-question').value = initialQuestion || '';
+    var qElInit = document.getElementById('sfnav-ask-question');
+    qElInit.value = initialQuestion || '';
+    qElInit.disabled = false;
+    qElInit.placeholder = 'What’s happening here? Why this error? Anything you want to know about the current screen…';
+    document.getElementById('sfnav-ask-run').disabled = false;
 
     if (typeof getAskHistory === 'function') {
       getAskHistory().then(function (entries) {
@@ -884,6 +892,9 @@
 
   async function runAskQuery() {
     if (askInFlight) return;
+    // Locked after the turn cap (or an escalation); user must Esc to start over.
+    if (askConversation && (askConversation.ended || askConversation.turns >= MAX_ASK_TURNS)) return;
+
     var qEl = document.getElementById('sfnav-ask-question');
     var statusEl = document.getElementById('sfnav-ask-status');
     var outputEl = document.getElementById('sfnav-ask-output');
@@ -906,34 +917,44 @@
       return;
     }
 
+    var isFollowUp = !!(askConversation && askConversation.messages);
+
     askInFlight = true;
     runBtn.disabled = true;
     qEl.disabled = true;
-    statusEl.textContent = 'Capturing screen + loading record';
     statusEl.className = 'sfnav-ask-status-loading sfnav-progress-dots';
-    outputEl.style.display = 'none';
 
-    // Hide the palette so it doesn't end up in the screenshot. We restore it as
-    // soon as captureVisibleTab returns — well before the Claude round-trip.
+    // Turn 1 captures a screenshot, so the palette must be hidden then restored.
+    // Follow-ups reuse the turn-1 snapshot — no capture, no overlay dance.
     var prevDisplay = overlay.style.display;
-    overlay.style.display = 'none';
-
     var restored = false;
     function restoreOverlay() {
       if (restored) return;
       restored = true;
       overlay.style.display = prevDisplay || 'flex';
     }
+    if (isFollowUp) {
+      restored = true; // nothing to restore
+      statusEl.textContent = 'Thinking';
+    } else {
+      statusEl.textContent = 'Capturing screen + loading record';
+      overlay.style.display = 'none';
+      outputEl.innerHTML = '';
+      outputEl.style.display = 'none';
+    }
 
     var activityEl = document.getElementById('sfnav-ask-activity');
     activityEl.innerHTML = '';
     activityEl.style.display = 'none';
 
+    var lockAfter = false;
     try {
-      // Force a paint frame so the screenshot doesn't catch a half-rendered overlay
-      await new Promise(function (resolve) {
-        requestAnimationFrame(function () { requestAnimationFrame(resolve); });
-      });
+      if (!isFollowUp) {
+        // Force a paint frame so the screenshot doesn't catch a half-rendered overlay
+        await new Promise(function (resolve) {
+          requestAnimationFrame(function () { requestAnimationFrame(resolve); });
+        });
+      }
       var result = await runAsk(question, function (event) {
         if (event.kind === 'captured') {
           restoreOverlay();
@@ -955,15 +976,32 @@
         } else if (event.kind === 'escalate') {
           appendAskInterim(activityEl, 'Escalating to claude.ai — ' + event.reason);
         }
-      });
+      }, isFollowUp ? askConversation : null);
       restoreOverlay();
+
+      // Persist the conversation so the next turn continues this thread.
+      if (isFollowUp) {
+        askConversation.messages = result.messages;
+        askConversation.turns += 1;
+        if (result.escalate) askConversation.ended = true;
+      } else {
+        askConversation = {
+          messages: result.messages,
+          systemBlocks: result.systemBlocks,
+          context: result.context,
+          turns: 1,
+          ended: !!result.escalate
+        };
+      }
+
       var ctxForEntry = result.context || {};
       var ctxBits = [];
       if (ctxForEntry.pageType)  ctxBits.push(ctxForEntry.pageType);
       if (ctxForEntry.sObject)   ctxBits.push(ctxForEntry.sObject);
       if (ctxForEntry.setupNode) ctxBits.push(ctxForEntry.setupNode);
       var contextLineForEntry = ctxBits.join(' · ');
-      renderAskOutput({ question: question, answer: result.text || '' });
+      appendAskTurnBlock(question, result.text || '');
+      qEl.value = '';
       if (typeof addToAskHistory === 'function' && result.text) {
         var updated = await addToAskHistory({
           question: question,
@@ -977,18 +1015,58 @@
         ? 'Done · ' + result.toolCallCount + ' tool call' + (result.toolCallCount === 1 ? '' : 's')
         : 'Done';
       statusEl.className = 'sfnav-ask-status-ok';
+
+      // Update the follow-up affordance, or lock the box at the cap / escalation.
+      if (askConversation.ended || askConversation.turns >= MAX_ASK_TURNS) {
+        lockAfter = true;
+        qEl.placeholder = 'Conversation limit reached — Esc to start a new @ask';
+      } else {
+        qEl.placeholder = 'Ask a follow-up… (turn ' + (askConversation.turns + 1) + ' of ' + MAX_ASK_TURNS + ')';
+      }
     } catch (err) {
       restoreOverlay();
       statusEl.textContent = 'Error: ' + err.message;
       statusEl.className = 'sfnav-ask-status-error';
-      outputEl.style.display = 'none';
       console.warn('sfnav: ask failed —', err);
     } finally {
       askInFlight = false;
-      runBtn.disabled = false;
-      qEl.disabled = false;
+      if (!lockAfter) {
+        runBtn.disabled = false;
+        qEl.disabled = false;
+      }
       qEl.focus();
     }
+  }
+
+  // Append one Q&A turn to the ask thread. Reuses the original single-block
+  // classes so existing CSS applies; the container now holds N stacked turns.
+  function appendAskTurnBlock(question, answer) {
+    var outputEl = document.getElementById('sfnav-ask-output');
+    var turn = document.createElement('div');
+    turn.className = 'sfnav-ask-turn';
+    var qDiv = document.createElement('div');
+    qDiv.className = 'sfnav-ask-output-question';
+    qDiv.textContent = question || '';
+    if (!question) qDiv.style.display = 'none';
+    var aDiv = document.createElement('div');
+    aDiv.className = 'sfnav-ask-answer';
+    aDiv.innerHTML = renderAskMarkdown(answer || '');
+    var copyBtn = document.createElement('button');
+    copyBtn.className = 'sfnav-ask-copy';
+    copyBtn.textContent = 'Copy answer';
+    copyBtn.onclick = function () {
+      navigator.clipboard.writeText(answer || '').then(function () {
+        var prev = copyBtn.textContent;
+        copyBtn.textContent = 'Copied!';
+        setTimeout(function () { copyBtn.textContent = prev; }, 1500);
+      });
+    };
+    turn.appendChild(qDiv);
+    turn.appendChild(aDiv);
+    turn.appendChild(copyBtn);
+    outputEl.appendChild(turn);
+    outputEl.style.display = 'block';
+    turn.scrollIntoView({ block: 'nearest' });
   }
 
   // Human-readable label for each tool. Kept in content.js (not ask.js) so the
@@ -1041,28 +1119,20 @@
     activityEl.appendChild(li);
   }
 
+  // Display a stored history entry. A past entry has no retained message thread,
+  // so this resets the live conversation — typing afterwards starts fresh.
   function renderAskOutput(entry) {
+    askConversation = null;
     var outputEl = document.getElementById('sfnav-ask-output');
-    var questionEl = outputEl.querySelector('.sfnav-ask-output-question');
-    var answerEl = outputEl.querySelector('.sfnav-ask-answer');
-    var copyBtn  = outputEl.querySelector('.sfnav-ask-copy');
-    var question = (entry && entry.question) || '';
-    var answer = (entry && entry.answer) || '';
-    if (question) {
-      questionEl.textContent = question;
-      questionEl.style.display = 'block';
-    } else {
-      questionEl.style.display = 'none';
+    outputEl.innerHTML = '';
+    var qEl = document.getElementById('sfnav-ask-question');
+    if (qEl) {
+      qEl.disabled = false;
+      qEl.placeholder = 'What’s happening here? Why this error? Anything you want to know about the current screen…';
     }
-    answerEl.innerHTML = renderAskMarkdown(answer);
-    copyBtn.onclick = function () {
-      navigator.clipboard.writeText(answer).then(function () {
-        var prev = copyBtn.textContent;
-        copyBtn.textContent = 'Copied!';
-        setTimeout(function () { copyBtn.textContent = prev; }, 1500);
-      });
-    };
-    outputEl.style.display = 'block';
+    var runBtn = document.getElementById('sfnav-ask-run');
+    if (runBtn) runBtn.disabled = false;
+    appendAskTurnBlock((entry && entry.question) || '', (entry && entry.answer) || '');
   }
 
   function formatAskTimeAgo(ts) {
@@ -1180,7 +1250,8 @@
     }
     if (searchMode === 'ask') {
       var qEl = document.getElementById('sfnav-ask-question');
-      var aEl = document.querySelector('#sfnav-ask-output .sfnav-ask-answer');
+      var answerEls = document.querySelectorAll('#sfnav-ask-output .sfnav-ask-answer');
+      var aEl = answerEls.length ? answerEls[answerEls.length - 1] : null;
       var question = (qEl && qEl.value || '').trim();
       var answer = (aEl && aEl.textContent || '').trim();
       if ((!question || !answer) && askHistoryEntries && askHistoryEntries.length) {
