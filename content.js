@@ -188,6 +188,7 @@
             '</div>' +
             '<div id="sfnav-ask-status-row">' +
               '<span id="sfnav-ask-status"></span>' +
+              '<label class="sfnav-ask-screenshot-label"><input type="checkbox" id="sfnav-ask-screenshot" checked /> Screenshot</label>' +
               '<span id="sfnav-ask-apistat" class="sfnav-apistat"></span>' +
             '</div>' +
           '</div>' +
@@ -1011,6 +1012,8 @@
     }
 
     var isFollowUp = !!(askConversation && askConversation.messages);
+    var screenshotEl = document.getElementById('sfnav-ask-screenshot');
+    var includeScreenshot = !screenshotEl || screenshotEl.checked;
 
     // Show the user bubble immediately, clear the input.
     appendUserBubble(question);
@@ -1024,6 +1027,7 @@
     askInFlight = true;
     runBtn.disabled = true;
     qEl.disabled = true;
+    if (screenshotEl) screenshotEl.disabled = true;
     statusEl.className = 'sfnav-ask-status-loading sfnav-progress-dots';
 
     var prevDisplay = overlay.style.display;
@@ -1033,9 +1037,9 @@
       restored = true;
       overlay.style.display = prevDisplay || 'flex';
     }
-    if (isFollowUp) {
+    if (isFollowUp || !includeScreenshot) {
       restored = true;
-      statusEl.textContent = 'Thinking';
+      statusEl.textContent = isFollowUp ? 'Thinking' : 'Loading record';
     } else {
       statusEl.textContent = 'Capturing screen + loading record';
       overlay.style.display = 'none';
@@ -1069,7 +1073,7 @@
         } else if (event.kind === 'escalate') {
           appendAskInterim(activityEl, 'Escalating to claude.ai — ' + event.reason);
         }
-      }, isFollowUp ? askConversation : null);
+      }, isFollowUp ? askConversation : null, { includeScreenshot: includeScreenshot });
       restoreOverlay();
 
       if (isFollowUp) {
@@ -1099,9 +1103,9 @@
       var contextLineForEntry = ctxBits.join(' · ');
       if (typeof addToAskHistory === 'function' && result.text) {
         var updated = await addToAskHistory({
-          question: question,
-          answer: result.text,
-          contextLine: contextLineForEntry
+          turns: askConversation.qas,
+          contextLine: contextLineForEntry,
+          update: isFollowUp
         });
         if (updated) askHistoryEntries = updated;
       }
@@ -1123,6 +1127,7 @@
       console.warn('sfnav: ask failed —', err);
     } finally {
       askInFlight = false;
+      if (screenshotEl) screenshotEl.disabled = false;
       if (!lockAfter) {
         runBtn.disabled = false;
         qEl.disabled = false;
@@ -1321,7 +1326,8 @@
     var statusEl = document.getElementById('sfnav-ask-status');
     if (statusEl) { statusEl.textContent = ''; statusEl.className = ''; }
     updateAskDots(0);
-    appendAskTurnBlock((entry && entry.question) || '', (entry && entry.answer) || '');
+    var turns = (entry && entry.turns) || [{ q: (entry && entry.question) || '', a: (entry && entry.answer) || '' }];
+    turns.forEach(function (t) { appendAskTurnBlock(t.q, t.a); });
   }
 
   function formatAskTimeAgo(ts) {
@@ -1358,9 +1364,12 @@
     visible.forEach(function (entry) {
       var li = document.createElement('li');
       li.className = 'sfnav-ask-history-item';
+      var entryTurns = entry.turns || [{ q: entry.question || '' }];
+      var firstQ = (entryTurns[0] && entryTurns[0].q) || '';
+      var metaText = (entryTurns.length > 1 ? entryTurns.length + ' turns · ' : '') + formatAskTimeAgo(entry.timestamp);
       li.innerHTML =
-        '<span class="sfnav-ask-history-q">' + esc(entry.question || '') + '</span>' +
-        '<span class="sfnav-ask-history-meta">' + esc(formatAskTimeAgo(entry.timestamp)) + '</span>';
+        '<span class="sfnav-ask-history-q">' + esc(firstQ) + '</span>' +
+        '<span class="sfnav-ask-history-meta">' + esc(metaText) + '</span>';
       li.addEventListener('click', function () {
         renderAskOutput(entry);
       });

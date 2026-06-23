@@ -874,6 +874,17 @@ ol.sfnav-flowdebug-steps li::before {
 .sfnav-ask-status-ok      { color: var(--sf-success); }
 .sfnav-ask-status-error   { color: var(--sf-error); }
 
+.sfnav-ask-screenshot-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--sf-ink-soft);
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+
 /* ─── Handoff card ─────────────────────────────────── */
 
 #sfnav-ask-handoff {
