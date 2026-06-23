@@ -107,7 +107,8 @@
     'flow-picker':    '@flows',
     'cmd-picker':     '@cmd',
     'label-picker':   '@label',
-    'permset-picker': '@permset'
+    'permset-picker': '@permset',
+    'id-entry':       '@id'
   };
 
   function renderBreadcrumbHtml(segments) {
@@ -174,17 +175,23 @@
           '</div>' +
         '</div>' +
         '<div id="sfnav-ask" style="display:none">' +
-          '<div id="sfnav-ask-meta"></div>' +
-          '<textarea id="sfnav-ask-question" placeholder="What’s happening here? Why this error? Anything you want to know about the current screen…" spellcheck="false"></textarea>' +
-          '<div id="sfnav-ask-actions">' +
-            '<button id="sfnav-ask-run" class="sfnav-soql-btn-primary">Ask <span class="sfnav-kbd">↵</span></button>' +
-            '<span id="sfnav-ask-apistat" class="sfnav-apistat"></span>' +
+          '<div id="sfnav-ask-scroll">' +
+            '<div id="sfnav-ask-meta"></div>' +
+            '<div id="sfnav-ask-output"></div>' +
+            '<div id="sfnav-ask-history-label" class="sfnav-section-header" style="display:none">Recent</div>' +
+            '<ul id="sfnav-ask-history"></ul>' +
           '</div>' +
-          '<div id="sfnav-ask-status"></div>' +
-          '<ul id="sfnav-ask-activity" style="display:none"></ul>' +
-          '<div id="sfnav-ask-output" style="display:none"></div>' +
-          '<div id="sfnav-ask-history-label" class="sfnav-section-header" style="display:none">Recent</div>' +
-          '<ul id="sfnav-ask-history"></ul>' +
+          '<div id="sfnav-ask-composer">' +
+            '<div id="sfnav-ask-input-row">' +
+              '<textarea id="sfnav-ask-question" placeholder="What’s happening here? Why this error? Anything you want to know about the current screen…" spellcheck="false"></textarea>' +
+              '<button id="sfnav-ask-run" class="sfnav-soql-btn-primary sfnav-ask-run-btn">Ask <span class="sfnav-kbd">↵</span></button>' +
+            '</div>' +
+            '<div id="sfnav-ask-status-row">' +
+              '<span id="sfnav-ask-status"></span>' +
+              '<span id="sfnav-ask-apistat" class="sfnav-apistat"></span>' +
+            '</div>' +
+          '</div>' +
+          '<div id="sfnav-ask-handoff" style="display:none"></div>' +
         '</div>' +
         '<div id="sfnav-feedback" style="display:none">' +
           '<div id="sfnav-feedback-context" style="display:none"></div>' +
@@ -311,6 +318,8 @@
         renderResults(resolvePermsetPicker(val));
       } else if (searchMode === 'setup-picker') {
         renderResults(resolveSetupPicker(val));
+      } else if (searchMode === 'id-entry') {
+        renderResults(resolveIdEntry(val));
       } else if (searchMode === 'cmd-scoped') {
         renderResults(resolveCmdtScoped(val, scopedCmdt));
       } else if (searchMode === 'soql') {
@@ -349,6 +358,11 @@
     if (searchMode === 'root') { hidePalette(); return; }
     var custom = MODE_BACK_HANDLERS[searchMode];
     if (custom) { custom(); return; }
+    // Esc from an active @ask thread (or handoff) starts a fresh @ask session.
+    if (searchMode === 'ask' && askConversation) {
+      enterAskMode('');
+      return;
+    }
     goToRoot();
   }
 
@@ -394,6 +408,7 @@
       case 'label':   enterLabelPickerMode(filterText || '');   return;
       case 'permset': enterPermsetPickerMode(filterText || ''); return;
       case 'setup':   enterSetupPickerMode(filterText || '');   return;
+      case 'id':      enterIdEntryMode(filterText || '');      return;
       case 'ask':     enterAskMode(filterText || '');           return;
       case 'soql':       enterSoqlMode();        return;
       case 'flow-debug': enterFlowDebugMode();   return;
@@ -649,6 +664,15 @@
     input.focus();
   }
 
+  function enterIdEntryMode(filterText) {
+    searchMode = 'id-entry';
+    var input = document.getElementById('sfnav-input');
+    input.value = filterText || '';
+    input.placeholder = 'Paste a record ID (15 or 18 characters)…';
+    renderResults(resolveIdEntry(filterText || ''));
+    input.focus();
+  }
+
   function enterCmdPickerMode(filterText) {
     searchMode = 'cmd-picker';
     scopedCmdt = null;
@@ -869,7 +893,7 @@
     setFooterHints('ask');
     var input = document.getElementById('sfnav-input');
 
-    askConversation = null; // each @ask entry starts a fresh conversation
+    askConversation = null;
 
     input.value = '';
     input.placeholder = 'Use the box below to describe what you’re seeing';
@@ -879,18 +903,23 @@
     document.getElementById('sfnav-breadcrumb').innerHTML = renderBreadcrumbHtml([{ text: '@ask' }]);
     document.getElementById('sfnav-breadcrumb').style.display = 'flex';
     document.getElementById('sfnav-ask').style.display = 'flex';
-    document.getElementById('sfnav-ask-status').textContent = '';
-    document.getElementById('sfnav-ask-status').className = '';
-    var outEl = document.getElementById('sfnav-ask-output');
-    outEl.innerHTML = '';
-    outEl.style.display = 'none';
-    var actEl = document.getElementById('sfnav-ask-activity');
-    actEl.innerHTML = '';
-    actEl.style.display = 'none';
+
+    // Clear thread
+    document.getElementById('sfnav-ask-output').innerHTML = '';
+
+    // Show composer, hide handoff
+    document.getElementById('sfnav-ask-composer').style.display = 'flex';
+    document.getElementById('sfnav-ask-handoff').style.display = 'none';
+
+    // Reset composer
+    var statusEl = document.getElementById('sfnav-ask-status');
+    statusEl.textContent = '';
+    statusEl.className = '';
     var qElInit = document.getElementById('sfnav-ask-question');
     qElInit.value = initialQuestion || '';
     qElInit.disabled = false;
     qElInit.placeholder = 'What’s happening here? Why this error? Anything you want to know about the current screen…';
+    qElInit.style.height = 'auto';
     document.getElementById('sfnav-ask-run').disabled = false;
 
     if (typeof getAskHistory === 'function') {
@@ -900,21 +929,27 @@
       });
     }
 
+    // Meta line: context breadcrumb + turn dots
     var metaEl = document.getElementById('sfnav-ask-meta');
     var ctx = (typeof getAskOrgContext === 'function') ? getAskOrgContext() : null;
+    var contextText = '';
     if (ctx) {
       var bits = [];
       if (ctx.pageType)  bits.push(ctx.pageType);
       if (ctx.sObject)   bits.push(ctx.sObject);
       if (ctx.setupNode) bits.push(ctx.setupNode);
-      var line = bits.length ? 'Context: ' + bits.join(' · ') : 'Context: ' + ctx.host;
+      contextText = bits.length ? 'Context: ' + bits.join(' · ') : 'Context: ' + ctx.host;
       if (ctx.pageType === 'record' && ctx.sObject && ctx.recordId) {
-        line += ' · sending live record fields';
+        contextText += ' · sending live record fields';
       }
-      metaEl.textContent = line;
-    } else {
-      metaEl.textContent = '';
     }
+    metaEl.innerHTML =
+      '<span>' + esc(contextText) + '</span>' +
+      '<span id="sfnav-ask-dots" aria-label="0 of 3 questions used">' +
+        '<span class="sfnav-ask-dot">○</span>' +
+        '<span class="sfnav-ask-dot">○</span>' +
+        '<span class="sfnav-ask-dot">○</span>' +
+      '</span>';
 
     hasSoqlApiKey().then(function (ok) {
       var el = document.getElementById('sfnav-ask-apistat');
@@ -933,6 +968,10 @@
     document.getElementById('sfnav-ask-run').onclick = runAskQuery;
 
     var qEl = document.getElementById('sfnav-ask-question');
+    qEl.oninput = function () {
+      this.style.height = 'auto';
+      this.style.height = Math.min(this.scrollHeight, 110) + 'px';
+    };
     qEl.onkeydown = function (e) {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
@@ -948,12 +987,10 @@
 
   async function runAskQuery() {
     if (askInFlight) return;
-    // Locked after the turn cap (or an escalation); user must Esc to start over.
     if (askConversation && (askConversation.ended || askConversation.turns >= MAX_ASK_TURNS)) return;
 
     var qEl = document.getElementById('sfnav-ask-question');
     var statusEl = document.getElementById('sfnav-ask-status');
-    var outputEl = document.getElementById('sfnav-ask-output');
     var runBtn = document.getElementById('sfnav-ask-run');
     var overlay = document.getElementById('sfnav-overlay');
 
@@ -975,13 +1012,20 @@
 
     var isFollowUp = !!(askConversation && askConversation.messages);
 
+    // Show the user bubble immediately, clear the input.
+    appendUserBubble(question);
+    hideAskHistory();
+    qEl.value = '';
+    qEl.style.height = 'auto';
+
+    // Per-turn activity container sits between the user bubble and the answer.
+    var activityEl = createAskActivityContainer();
+
     askInFlight = true;
     runBtn.disabled = true;
     qEl.disabled = true;
     statusEl.className = 'sfnav-ask-status-loading sfnav-progress-dots';
 
-    // Turn 1 captures a screenshot, so the palette must be hidden then restored.
-    // Follow-ups reuse the turn-1 snapshot — no capture, no overlay dance.
     var prevDisplay = overlay.style.display;
     var restored = false;
     function restoreOverlay() {
@@ -990,23 +1034,16 @@
       overlay.style.display = prevDisplay || 'flex';
     }
     if (isFollowUp) {
-      restored = true; // nothing to restore
+      restored = true;
       statusEl.textContent = 'Thinking';
     } else {
       statusEl.textContent = 'Capturing screen + loading record';
       overlay.style.display = 'none';
-      outputEl.innerHTML = '';
-      outputEl.style.display = 'none';
     }
-
-    var activityEl = document.getElementById('sfnav-ask-activity');
-    activityEl.innerHTML = '';
-    activityEl.style.display = 'none';
 
     var lockAfter = false;
     try {
       if (!isFollowUp) {
-        // Force a paint frame so the screenshot doesn't catch a half-rendered overlay
         await new Promise(function (resolve) {
           requestAnimationFrame(function () { requestAnimationFrame(resolve); });
         });
@@ -1035,10 +1072,10 @@
       }, isFollowUp ? askConversation : null);
       restoreOverlay();
 
-      // Persist the conversation so the next turn continues this thread.
       if (isFollowUp) {
         askConversation.messages = result.messages;
         askConversation.turns += 1;
+        askConversation.qas.push({ q: question, a: result.text || '' });
         if (result.escalate) askConversation.ended = true;
       } else {
         askConversation = {
@@ -1046,9 +1083,13 @@
           systemBlocks: result.systemBlocks,
           context: result.context,
           turns: 1,
-          ended: !!result.escalate
+          ended: !!result.escalate,
+          qas: [{ q: question, a: result.text || '' }]
         };
       }
+
+      appendAssistantMessage(result.text || '');
+      updateAskDots(askConversation.turns);
 
       var ctxForEntry = result.context || {};
       var ctxBits = [];
@@ -1056,8 +1097,6 @@
       if (ctxForEntry.sObject)   ctxBits.push(ctxForEntry.sObject);
       if (ctxForEntry.setupNode) ctxBits.push(ctxForEntry.setupNode);
       var contextLineForEntry = ctxBits.join(' · ');
-      appendAskTurnBlock(question, result.text || '');
-      qEl.value = '';
       if (typeof addToAskHistory === 'function' && result.text) {
         var updated = await addToAskHistory({
           question: question,
@@ -1065,19 +1104,17 @@
           contextLine: contextLineForEntry
         });
         if (updated) askHistoryEntries = updated;
-        renderAskHistoryList();
       }
       statusEl.textContent = result.toolCallCount
         ? 'Done · ' + result.toolCallCount + ' tool call' + (result.toolCallCount === 1 ? '' : 's')
         : 'Done';
       statusEl.className = 'sfnav-ask-status-ok';
 
-      // Update the follow-up affordance, or lock the box at the cap / escalation.
       if (askConversation.ended || askConversation.turns >= MAX_ASK_TURNS) {
         lockAfter = true;
-        qEl.placeholder = 'Conversation limit reached — Esc to start a new @ask';
+        showAskHandoff();
       } else {
-        qEl.placeholder = 'Ask a follow-up… (turn ' + (askConversation.turns + 1) + ' of ' + MAX_ASK_TURNS + ')';
+        qEl.placeholder = 'Ask a follow-up…';
       }
     } catch (err) {
       restoreOverlay();
@@ -1089,21 +1126,30 @@
       if (!lockAfter) {
         runBtn.disabled = false;
         qEl.disabled = false;
+        qEl.focus();
       }
-      qEl.focus();
     }
   }
 
-  // Append one Q&A turn to the ask thread. Reuses the original single-block
-  // classes so existing CSS applies; the container now holds N stacked turns.
+  // Used when replaying a history entry (no live conversation thread).
   function appendAskTurnBlock(question, answer) {
+    if (question) appendUserBubble(question);
+    appendAssistantMessage(answer);
+  }
+
+  function appendUserBubble(question) {
     var outputEl = document.getElementById('sfnav-ask-output');
-    var turn = document.createElement('div');
-    turn.className = 'sfnav-ask-turn';
-    var qDiv = document.createElement('div');
-    qDiv.className = 'sfnav-ask-output-question';
-    qDiv.textContent = question || '';
-    if (!question) qDiv.style.display = 'none';
+    var bubble = document.createElement('div');
+    bubble.className = 'sfnav-ask-bubble-user';
+    bubble.textContent = question || '';
+    outputEl.appendChild(bubble);
+    scrollAskThreadToBottom();
+  }
+
+  function appendAssistantMessage(answer) {
+    var outputEl = document.getElementById('sfnav-ask-output');
+    var wrap = document.createElement('div');
+    wrap.className = 'sfnav-ask-answer-wrap';
     var aDiv = document.createElement('div');
     aDiv.className = 'sfnav-ask-answer';
     aDiv.innerHTML = renderAskMarkdown(answer || '');
@@ -1117,12 +1163,92 @@
         setTimeout(function () { copyBtn.textContent = prev; }, 1500);
       });
     };
-    turn.appendChild(qDiv);
-    turn.appendChild(aDiv);
-    turn.appendChild(copyBtn);
-    outputEl.appendChild(turn);
-    outputEl.style.display = 'block';
-    turn.scrollIntoView({ block: 'nearest' });
+    wrap.appendChild(aDiv);
+    wrap.appendChild(copyBtn);
+    outputEl.appendChild(wrap);
+    scrollAskThreadToBottom();
+  }
+
+  // Creates a per-turn activity container appended to the output thread,
+  // positioned between the user bubble and the assistant answer for that turn.
+  function createAskActivityContainer() {
+    var outputEl = document.getElementById('sfnav-ask-output');
+    var ul = document.createElement('ul');
+    ul.className = 'sfnav-ask-activity';
+    ul.style.display = 'none';
+    outputEl.appendChild(ul);
+    return ul;
+  }
+
+  function scrollAskThreadToBottom() {
+    var scrollEl = document.getElementById('sfnav-ask-scroll');
+    if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight;
+  }
+
+  function hideAskHistory() {
+    var labelEl = document.getElementById('sfnav-ask-history-label');
+    var listEl = document.getElementById('sfnav-ask-history');
+    if (labelEl) labelEl.style.display = 'none';
+    if (listEl) listEl.style.display = 'none';
+  }
+
+  function updateAskDots(n) {
+    var el = document.getElementById('sfnav-ask-dots');
+    if (!el) return;
+    var dots = el.querySelectorAll('.sfnav-ask-dot');
+    dots.forEach(function (dot, i) {
+      dot.textContent = i < n ? '●' : '○';
+      dot.classList.toggle('sfnav-ask-dot-filled', i < n);
+    });
+    el.setAttribute('aria-label', n + ' of ' + MAX_ASK_TURNS + ' questions used');
+  }
+
+  function showAskHandoff() {
+    var composerEl = document.getElementById('sfnav-ask-composer');
+    var handoffEl = document.getElementById('sfnav-ask-handoff');
+    if (composerEl) composerEl.style.display = 'none';
+    if (!handoffEl) return;
+    handoffEl.innerHTML =
+      '<div class="sfnav-ask-handoff-heading">This thread is wrapping up</div>' +
+      '<p class="sfnav-ask-handoff-body">Skipper keeps @ask short and grounded in your org. For deeper back-and-forth, claude.ai is the better fit.</p>' +
+      '<div class="sfnav-ask-handoff-actions">' +
+        '<button id="sfnav-ask-handoff-open" class="sfnav-soql-btn-primary">Open in claude.ai ↗</button>' +
+        '<button id="sfnav-ask-handoff-new" class="sfnav-soql-btn-secondary">New @ask <span class="sfnav-kbd">Esc</span></button>' +
+      '</div>';
+    handoffEl.style.display = 'flex';
+    var openBtn = document.getElementById('sfnav-ask-handoff-open');
+    if (openBtn) {
+      openBtn.onclick = function () {
+        var url = buildClaudeAiDeepLink();
+        window.open(url, '_blank');
+      };
+    }
+    var newBtn = document.getElementById('sfnav-ask-handoff-new');
+    if (newBtn) {
+      newBtn.onclick = function () { enterAskMode(''); };
+    }
+    scrollAskThreadToBottom();
+  }
+
+  function buildClaudeAiDeepLink() {
+    var MAX_CHARS = 1800;
+    if (!askConversation || !askConversation.qas || !askConversation.qas.length) {
+      return 'https://claude.ai/new';
+    }
+    var lines = [
+      'I was investigating this in my Salesforce org via the Skipper extension. Here’s the thread so far:',
+      ''
+    ];
+    askConversation.qas.forEach(function (qa) {
+      lines.push('Q: ' + qa.q);
+      var answer = qa.a.length > 400 ? qa.a.slice(0, 397) + '…' : qa.a;
+      lines.push('A: ' + answer);
+      lines.push('');
+    });
+    lines.push('Continue helping me figure this out.');
+    var text = lines.join('\n');
+    if (text.length > MAX_CHARS) text = text.slice(0, MAX_CHARS - 1) + '…';
+    return 'https://claude.ai/new?q=' + encodeURIComponent(text);
   }
 
   // Human-readable label for each tool. Kept in content.js (not ask.js) so the
@@ -1179,15 +1305,22 @@
   // so this resets the live conversation — typing afterwards starts fresh.
   function renderAskOutput(entry) {
     askConversation = null;
-    var outputEl = document.getElementById('sfnav-ask-output');
-    outputEl.innerHTML = '';
+    document.getElementById('sfnav-ask-output').innerHTML = '';
+    var composerEl = document.getElementById('sfnav-ask-composer');
+    if (composerEl) composerEl.style.display = 'flex';
+    var handoffEl = document.getElementById('sfnav-ask-handoff');
+    if (handoffEl) handoffEl.style.display = 'none';
     var qEl = document.getElementById('sfnav-ask-question');
     if (qEl) {
       qEl.disabled = false;
       qEl.placeholder = 'What’s happening here? Why this error? Anything you want to know about the current screen…';
+      qEl.style.height = 'auto';
     }
     var runBtn = document.getElementById('sfnav-ask-run');
     if (runBtn) runBtn.disabled = false;
+    var statusEl = document.getElementById('sfnav-ask-status');
+    if (statusEl) { statusEl.textContent = ''; statusEl.className = ''; }
+    updateAskDots(0);
     appendAskTurnBlock((entry && entry.question) || '', (entry && entry.answer) || '');
   }
 
@@ -1209,7 +1342,7 @@
     var listEl = document.getElementById('sfnav-ask-history');
     var labelEl = document.getElementById('sfnav-ask-history-label');
     if (!listEl || !labelEl) return;
-    if (!askHistoryEntries.length) {
+    if (!askHistoryEntries.length || askConversation) {
       labelEl.style.display = 'none';
       listEl.style.display = 'none';
       listEl.innerHTML = '';
