@@ -2,6 +2,7 @@
   const SF_HOST_RE = /^https:\/\/[^/]+\.(lightning\.force\.com|salesforce\.com|salesforce-setup\.com|force\.com)\//;
 
   const kbdEl = document.getElementById('kbd');
+  const noteEl = document.getElementById('note');
   const isMac = /Mac/i.test(navigator.platform);
   if (kbdEl && typeof sfnavPaletteShortcut === 'function') {
     kbdEl.textContent = sfnavPaletteShortcut();
@@ -11,14 +12,24 @@
     const cmd = commands.find(c => c.name === 'open-palette');
     if (cmd && !cmd.shortcut) {
       if (kbdEl) {
-        kbdEl.textContent = 'Not set';
+        kbdEl.textContent = 'Shortcut not set';
         kbdEl.classList.add('warn');
       }
-      showNote('No shortcut set — go to chrome://extensions/shortcuts to assign ' + (isMac ? '⌘⇧K' : 'Ctrl+Shift+K') + '.', true);
+      noteEl.textContent = 'No shortcut set. ';
+      noteEl.classList.add('warn');
+      noteEl.classList.remove('hidden');
+      const link = document.createElement('a');
+      link.textContent = 'Set it up →';
+      link.href = '#';
+      link.style.cssText = 'color:inherit;text-decoration:underline;cursor:pointer';
+      link.addEventListener('click', (e) => {
+        e.preventDefault();
+        chrome.tabs.create({ url: 'chrome://extensions/shortcuts' });
+        window.close();
+      });
+      noteEl.appendChild(link);
     }
   });
-
-  const noteEl = document.getElementById('note');
   const paletteBtn = document.getElementById('openPalette');
 
   function showNote(text, warn) {
