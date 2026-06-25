@@ -916,18 +916,6 @@ ol.sfnav-flowdebug-steps li::before {
 }
 .sfnav-ask-chip-dismiss:hover { color: var(--sf-ink); }
 
-.sfnav-ask-add-screen {
-  font-family: var(--sf-sans);
-  font-size: 11px;
-  font-weight: 400;
-  color: var(--sf-ink-faint);
-  background: none;
-  border: none;
-  padding: 0;
-  cursor: pointer;
-  transition: color var(--sf-transition);
-}
-.sfnav-ask-add-screen:hover { color: var(--sf-ink-soft); }
 
 /* ─── Handoff card ─────────────────────────────────── */
 

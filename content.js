@@ -199,7 +199,6 @@
             '</div>' +
             '<div id="sfnav-ask-status-row">' +
               '<span id="sfnav-ask-status"></span>' +
-              '<button id="sfnav-ask-add-screen" class="sfnav-ask-add-screen" style="display:none">+ Add screen</button>' +
               '<span id="sfnav-ask-apistat" class="sfnav-apistat"></span>' +
             '</div>' +
           '</div>' +
@@ -979,17 +978,12 @@
 
     document.getElementById('sfnav-ask-run').onclick = runAskQuery;
 
-    // Screenshot chip — default ON for first turn
+    // Screenshot chip — default ON for first turn only
     askIncludeScreenshot = true;
     renderAskScreenChip();
     var chipDismiss = document.querySelector('.sfnav-ask-chip-dismiss');
     if (chipDismiss) chipDismiss.onclick = function () {
       askIncludeScreenshot = false;
-      renderAskScreenChip();
-    };
-    var addScreenBtn = document.getElementById('sfnav-ask-add-screen');
-    if (addScreenBtn) addScreenBtn.onclick = function () {
-      askIncludeScreenshot = true;
       renderAskScreenChip();
     };
 
@@ -1013,9 +1007,7 @@
 
   function renderAskScreenChip() {
     var chipRow = document.getElementById('sfnav-ask-chip-row');
-    var addBtn  = document.getElementById('sfnav-ask-add-screen');
     if (chipRow) chipRow.style.display = askIncludeScreenshot ? '' : 'none';
-    if (addBtn)  addBtn.style.display  = askIncludeScreenshot ? 'none' : '';
   }
 
   async function runAskQuery() {
@@ -1149,7 +1141,6 @@
         showAskHandoff();
       } else {
         qEl.placeholder = 'Ask a follow-up…';
-        // Follow-ups default to no screenshot — user can re-add via chip
         askIncludeScreenshot = false;
         renderAskScreenChip();
       }
