@@ -26,6 +26,7 @@
   var flowDebugInFlight = false;
   var askInFlight = false;
   var askHistoryEntries = [];
+  var askIncludeScreenshot = true; // intent flag — capture happens at submit time
   // Live @ask conversation: { messages, systemBlocks, context, turns, ended }.
   // Null between conversations. Lets follow-up turns continue the same thread.
   var askConversation = null;
@@ -182,13 +183,23 @@
             '<ul id="sfnav-ask-history"></ul>' +
           '</div>' +
           '<div id="sfnav-ask-composer">' +
+            '<div id="sfnav-ask-chip-row">' +
+              '<span class="sfnav-ask-chip">' +
+                '<svg class="sfnav-ask-chip-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
+                  '<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>' +
+                  '<circle cx="12" cy="13" r="4" stroke="currentColor" stroke-width="2"/>' +
+                '</svg>' +
+                'Attach current screen' +
+                '<button class="sfnav-ask-chip-dismiss" aria-label="Remove screenshot">×</button>' +
+              '</span>' +
+            '</div>' +
             '<div id="sfnav-ask-input-row">' +
               '<textarea id="sfnav-ask-question" placeholder="What’s happening here? Why this error? Anything you want to know about the current screen…" spellcheck="false"></textarea>' +
               '<button id="sfnav-ask-run" class="sfnav-soql-btn-primary sfnav-ask-run-btn">Ask <span class="sfnav-kbd">↵</span></button>' +
             '</div>' +
             '<div id="sfnav-ask-status-row">' +
               '<span id="sfnav-ask-status"></span>' +
-              '<label class="sfnav-ask-screenshot-label"><input type="checkbox" id="sfnav-ask-screenshot" checked /> Screenshot</label>' +
+              '<button id="sfnav-ask-add-screen" class="sfnav-ask-add-screen" style="display:none">+ Add screen</button>' +
               '<span id="sfnav-ask-apistat" class="sfnav-apistat"></span>' +
             '</div>' +
           '</div>' +
@@ -968,6 +979,20 @@
 
     document.getElementById('sfnav-ask-run').onclick = runAskQuery;
 
+    // Screenshot chip — default ON for first turn
+    askIncludeScreenshot = true;
+    renderAskScreenChip();
+    var chipDismiss = document.querySelector('.sfnav-ask-chip-dismiss');
+    if (chipDismiss) chipDismiss.onclick = function () {
+      askIncludeScreenshot = false;
+      renderAskScreenChip();
+    };
+    var addScreenBtn = document.getElementById('sfnav-ask-add-screen');
+    if (addScreenBtn) addScreenBtn.onclick = function () {
+      askIncludeScreenshot = true;
+      renderAskScreenChip();
+    };
+
     var qEl = document.getElementById('sfnav-ask-question');
     qEl.oninput = function () {
       this.style.height = 'auto';
@@ -984,6 +1009,13 @@
     };
 
     qEl.focus();
+  }
+
+  function renderAskScreenChip() {
+    var chipRow = document.getElementById('sfnav-ask-chip-row');
+    var addBtn  = document.getElementById('sfnav-ask-add-screen');
+    if (chipRow) chipRow.style.display = askIncludeScreenshot ? '' : 'none';
+    if (addBtn)  addBtn.style.display  = askIncludeScreenshot ? 'none' : '';
   }
 
   async function runAskQuery() {
@@ -1012,8 +1044,7 @@
     }
 
     var isFollowUp = !!(askConversation && askConversation.messages);
-    var screenshotEl = document.getElementById('sfnav-ask-screenshot');
-    var includeScreenshot = !screenshotEl || screenshotEl.checked;
+    var includeScreenshot = askIncludeScreenshot;
 
     // Show the user bubble immediately, clear the input.
     appendUserBubble(question);
@@ -1027,7 +1058,6 @@
     askInFlight = true;
     runBtn.disabled = true;
     qEl.disabled = true;
-    if (screenshotEl) screenshotEl.disabled = true;
     statusEl.className = 'sfnav-ask-status-loading sfnav-progress-dots';
 
     var prevDisplay = overlay.style.display;
@@ -1037,7 +1067,7 @@
       restored = true;
       overlay.style.display = prevDisplay || 'flex';
     }
-    if (isFollowUp || !includeScreenshot) {
+    if (!includeScreenshot) {
       restored = true;
       statusEl.textContent = isFollowUp ? 'Thinking' : 'Loading record';
     } else {
@@ -1047,7 +1077,7 @@
 
     var lockAfter = false;
     try {
-      if (!isFollowUp) {
+      if (includeScreenshot) {
         await new Promise(function (resolve) {
           requestAnimationFrame(function () { requestAnimationFrame(resolve); });
         });
@@ -1119,6 +1149,9 @@
         showAskHandoff();
       } else {
         qEl.placeholder = 'Ask a follow-up…';
+        // Follow-ups default to no screenshot — user can re-add via chip
+        askIncludeScreenshot = false;
+        renderAskScreenChip();
       }
     } catch (err) {
       restoreOverlay();
@@ -1127,7 +1160,6 @@
       console.warn('sfnav: ask failed —', err);
     } finally {
       askInFlight = false;
-      if (screenshotEl) screenshotEl.disabled = false;
       if (!lockAfter) {
         runBtn.disabled = false;
         qEl.disabled = false;

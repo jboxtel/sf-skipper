@@ -800,7 +800,18 @@ async function runAsk(question, onActivity, conversation, options) {
     messages = conversation.messages.slice();
     systemBlocks = conversation.systemBlocks;
     enrichedCtx = conversation.context;
-    messages.push({ role: 'user', content: question });
+    if (includeScreenshot) {
+      // User opted to attach the current screen to this follow-up — capture now.
+      var followImg = await captureVisibleTab().then(function (img) { emit({ kind: 'captured' }); return img; });
+      var followContent = [];
+      if (followImg && followImg.data) {
+        followContent.push({ type: 'image', source: { type: 'base64', media_type: followImg.mediaType || 'image/jpeg', data: followImg.data } });
+      }
+      followContent.push({ type: 'text', text: question });
+      messages.push({ role: 'user', content: followContent });
+    } else {
+      messages.push({ role: 'user', content: question });
+    }
   } else {
     var ctx = getAskOrgContext();
     var imageP = includeScreenshot

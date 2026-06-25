@@ -874,16 +874,60 @@ ol.sfnav-flowdebug-steps li::before {
 .sfnav-ask-status-ok      { color: var(--sf-success); }
 .sfnav-ask-status-error   { color: var(--sf-error); }
 
-.sfnav-ask-screenshot-label {
-  display: flex;
+/* ─── Screen attach chip ────────────────────────────── */
+
+#sfnav-ask-chip-row {
+  padding-bottom: 8px;
+}
+
+.sfnav-ask-chip {
+  display: inline-flex;
   align-items: center;
-  gap: 4px;
-  font-size: 11px;
-  color: var(--sf-ink-soft);
-  cursor: pointer;
-  white-space: nowrap;
+  gap: 5px;
+  padding: 4px 8px 4px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--sf-rule);
+  background: var(--sf-surface);
+  font-family: var(--sf-sans);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--sf-ink);
   user-select: none;
 }
+
+.sfnav-ask-chip-icon {
+  color: var(--sf-accent);
+  flex-shrink: 0;
+}
+
+.sfnav-ask-chip-dismiss {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  padding: 0;
+  margin-left: 2px;
+  color: var(--sf-ink-faint);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  transition: color var(--sf-transition);
+}
+.sfnav-ask-chip-dismiss:hover { color: var(--sf-ink); }
+
+.sfnav-ask-add-screen {
+  font-family: var(--sf-sans);
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--sf-ink-faint);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  transition: color var(--sf-transition);
+}
+.sfnav-ask-add-screen:hover { color: var(--sf-ink-soft); }
 
 /* ─── Handoff card ─────────────────────────────────── */
 
