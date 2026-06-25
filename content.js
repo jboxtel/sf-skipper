@@ -1499,6 +1499,11 @@
       return;
     }
 
+    if (result && result.type === 'action' && result.action === 'refresh-flows') {
+      refreshFlowsInPicker();
+      return;
+    }
+
     if (result && result.type === 'object') {
       enterObjectScopedMode(result.object);
       return;
@@ -1524,7 +1529,40 @@
       return;
     }
 
+    if (result && result.type === 'flow' && result.flow) {
+      openFlow(result);
+      return;
+    }
+
     openUrl(url);
+  }
+
+  // The cached flow version id can be stale (see resolveFlowVersionId), so we
+  // re-resolve the current active/latest version at open time. Falls back to
+  // the cached URL if resolution fails.
+  function openFlow(result) {
+    var hintEl = document.getElementById('sfnav-hint');
+    if (hintEl) hintEl.textContent = 'Opening latest version…';
+    resolveFlowVersionId(result.flow)
+      .then(function (versionId) {
+        openUrl(getOrgBase() + '/builder_platform_interaction/flowBuilder.app?flowId=' + (versionId || result.flow.id));
+      })
+      .catch(function (err) {
+        console.warn('sfnav: flow open failed —', err);
+        openUrl(result.url);
+      });
+  }
+
+  // Triggered by the picker's "Refresh flow list" row. Reloads the flow cache;
+  // the sfnav:flows-loaded listener re-renders the picker with the current
+  // filter, so a just-created flow appears without leaving the palette.
+  function refreshFlowsInPicker() {
+    var hintEl = document.getElementById('sfnav-hint');
+    if (hintEl) hintEl.textContent = 'Refreshing flows…';
+    loadFlows().catch(function (err) {
+      console.warn('sfnav: flow refresh failed —', err);
+      if (hintEl) hintEl.textContent = 'Failed to refresh flows: ' + (err && err.message ? err.message : 'unknown error');
+    });
   }
 
   // Object Manager sub-pages must be opened with the EntityDefinition DurableId,
