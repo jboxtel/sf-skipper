@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Skipper for Salesforce",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Grounding and guardrails for AI in Salesforce.",
   "permissions": ["activeTab", "scripting", "storage", "unlimitedStorage", "cookies"],
   "host_permissions": [
