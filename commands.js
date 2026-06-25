@@ -1,3 +1,5 @@
+var SF_ID_RE = /^[a-zA-Z0-9]{15}([a-zA-Z0-9]{3})?$/;
+
 function fuzzyScore(query, target) {
   const q = query.toLowerCase();
   const t = target.toLowerCase();
@@ -82,6 +84,7 @@ function toFlowResult(flow) {
     sublabel: flow.isActive ? 'Active Flow' : 'Inactive Flow',
     url: getOrgBase() + '/builder_platform_interaction/flowBuilder.app?flowId=' + (flow.versionId || flow.id),
     type: 'flow',
+    flow: flow,
   };
 }
 
@@ -224,15 +227,27 @@ function resolveFlowPicker(filter) {
     ? fuzzyFilter(filter, allFlows, f => f.label + ' ' + f.apiName)
     : allFlows;
   const count = filtered.length;
+  const results = filtered.slice(0, 30).map(toFlowResult);
+  // While filtering, always offer a reload — a flow created/renamed since the
+  // last cache load won't be in the list yet, so matching by name alone can't
+  // surface it. Suppressed during the initial empty load (nothing to refresh).
+  if (filter && getFlowsState() !== 'loading') {
+    results.push({
+      label: '↻ Don’t see your flow?',
+      sublabel: 'Fetch the latest from the org and search again',
+      type: 'action',
+      action: 'refresh-flows',
+    });
+  }
   return {
     mode: 'flow-picker',
-    results: filtered.slice(0, 30).map(toFlowResult),
+    results: results,
     hint: getFlowsState() === 'error'
       ? 'Failed to load flows: ' + getFlowsError()
       : allFlows.length === 0
         ? 'Loading flows…'
         : filter
-          ? (count === 0 ? 'No flows match' : `${count} matching flow${count === 1 ? '' : 's'}`)
+          ? (count === 0 ? 'No flows match — refresh to reload from the org' : `${count} matching flow${count === 1 ? '' : 's'}`)
           : `${allFlows.length} flow${allFlows.length === 1 ? '' : 's'} — type to filter`,
   };
 }
@@ -447,6 +462,16 @@ function resolveInput(rawInput) {
       hint: shortcutMatches.length
         ? 'Pick a shortcut or keep typing'
         : 'No matching shortcut — drop the @ to search objects and setup'
+    };
+  }
+
+  // Bare record ID (15 or 18 alphanumeric chars) — navigate directly to the record
+  var trimmed = rawInput.trim();
+  if (SF_ID_RE.test(trimmed)) {
+    return {
+      mode: 'search',
+      results: [{ label: trimmed, sublabel: 'Go to record', url: getOrgBase() + '/lightning/r/' + trimmed + '/view' }],
+      hint: null
     };
   }
 
