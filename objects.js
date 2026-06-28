@@ -102,6 +102,7 @@ async function loadObjectsFromPage() {
   if (!objects.length) return 0;
   mergeIntoCache(objects);
   persistCache();
+  document.dispatchEvent(new CustomEvent('sfnav:objects-loaded'));
   return objects.length;
 }
 

@@ -1770,8 +1770,8 @@
       return;
     }
 
-    if (result && result.type === 'action' && result.action === 'refresh-flows') {
-      refreshFlowsInPicker();
+    if (result && result.type === 'action' && PICKER_REFRESH[result.action]) {
+      runPickerRefresh(result.action);
       return;
     }
 
@@ -1824,15 +1824,25 @@
       });
   }
 
-  // Triggered by the picker's "Refresh flow list" row. Reloads the flow cache;
-  // the sfnav:flows-loaded listener re-renders the picker with the current
-  // filter, so a just-created flow appears without leaving the palette.
-  function refreshFlowsInPicker() {
+  var PICKER_REFRESH = {
+    'refresh-flows':    { label: 'flows',           load: function () { return loadFlows(); } },
+    'refresh-apps':     { label: 'apps',            load: function () { return loadApps(); } },
+    'refresh-labels':   { label: 'custom labels',   load: function () { return loadLabels(); } },
+    'refresh-permsets': { label: 'permission sets', load: function () { return loadPermsets(); } },
+    'refresh-objects':  { label: 'objects',         load: function () { return loadObjectsFromPage(); } },
+  };
+
+  // Reloads a picker's backing cache and updates the hint while loading.
+  // The sfnav:*-loaded event listener re-renders the picker once the load
+  // completes, so the user never has to leave the palette.
+  function runPickerRefresh(action) {
+    var entry = PICKER_REFRESH[action];
+    if (!entry) return;
     var hintEl = document.getElementById('sfnav-hint');
-    if (hintEl) hintEl.textContent = 'Refreshing flows…';
-    loadFlows().catch(function (err) {
-      console.warn('sfnav: flow refresh failed —', err);
-      if (hintEl) hintEl.textContent = 'Failed to refresh flows: ' + (err && err.message ? err.message : 'unknown error');
+    if (hintEl) hintEl.textContent = 'Refreshing ' + entry.label + '…';
+    entry.load().catch(function (err) {
+      console.warn('sfnav: ' + entry.label + ' refresh failed —', err);
+      if (hintEl) hintEl.textContent = 'Failed to refresh ' + entry.label + ': ' + (err && err.message ? err.message : 'unknown error');
     });
   }
 
@@ -1935,6 +1945,15 @@
   }
 
   // Re-render when async data finishes loading while the palette is open
+  document.addEventListener('sfnav:apps-loaded', function () {
+    if (!paletteVisible) return;
+    var input = document.getElementById('sfnav-input');
+    if (!input) return;
+    if (searchMode === 'app-picker') {
+      renderResults(resolveAppPicker(input.value));
+    }
+  });
+
   document.addEventListener('sfnav:flows-loaded', function () {
     if (!paletteVisible) return;
     var input = document.getElementById('sfnav-input');
@@ -1961,6 +1980,17 @@
     if (!input) return;
     if (searchMode === 'permset-picker') {
       renderResults(resolvePermsetPicker(input.value));
+    }
+  });
+
+  document.addEventListener('sfnav:objects-loaded', function () {
+    if (!paletteVisible) return;
+    var input = document.getElementById('sfnav-input');
+    if (!input) return;
+    if (searchMode === 'object-picker') {
+      renderResults(resolveObjectPicker(input.value));
+    } else if (searchMode === 'cmd-picker') {
+      renderResults(resolveCmdtPicker(input.value));
     }
   });
 

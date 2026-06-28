@@ -99,6 +99,15 @@ function toSubPageResult(page, object) {
   };
 }
 
+function makeRefreshRow(action, noun) {
+  return {
+    label: '↻ Don’t see your ' + noun + '?',
+    sublabel: 'Fetch the latest from the org and search again',
+    type: 'action',
+    action: action,
+  };
+}
+
 // One declarative table for every @keyword shortcut. Adding a new shortcut
 // means one row here plus a case in enterShortcutMode (content.js). The
 // `aliases` field is space-separated so the existing 1-word lookup stays
@@ -232,12 +241,7 @@ function resolveFlowPicker(filter) {
   // last cache load won't be in the list yet, so matching by name alone can't
   // surface it. Suppressed during the initial empty load (nothing to refresh).
   if (filter && getFlowsState() !== 'loading') {
-    results.push({
-      label: '↻ Don’t see your flow?',
-      sublabel: 'Fetch the latest from the org and search again',
-      type: 'action',
-      action: 'refresh-flows',
-    });
+    results.push(makeRefreshRow('refresh-flows', 'flow'));
   }
   return {
     mode: 'flow-picker',
@@ -259,15 +263,19 @@ function resolveAppPicker(filter) {
     ? fuzzyFilter(filter, allApps, function (a) { return a.label + ' ' + a.durableId; })
     : allApps;
   var count = filtered.length;
+  var results = filtered.slice(0, 30).map(toAppResult);
+  if (filter && getAppsState() !== 'loading') {
+    results.push(makeRefreshRow('refresh-apps', 'app'));
+  }
   return {
     mode: 'app-picker',
-    results: filtered.slice(0, 30).map(toAppResult),
+    results: results,
     hint: getAppsState() === 'error'
       ? 'Failed to load apps: ' + getAppsError()
       : allApps.length === 0
         ? 'Loading apps…'
         : filter
-          ? (count === 0 ? 'No apps match' : count + ' matching app' + (count === 1 ? '' : 's'))
+          ? (count === 0 ? 'No apps match — refresh to reload from the org' : count + ' matching app' + (count === 1 ? '' : 's'))
           : allApps.length + ' app' + (allApps.length === 1 ? '' : 's') + ' — type to filter',
   };
 }
@@ -279,21 +287,25 @@ function resolveCmdtPicker(filter) {
     ? fuzzyFilter(filter, all, function (o) { return o.label + ' ' + o.apiName; })
     : all;
   var count = filtered.length;
+  var results = filtered.slice(0, 30).map(function (o) {
+    return {
+      label: o.label,
+      sublabel: o.apiName,
+      url: '#',
+      type: 'cmdt',
+      cmdt: o,
+    };
+  });
+  if (filter) {
+    results.push(makeRefreshRow('refresh-objects', 'custom metadata type'));
+  }
   return {
     mode: 'cmd-picker',
-    results: filtered.slice(0, 30).map(function (o) {
-      return {
-        label: o.label,
-        sublabel: o.apiName,
-        url: '#',
-        type: 'cmdt',
-        cmdt: o,
-      };
-    }),
+    results: results,
     hint: all.length === 0
       ? 'No custom metadata types found in your org cache yet — wait a moment for it to load'
       : filter
-        ? (count === 0 ? 'No CMDTs match' : count + ' matching CMDT' + (count === 1 ? '' : 's'))
+        ? (count === 0 ? 'No CMDTs match — refresh to reload from the org' : count + ' matching CMDT' + (count === 1 ? '' : 's'))
         : all.length + ' custom metadata type' + (all.length === 1 ? '' : 's') + ' — type to filter',
   };
 }
@@ -332,15 +344,19 @@ function resolveLabelPicker(filter) {
     ? fuzzyFilter(filter, all, function (l) { return (l.label || '') + ' ' + l.name + ' ' + (l.value || ''); })
     : all;
   var count = filtered.length;
+  var results = filtered.slice(0, 30).map(toLabelResult);
+  if (filter && getLabelsState() !== 'loading') {
+    results.push(makeRefreshRow('refresh-labels', 'label'));
+  }
   return {
     mode: 'label-picker',
-    results: filtered.slice(0, 30).map(toLabelResult),
+    results: results,
     hint: getLabelsState() === 'error'
       ? 'Failed to load custom labels: ' + getLabelsError()
       : all.length === 0
         ? 'Loading custom labels…'
         : filter
-          ? (count === 0 ? 'No custom labels match' : count + ' matching custom label' + (count === 1 ? '' : 's'))
+          ? (count === 0 ? 'No custom labels match — refresh to reload from the org' : count + ' matching custom label' + (count === 1 ? '' : 's'))
           : all.length + ' custom label' + (all.length === 1 ? '' : 's') + ' — type to filter',
   };
 }
@@ -352,15 +368,19 @@ function resolvePermsetPicker(filter) {
     ? fuzzyFilter(filter, all, function (p) { return p.label + ' ' + p.name; })
     : all;
   var count = filtered.length;
+  var results = filtered.slice(0, 30).map(toPermsetResult);
+  if (filter && getPermsetsState() !== 'loading') {
+    results.push(makeRefreshRow('refresh-permsets', 'permission set'));
+  }
   return {
     mode: 'permset-picker',
-    results: filtered.slice(0, 30).map(toPermsetResult),
+    results: results,
     hint: getPermsetsState() === 'error'
       ? 'Failed to load permission sets: ' + getPermsetsError()
       : all.length === 0
         ? 'Loading permission sets…'
         : filter
-          ? (count === 0 ? 'No permission sets match' : count + ' matching permission set' + (count === 1 ? '' : 's'))
+          ? (count === 0 ? 'No permission sets match — refresh to reload from the org' : count + ' matching permission set' + (count === 1 ? '' : 's'))
           : all.length + ' permission set' + (all.length === 1 ? '' : 's') + ' — type to filter',
   };
 }
@@ -387,11 +407,15 @@ function resolveObjectPicker(filter) {
     ? fuzzyFilter(filter, allObjects, o => o.label + ' ' + o.apiName)
     : allObjects;
   const count = filtered.length;
+  const results = filtered.slice(0, 30).map(toObjectResult);
+  if (filter) {
+    results.push(makeRefreshRow('refresh-objects', 'object'));
+  }
   return {
     mode: 'object-picker',
-    results: filtered.slice(0, 30).map(toObjectResult),
+    results: results,
     hint: filter
-      ? (count === 0 ? 'No objects match' : `${count} matching object${count === 1 ? '' : 's'}`)
+      ? (count === 0 ? 'No objects match — refresh to reload from the org' : `${count} matching object${count === 1 ? '' : 's'}`)
       : `${allObjects.length} object${allObjects.length === 1 ? '' : 's'} — type to filter`,
   };
 }
