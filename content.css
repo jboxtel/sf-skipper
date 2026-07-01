@@ -708,21 +708,12 @@ ol.sfnav-flowdebug-steps li::before {
   flex-shrink: 0;
 }
 
-#sfnav-ask-dots {
-  display: flex;
-  gap: 5px;
+#sfnav-ask-turn-counter {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--sf-ink-faint);
   flex-shrink: 0;
-}
-
-.sfnav-ask-dot {
-  font-size: 8px;
-  color: var(--sf-rule);
-  line-height: 1;
-  transition: color var(--sf-transition);
-}
-
-.sfnav-ask-dot-filled {
-  color: var(--sf-accent);
+  letter-spacing: 0.02em;
 }
 
 #sfnav-ask-output {
@@ -753,6 +744,7 @@ ol.sfnav-flowdebug-steps li::before {
   align-self: flex-start;
   display: flex;
   flex-direction: column;
+  position: relative;
 }
 
 .sfnav-ask-answer {
@@ -790,24 +782,30 @@ ol.sfnav-flowdebug-steps li::before {
 }
 
 .sfnav-ask-copy {
-  align-self: flex-start;
-  margin-top: 6px;
-  background: var(--sf-surface);
-  color: var(--sf-ink-soft);
-  border: 1px solid var(--sf-rule);
-  font-family: var(--sf-sans);
-  font-size: 11px;
-  font-weight: 500;
-  padding: 3px 10px;
-  border-radius: var(--sf-radius);
+  position: absolute;
+  top: 0;
+  right: -26px;
+  background: transparent;
+  color: var(--sf-ink-faint);
+  border: none;
+  padding: 3px;
+  border-radius: 3px;
   cursor: pointer;
-  transition: background var(--sf-transition), color var(--sf-transition);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity var(--sf-transition), color var(--sf-transition), background var(--sf-transition);
+}
+
+.sfnav-ask-answer-wrap:hover .sfnav-ask-copy {
+  opacity: 1;
 }
 
 .sfnav-ask-copy:hover {
-  background: var(--sf-ink);
-  color: #ffffff;
-  border-color: var(--sf-ink);
+  color: var(--sf-ink);
+  background: var(--sf-rule-soft);
 }
 
 /* ─── Composer (pinned bottom) ─────────────────────── */

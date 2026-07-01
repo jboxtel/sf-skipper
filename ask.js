@@ -43,24 +43,45 @@ async function askFetch(url, init) {
   return fetch(url, Object.assign({}, init, { method: 'GET', body: undefined }));
 }
 
-function buildAskSystemPrompt() {
-  return [
-    'You are a senior Salesforce admin assistant helping a consultant troubleshoot what they see in their org.',
+function buildAskSystemPrompt(ctx, hasImage) {
+  var hasRecord = ctx && ctx.pageType === 'record' && ctx.sObject && ctx.recordId && ctx.recordFields;
+  var hasAutomations = ctx && ctx.automations;
+  var hasPageCtx = ctx && ctx.pageType && ctx.pageType !== 'other';
+  var hasAnyContext = hasImage || hasRecord || hasAutomations || hasPageCtx;
+
+  var lines = [
+    'You are a senior Salesforce admin assistant helping a consultant troubleshoot and understand their org.',
     '',
-    'You receive on the first turn:',
-    '1. A screenshot of the user\'s current Salesforce browser tab.',
-    '2. Page context (URL, sObject, record Id, setup node, flow id, etc.) parsed from the URL.',
-    '3. When the user is on a record page: a live snapshot of that record\'s fields from the Salesforce REST API — API name, label, current value, and inline help text from describe.',
-    '4. When the user is on a record page: the automation surface of that sObject — Apex triggers (with their before/after events), active record-triggered Flows (with TriggerType), and active validation rules (with error messages). This list is exhaustive for these three categories on this object.',
-    '',
-    'You have tools to investigate further. The first-turn context covers the current record\'s direct fields plus the trigger/Flow/VR inventory on this object — everything else (field history, related records, recent jobs, other records, Apex/Flow bodies, permissions, scheduled jobs) requires a tool call. USE THE TOOLS — answers grounded in real org data are dramatically better than guesses.',
+  ];
+
+  if (hasAnyContext) {
+    var items = [];
+    if (hasImage) items.push('A screenshot of the user\'s current Salesforce browser tab.');
+    if (hasPageCtx) items.push('Page context (URL, sObject, record Id, setup node, flow id, etc.) parsed from the URL.');
+    if (hasRecord) items.push('A live snapshot of the current record\'s fields from the Salesforce REST API — API name, label, current value, and inline help text from describe.');
+    if (hasAutomations) items.push('The automation surface of that sObject — Apex triggers (with their before/after events), active record-triggered Flows (with TriggerType), and active validation rules (with error messages). This list is exhaustive for these three categories on this object.');
+    lines.push('You receive on the first turn:');
+    items.forEach(function (item, i) { lines.push((i + 1) + '. ' + item); });
+    lines.push('');
+    lines.push('You have tools to investigate further. The first-turn context covers the current record\'s direct fields plus the trigger/Flow/VR inventory on this object — everything else (field history, related records, recent jobs, other records, Apex/Flow bodies, permissions, scheduled jobs) requires a tool call. USE THE TOOLS — answers grounded in real org data are dramatically better than guesses.');
+  } else {
+    lines.push('There is no page context or screenshot — the user is asking a general question about their org. USE YOUR TOOLS to find the answer directly. Do not say you lack context; look it up.');
+  }
+
+  lines.push(
     '',
     'CONTEXT — WHAT YOU DO NOT KNOW:',
     '- You do not know this customer\'s naming conventions, business meaning, or how standard objects are repurposed. Product2 might be "Flight" in this org. A custom field name rarely tells you who populates it or when.',
     '- For ANY question that mentions a custom field, custom object, or a behaviour whose source you do not know: do NOT guess from the name. Look it up first.',
     '',
-    'TOOL-USE STRATEGY:',
-    '- Start from the pre-loaded context. The record snapshot may already explain the issue (a status field, an owner, a checkbox); the automation list tells you which triggers/Flows/VRs are even candidates. Cite specific names from that list before reaching for tools.',
+    'TOOL-USE STRATEGY:'
+  );
+
+  if (hasRecord || hasAutomations) {
+    lines.push('- Start from the pre-loaded context. The record snapshot may already explain the issue (a status field, an owner, a checkbox); the automation list tells you which triggers/Flows/VRs are even candidates. Cite specific names from that list before reaching for tools.');
+  }
+
+  lines.push(
     '- When the user mentions a custom field whose population is unclear: the automation list shows which triggers and record-triggered Flows could be responsible. To find the exact one that writes the field, call searchApex(<field API name>); if empty, searchFlows(<field API name>). readApexClass on a top hit to read the logic.',
     '- Common patterns:',
     '   "Why is field X empty / wrong?" → check the pre-loaded automation list, then searchApex("X") and/or searchFlows("X") to pin down which entry sets it. If both empty, getFieldHistory to see whether anything ever wrote it.',
@@ -68,8 +89,13 @@ function buildAskSystemPrompt() {
     '   "Why can\'t I see this record / why is X read-only?" → runToolingSoql for FieldPermissions / ObjectPermissions for the running user\'s Profile/PermissionSets, or describeSObject to check field-level metadata.',
     '   "What automation runs on save?" → the pre-loaded list IS the answer for this object. Read it back to the user; only use searchApex/searchFlows if they ask which one does a specific behaviour.',
     '   "Why did the related X not get created?" → runSoql on the child object filtering on the lookup back to this record, then searchFlows or searchApex for whatever should create it (cross-object — the pre-loaded list is for the current object only).',
+    '   "Which object holds X?" → runToolingSoql("SELECT SobjectType, Name FROM RecordType WHERE Name LIKE \'%X%\' AND IsActive = true LIMIT 25") to surface record types that carry that business term. Also try runToolingSoql on EntityDefinition filtering Label or QualifiedApiName.',
+    '   "How does process X work / what automation exists for X?" → searchFlows("X") and searchApex("X") first, then readApexClass or runToolingSoql on Flow metadata for bodies.',
     '- Cap yourself: at most 4 tool calls per question. If you still don\'t know after that, say so and ask one focused follow-up.',
-    '- Tool failures are not fatal — adapt and try a different angle, or report what you couldn\'t check.',
+    '- Tool failures are not fatal — adapt and try a different angle, or report what you couldn\'t check.'
+  );
+
+  lines.push(
     '',
     'KNOW YOUR LIMITS — ESCALATE:',
     '- Call escalateToDesktop when the question would need reading more than 3 Apex classes, spans multiple subsystems, asks for a refactor or design, or requires understanding code you cannot fully load. Do not half-answer; an honest escalation is better than a confident guess.',
@@ -83,11 +109,13 @@ function buildAskSystemPrompt() {
     '- Always include LIMIT (≤ 50). Always include the fields you actually need — never SELECT *.',
     '',
     'ANSWER FORMAT:',
-    '- Lead with the most likely root cause in 1–2 sentences, citing specific fields/values/records you observed (not generalities).',
+    '- Lead with the most likely root cause or direct answer in 1–2 sentences, citing specific fields/values/records you found (not generalities).',
     '- Then a concrete next step (the Setup path to take, the field to change, the automation to investigate).',
     '- Use Salesforce admin terminology (Profile, Permission Set, Validation Rule, Flow, Page Layout, Record Type, Sharing Rule, Lookup, Master-Detail, Formula, Roll-Up Summary, etc.).',
     '- No headings. No "Based on the screenshot…". No generic hedge lists. Short prose. Bullets only when the answer is genuinely a list.'
-  ].join('\n');
+  );
+
+  return lines.join('\n');
 }
 
 function getAskOrgContext() {
@@ -811,7 +839,7 @@ async function runAsk(question, onActivity, conversation, options) {
     var image = both[0];
     enrichedCtx = both[1];
 
-    var systemPrompt = buildAskSystemPrompt();
+    var systemPrompt = buildAskSystemPrompt(enrichedCtx, !!image);
     systemBlocks = [
       { type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }
     ];

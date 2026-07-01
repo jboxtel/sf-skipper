@@ -907,7 +907,7 @@
     askConversation = null;
 
     input.value = '';
-    input.placeholder = 'Use the box below to describe what you’re seeing';
+    input.placeholder = '';
     input.disabled = true;
     document.getElementById('sfnav-results').style.display = 'none';
     document.getElementById('sfnav-hint').textContent = '';
@@ -932,6 +932,7 @@
     qElInit.placeholder = 'What’s happening here? Why this error? Anything you want to know about the current screen…';
     qElInit.style.height = 'auto';
     document.getElementById('sfnav-ask-run').disabled = false;
+    document.getElementById('sfnav-ask-run').innerHTML = 'Ask <span class="sfnav-kbd">↵</span>';
 
     if (typeof getAskHistory === 'function') {
       getAskHistory().then(function (entries) {
@@ -949,18 +950,14 @@
       if (ctx.pageType)  bits.push(ctx.pageType);
       if (ctx.sObject)   bits.push(ctx.sObject);
       if (ctx.setupNode) bits.push(ctx.setupNode);
-      contextText = bits.length ? 'Context: ' + bits.join(' · ') : 'Context: ' + ctx.host;
+      contextText = bits.length ? bits.join(' · ') : ctx.host;
       if (ctx.pageType === 'record' && ctx.sObject && ctx.recordId) {
-        contextText += ' · sending live record fields';
+        contextText += ' · live fields';
       }
     }
     metaEl.innerHTML =
       '<span>' + esc(contextText) + '</span>' +
-      '<span id="sfnav-ask-dots" aria-label="0 of 3 questions used">' +
-        '<span class="sfnav-ask-dot">○</span>' +
-        '<span class="sfnav-ask-dot">○</span>' +
-        '<span class="sfnav-ask-dot">○</span>' +
-      '</span>';
+      '<span id="sfnav-ask-turn-counter" aria-live="polite"></span>';
 
     hasSoqlApiKey().then(function (ok) {
       var el = document.getElementById('sfnav-ask-apistat');
@@ -1051,6 +1048,8 @@
     runBtn.disabled = true;
     qEl.disabled = true;
     statusEl.className = 'sfnav-ask-status-loading sfnav-progress-dots';
+    var apistatEl = document.getElementById('sfnav-ask-apistat');
+    if (apistatEl) { apistatEl.textContent = ''; apistatEl.className = 'sfnav-apistat'; }
 
     var prevDisplay = overlay.style.display;
     var restored = false;
@@ -1132,15 +1131,16 @@
         if (updated) askHistoryEntries = updated;
       }
       statusEl.textContent = result.toolCallCount
-        ? 'Done · ' + result.toolCallCount + ' tool call' + (result.toolCallCount === 1 ? '' : 's')
-        : 'Done';
-      statusEl.className = 'sfnav-ask-status-ok';
+        ? result.toolCallCount + ' tool call' + (result.toolCallCount === 1 ? '' : 's')
+        : '';
+      statusEl.className = result.toolCallCount ? 'sfnav-ask-status-ok' : '';
 
       if (askConversation.ended || askConversation.turns >= MAX_ASK_TURNS) {
         lockAfter = true;
         showAskHandoff();
       } else {
         qEl.placeholder = 'Ask a follow-up…';
+        runBtn.innerHTML = 'Reply <span class="sfnav-kbd">↵</span>';
         askIncludeScreenshot = false;
         renderAskScreenChip();
       }
@@ -1183,12 +1183,15 @@
     aDiv.innerHTML = renderAskMarkdown(answer || '');
     var copyBtn = document.createElement('button');
     copyBtn.className = 'sfnav-ask-copy';
-    copyBtn.textContent = 'Copy answer';
+    copyBtn.title = 'Copy answer';
+    copyBtn.setAttribute('aria-label', 'Copy answer');
+    var iconClipboard = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+    var iconCheck = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+    copyBtn.innerHTML = iconClipboard;
     copyBtn.onclick = function () {
       navigator.clipboard.writeText(answer || '').then(function () {
-        var prev = copyBtn.textContent;
-        copyBtn.textContent = 'Copied!';
-        setTimeout(function () { copyBtn.textContent = prev; }, 1500);
+        copyBtn.innerHTML = iconCheck;
+        setTimeout(function () { copyBtn.innerHTML = iconClipboard; }, 1500);
       });
     };
     wrap.appendChild(aDiv);
@@ -1221,14 +1224,9 @@
   }
 
   function updateAskDots(n) {
-    var el = document.getElementById('sfnav-ask-dots');
+    var el = document.getElementById('sfnav-ask-turn-counter');
     if (!el) return;
-    var dots = el.querySelectorAll('.sfnav-ask-dot');
-    dots.forEach(function (dot, i) {
-      dot.textContent = i < n ? '●' : '○';
-      dot.classList.toggle('sfnav-ask-dot-filled', i < n);
-    });
-    el.setAttribute('aria-label', n + ' of ' + MAX_ASK_TURNS + ' questions used');
+    el.textContent = n > 0 ? n + ' / ' + MAX_ASK_TURNS : '';
   }
 
   function showAskHandoff() {
