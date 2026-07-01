@@ -1217,9 +1217,7 @@
   }
 
   function hideAskHistory() {
-    var labelEl = document.getElementById('sfnav-ask-history-label');
     var listEl = document.getElementById('sfnav-ask-history');
-    if (labelEl) labelEl.style.display = 'none';
     if (listEl) listEl.style.display = 'none';
   }
 
@@ -1370,16 +1368,14 @@
     var labelEl = document.getElementById('sfnav-ask-history-label');
     if (!listEl || !labelEl) return;
     if (!askHistoryEntries.length || askConversation) {
-      labelEl.style.display = 'none';
       listEl.style.display = 'none';
       listEl.innerHTML = '';
       return;
     }
-    labelEl.style.display = 'flex';
     listEl.style.display = 'block';
     listEl.innerHTML = '';
 
-    var COLLAPSED = 3;
+    var COLLAPSED = 2;
     var visible = askHistoryExpanded ? askHistoryEntries : askHistoryEntries.slice(0, COLLAPSED);
 
     visible.forEach(function (entry) {
