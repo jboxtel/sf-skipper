@@ -947,10 +947,10 @@
     var contextText = '';
     if (ctx) {
       var bits = [];
-      if (ctx.pageType)  bits.push(ctx.pageType);
+      if (ctx.pageType && ctx.pageType !== 'other') bits.push(ctx.pageType);
       if (ctx.sObject)   bits.push(ctx.sObject);
       if (ctx.setupNode) bits.push(ctx.setupNode);
-      contextText = bits.length ? bits.join(' · ') : ctx.host;
+      contextText = bits.join(' · ');
       if (ctx.pageType === 'record' && ctx.sObject && ctx.recordId) {
         contextText += ' · live fields';
       }
