@@ -808,6 +808,18 @@ ol.sfnav-flowdebug-steps li::before {
   background: var(--sf-rule-soft);
 }
 
+.sfnav-ask-debug-copy {
+  right: -52px;
+  font-size: 10px;
+  font-family: monospace;
+  padding: 2px 4px;
+  opacity: 0;
+}
+
+.sfnav-ask-answer-wrap:hover .sfnav-ask-debug-copy {
+  opacity: 1;
+}
+
 /* ─── Composer (pinned bottom) ─────────────────────── */
 
 #sfnav-ask-composer {

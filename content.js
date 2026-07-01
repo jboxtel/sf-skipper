@@ -32,19 +32,32 @@
   var askConversation = null;
   var MAX_ASK_TURNS = 3;
   var openInNewTabPref = true;
+  var askDebugMode = false;
 
   if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
     chrome.storage.local.get('sfnavOptions', function (data) {
       var opts = (data && data.sfnavOptions) || {};
       if (opts.openInNewTab === false) openInNewTabPref = false;
+      if (DEV_MODE && opts.debug) askDebugMode = true;
     });
     if (chrome.storage.onChanged && chrome.storage.onChanged.addListener) {
       chrome.storage.onChanged.addListener(function (changes, area) {
         if (area !== 'local' || !changes.sfnavOptions) return;
         var next = changes.sfnavOptions.newValue || {};
         openInNewTabPref = next.openInNewTab !== false;
+        if (DEV_MODE) askDebugMode = !!next.debug;
       });
     }
+  }
+
+  if (DEV_MODE) {
+    window.sfnavDebug = function (on) {
+      chrome.storage.local.get('sfnavOptions', function (data) {
+        var opts = (data && data.sfnavOptions) || {};
+        opts.debug = !!on;
+        chrome.storage.local.set({ sfnavOptions: opts });
+      });
+    };
   }
 
   function openUrl(url) {
@@ -1113,7 +1126,10 @@
         };
       }
 
-      appendAssistantMessage(result.text || '');
+      var debugPayload = (DEV_MODE && askDebugMode)
+        ? { system: result.systemBlocks, messages: result.messages }
+        : null;
+      appendAssistantMessage(result.text || '', debugPayload);
       updateAskDots(askConversation.turns);
 
       var ctxForEntry = result.context || {};
@@ -1174,19 +1190,19 @@
     scrollAskThreadToBottom();
   }
 
-  function appendAssistantMessage(answer) {
+  function appendAssistantMessage(answer, debugPayload) {
     var outputEl = document.getElementById('sfnav-ask-output');
     var wrap = document.createElement('div');
     wrap.className = 'sfnav-ask-answer-wrap';
     var aDiv = document.createElement('div');
     aDiv.className = 'sfnav-ask-answer';
     aDiv.innerHTML = renderAskMarkdown(answer || '');
+    var iconClipboard = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+    var iconCheck = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
     var copyBtn = document.createElement('button');
     copyBtn.className = 'sfnav-ask-copy';
     copyBtn.title = 'Copy answer';
     copyBtn.setAttribute('aria-label', 'Copy answer');
-    var iconClipboard = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
-    var iconCheck = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
     copyBtn.innerHTML = iconClipboard;
     copyBtn.onclick = function () {
       navigator.clipboard.writeText(answer || '').then(function () {
@@ -1196,6 +1212,22 @@
     };
     wrap.appendChild(aDiv);
     wrap.appendChild(copyBtn);
+    if (debugPayload) {
+      var dbgBtn = document.createElement('button');
+      dbgBtn.className = 'sfnav-ask-copy sfnav-ask-debug-copy';
+      dbgBtn.title = 'Copy debug payload';
+      dbgBtn.setAttribute('aria-label', 'Copy debug payload');
+      dbgBtn.textContent = '{ }';
+      dbgBtn.onclick = function () {
+        var json = JSON.stringify(debugPayload, null, 2);
+        navigator.clipboard.writeText(json).then(function () {
+          var prev = dbgBtn.textContent;
+          dbgBtn.textContent = 'Copied';
+          setTimeout(function () { dbgBtn.textContent = prev; }, 1500);
+        });
+      };
+      wrap.appendChild(dbgBtn);
+    }
     outputEl.appendChild(wrap);
     scrollAskThreadToBottom();
   }

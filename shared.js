@@ -2,6 +2,12 @@
 // Loaded as the first content script so flows.js / objects.js / soql.js can rely on it.
 // Also loaded by popup.html and options.html for platform-aware shortcut labels.
 
+// True only when the extension is loaded unpacked (not installed from the Chrome Web Store).
+// Store builds always have update_url; developer loads never do.
+var DEV_MODE = (function () {
+  try { return !chrome.runtime.getManifest().update_url; } catch (_) { return false; }
+})();
+
 // ─── Platform-aware shortcut labels ───────────────────────────────────────
 
 function sfnavIsMac() {
