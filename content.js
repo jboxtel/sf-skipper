@@ -192,7 +192,6 @@
           '<input id="sfnav-flowdebug-expectation" type="text" placeholder="Optional: what did you expect to happen?" autocomplete="off" />' +
           '<div id="sfnav-flowdebug-actions">' +
             '<button id="sfnav-flowdebug-run" class="sfnav-soql-btn-primary">Analyze <span class="sfnav-kbd">↵</span></button>' +
-            '<button id="sfnav-flowdebug-grab" class="sfnav-soql-btn-secondary" style="display:none">Grab from panel</button>' +
             '<span id="sfnav-flowdebug-apistat" class="sfnav-apistat"></span>' +
           '</div>' +
           '<div id="sfnav-flowdebug-status"></div>' +
@@ -801,14 +800,6 @@
 
     document.getElementById('sfnav-flowdebug-run').onclick = runFlowDebugAnalysis;
 
-    // Read the open Debug panel straight from the DOM so the user doesn't have
-    // to copy-paste. Only meaningful inside Flow Builder, so gate on flowId.
-    var grabBtn = document.getElementById('sfnav-flowdebug-grab');
-    grabBtn.textContent = 'Grab from panel';
-    grabBtn.style.display = flowId ? '' : 'none';
-    grabBtn.onclick = function () { fillFlowDebugFromPanel(true); };
-    if (flowId) fillFlowDebugFromPanel(false);
-
     // Enter submits, Shift+Enter inserts a newline (matches @ask). Escape steps
     // back to root.
     var debugEl = document.getElementById('sfnav-flowdebug-debug');
@@ -836,37 +827,6 @@
     });
 
     debugEl.focus();
-  }
-
-  // Pull the open Debug panel's text into the textarea. Called silently on
-  // entering @flow-debug (userInitiated=false) and on the "Grab" button
-  // (userInitiated=true, which surfaces feedback when nothing is found). The
-  // scrape runs in the page MAIN world via the background — see fetchFlowDebug-
-  // PanelText — because Flow Builder's synthetic shadow is invisible to us here.
-  async function fillFlowDebugFromPanel(userInitiated) {
-    var statusEl = document.getElementById('sfnav-flowdebug-status');
-    var grabBtn = document.getElementById('sfnav-flowdebug-grab');
-    var text = '';
-    if (typeof fetchFlowDebugPanelText === 'function') {
-      try { text = await fetchFlowDebugPanelText(); } catch (_) {}
-    }
-    if (searchMode !== 'flow-debug') return false; // user navigated away mid-scrape
-    if (!text) {
-      if (userInitiated) {
-        statusEl.textContent = 'No Debug panel found. Run a debug in Flow Builder, then grab — or paste the output manually.';
-        statusEl.className = 'sfnav-flowdebug-status-error';
-      }
-      return false;
-    }
-    var debugEl = document.getElementById('sfnav-flowdebug-debug');
-    // Don't clobber what the user started typing while the auto-scrape was in
-    // flight; the explicit Grab button always wins.
-    if (!userInitiated && debugEl.value.trim()) return false;
-    debugEl.value = text;
-    if (grabBtn) grabBtn.textContent = 'Re-grab from panel';
-    statusEl.textContent = 'Loaded from the Debug panel — edit or re-grab if needed.';
-    statusEl.className = '';
-    return true;
   }
 
   async function runFlowDebugAnalysis() {
