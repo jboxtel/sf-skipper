@@ -26,10 +26,20 @@
   var flowDebugInFlight = false;
   var askInFlight = false;
   var askHistoryEntries = [];
-  var askIncludeScreenshot = true; // intent flag — capture happens at submit time
-  // Live @ask conversation: { messages, systemBlocks, context, turns, ended }.
-  // Null between conversations. Lets follow-up turns continue the same thread.
+  var askIncludeScreenshot = true;       // home toggle — default ON for a new question
+  var askReplyIncludeScreenshot = false; // thread toggle — default OFF for follow-ups
+  var askView = 'home'; // 'home' | 'thread' — sub-view while searchMode === 'ask'
+  // Live @ask conversation: { messages, systemBlocks, context, turns, ended,
+  // qas, historyId, contextLine }. Null between conversations. Lets follow-up
+  // turns continue the same thread.
   var askConversation = null;
+  // Set when the user leaves the thread view while a request is in flight —
+  // the completion handler then persists to history but skips all UI commits.
+  var askRunDetached = false;
+  var askRecentSelIndex = -1; // keyboard selection in the recent list (-1 = none)
+  var askRecallIndex = -1;    // ArrowUp question-recall position (-1 = not recalling)
+  var askRecallDraft = '';
+  var askVisibleEntries = [];
   var MAX_ASK_TURNS = 3;
   var openInNewTabPref = true;
   var askDebugMode = false;
@@ -98,17 +108,20 @@
   }
 
   // Where to bounce focus when the user clicks dead space inside a panel mode.
+  // getInputId (over inputId) lets a panel pick its primary input at click time
+  // — @ask has one textarea per sub-view.
   var PANEL_PRIMARY_INPUTS = [
     { panelId: 'sfnav-soql',      inputId: 'sfnav-input' },
     { panelId: 'sfnav-flowdebug', inputId: 'sfnav-flowdebug-debug' },
-    { panelId: 'sfnav-ask',       inputId: 'sfnav-ask-question' },
+    { panelId: 'sfnav-ask',       getInputId: function () { return askView === 'thread' ? 'sfnav-ask-reply' : 'sfnav-ask-question'; } },
     { panelId: 'sfnav-feedback',  inputId: 'sfnav-feedback-message' }
   ];
 
   var FOOTER_HINTS = {
     'soql':       'Enter to generate · Esc to go back',
     'flow-debug': 'Enter to analyze · Shift+Enter for newline · Esc to go back',
-    'ask':        'Enter to ask · Shift+Enter for newline · Esc to go back',
+    'ask-home':   '↑↓ history · shift+↵ newline',
+    'ask-thread': 'shift+↵ newline · esc back to recent',
     'feedback':   null
   };
   var DEFAULT_FOOTER_HINT = '↑↓ navigate · Enter to select · Esc to close';
@@ -179,6 +192,7 @@
           '<input id="sfnav-flowdebug-expectation" type="text" placeholder="Optional: what did you expect to happen?" autocomplete="off" />' +
           '<div id="sfnav-flowdebug-actions">' +
             '<button id="sfnav-flowdebug-run" class="sfnav-soql-btn-primary">Analyze <span class="sfnav-kbd">↵</span></button>' +
+            '<button id="sfnav-flowdebug-grab" class="sfnav-soql-btn-secondary" style="display:none">Grab from panel</button>' +
             '<span id="sfnav-flowdebug-apistat" class="sfnav-apistat"></span>' +
           '</div>' +
           '<div id="sfnav-flowdebug-status"></div>' +
@@ -189,33 +203,41 @@
           '</div>' +
         '</div>' +
         '<div id="sfnav-ask" style="display:none">' +
-          '<div id="sfnav-ask-scroll">' +
-            '<div id="sfnav-ask-meta"></div>' +
-            '<div id="sfnav-ask-output"></div>' +
-            '<div id="sfnav-ask-history-label" class="sfnav-section-header" style="display:none">Recent</div>' +
-            '<ul id="sfnav-ask-history"></ul>' +
+          '<div id="sfnav-ask-header">' +
+            '<span id="sfnav-ask-crumb"></span>' +
+            '<span id="sfnav-ask-header-right"></span>' +
           '</div>' +
-          '<div id="sfnav-ask-composer">' +
-            '<div id="sfnav-ask-chip-row">' +
-              '<span class="sfnav-ask-chip">' +
-                '<svg class="sfnav-ask-chip-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
-                  '<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>' +
-                  '<circle cx="12" cy="13" r="4" stroke="currentColor" stroke-width="2"/>' +
-                '</svg>' +
-                'Attach current screen' +
-                '<button class="sfnav-ask-chip-dismiss" aria-label="Remove screenshot">×</button>' +
-              '</span>' +
+          '<div id="sfnav-ask-keywarn" style="display:none"></div>' +
+          '<div id="sfnav-ask-home" style="display:none">' +
+            '<div class="sfnav-ask-composer">' +
+              '<textarea id="sfnav-ask-question" rows="2" placeholder="Ask about this screen…" spellcheck="false"></textarea>' +
+              '<div class="sfnav-ask-composer-row">' +
+                '<button id="sfnav-ask-shot-toggle" class="sfnav-ask-shot-toggle" type="button" aria-pressed="true"></button>' +
+                '<span class="sfnav-ask-composer-hint">↵ to ask</span>' +
+                '<button id="sfnav-ask-run" class="sfnav-soql-btn-primary">Ask</button>' +
+              '</div>' +
+              '<div id="sfnav-ask-home-status" class="sfnav-ask-status-row"></div>' +
             '</div>' +
-            '<div id="sfnav-ask-input-row">' +
-              '<textarea id="sfnav-ask-question" placeholder="What’s happening here? Why this error? Anything you want to know about the current screen…" spellcheck="false"></textarea>' +
-              '<button id="sfnav-ask-run" class="sfnav-soql-btn-primary sfnav-ask-run-btn">Ask <span class="sfnav-kbd">↵</span></button>' +
-            '</div>' +
-            '<div id="sfnav-ask-status-row">' +
-              '<span id="sfnav-ask-status"></span>' +
-              '<span id="sfnav-ask-apistat" class="sfnav-apistat"></span>' +
+            '<div id="sfnav-ask-recent" style="display:none">' +
+              '<div class="sfnav-section-header">Recent — ↵ to resume thread</div>' +
+              '<ul id="sfnav-ask-history"></ul>' +
             '</div>' +
           '</div>' +
-          '<div id="sfnav-ask-handoff" style="display:none"></div>' +
+          '<div id="sfnav-ask-threadview" style="display:none">' +
+            '<div id="sfnav-ask-scroll">' +
+              '<div id="sfnav-ask-output"></div>' +
+            '</div>' +
+            '<div class="sfnav-ask-composer" id="sfnav-ask-reply-composer">' +
+              '<textarea id="sfnav-ask-reply" rows="1" placeholder="Reply…" spellcheck="false"></textarea>' +
+              '<div class="sfnav-ask-composer-row">' +
+                '<button id="sfnav-ask-reply-shot-toggle" class="sfnav-ask-shot-toggle" type="button" aria-pressed="false"></button>' +
+                '<span class="sfnav-ask-composer-hint">↵ to send</span>' +
+                '<button id="sfnav-ask-send" class="sfnav-soql-btn-primary">Send</button>' +
+              '</div>' +
+              '<div id="sfnav-ask-thread-status" class="sfnav-ask-status-row"></div>' +
+            '</div>' +
+            '<div id="sfnav-ask-handoff" style="display:none"></div>' +
+          '</div>' +
         '</div>' +
         '<div id="sfnav-feedback" style="display:none">' +
           '<div id="sfnav-feedback-context" style="display:none"></div>' +
@@ -251,8 +273,9 @@
       var panel = document.getElementById(entry.panelId);
       if (!panel) return;
       panel.addEventListener('click', function (e) {
-        if (e.target.closest('button, a, textarea, input, [contenteditable="true"], #sfnav-ask-output')) return;
-        var target = document.getElementById(entry.inputId);
+        if (e.target.closest('button, a, textarea, input, [contenteditable="true"], #sfnav-ask-output, #sfnav-ask-history')) return;
+        var inputId = entry.getInputId ? entry.getInputId() : entry.inputId;
+        var target = document.getElementById(inputId);
         if (target && !target.disabled) target.focus();
       });
     });
@@ -375,6 +398,12 @@
   }
 
   function handleBack() {
+    // Esc walks up one level at a time: thread → @ask home → main palette → closed.
+    if (searchMode === 'ask') {
+      if (askView === 'thread') { showAskHome(''); return; }
+      goToRoot();
+      return;
+    }
     if (PANEL_MODES[searchMode] || isFeedbackPanelOpen()) {
       goToRoot();
       return;
@@ -382,11 +411,6 @@
     if (searchMode === 'root') { hidePalette(); return; }
     var custom = MODE_BACK_HANDLERS[searchMode];
     if (custom) { custom(); return; }
-    // Esc from an active @ask thread (or handoff) starts a fresh @ask session.
-    if (searchMode === 'ask' && askConversation) {
-      enterAskMode('');
-      return;
-    }
     goToRoot();
   }
 
@@ -777,6 +801,14 @@
 
     document.getElementById('sfnav-flowdebug-run').onclick = runFlowDebugAnalysis;
 
+    // Read the open Debug panel straight from the DOM so the user doesn't have
+    // to copy-paste. Only meaningful inside Flow Builder, so gate on flowId.
+    var grabBtn = document.getElementById('sfnav-flowdebug-grab');
+    grabBtn.textContent = 'Grab from panel';
+    grabBtn.style.display = flowId ? '' : 'none';
+    grabBtn.onclick = function () { fillFlowDebugFromPanel(true); };
+    if (flowId) fillFlowDebugFromPanel(false);
+
     // Enter submits, Shift+Enter inserts a newline (matches @ask). Escape steps
     // back to root.
     var debugEl = document.getElementById('sfnav-flowdebug-debug');
@@ -804,6 +836,37 @@
     });
 
     debugEl.focus();
+  }
+
+  // Pull the open Debug panel's text into the textarea. Called silently on
+  // entering @flow-debug (userInitiated=false) and on the "Grab" button
+  // (userInitiated=true, which surfaces feedback when nothing is found). The
+  // scrape runs in the page MAIN world via the background — see fetchFlowDebug-
+  // PanelText — because Flow Builder's synthetic shadow is invisible to us here.
+  async function fillFlowDebugFromPanel(userInitiated) {
+    var statusEl = document.getElementById('sfnav-flowdebug-status');
+    var grabBtn = document.getElementById('sfnav-flowdebug-grab');
+    var text = '';
+    if (typeof fetchFlowDebugPanelText === 'function') {
+      try { text = await fetchFlowDebugPanelText(); } catch (_) {}
+    }
+    if (searchMode !== 'flow-debug') return false; // user navigated away mid-scrape
+    if (!text) {
+      if (userInitiated) {
+        statusEl.textContent = 'No Debug panel found. Run a debug in Flow Builder, then grab — or paste the output manually.';
+        statusEl.className = 'sfnav-flowdebug-status-error';
+      }
+      return false;
+    }
+    var debugEl = document.getElementById('sfnav-flowdebug-debug');
+    // Don't clobber what the user started typing while the auto-scrape was in
+    // flight; the explicit Grab button always wins.
+    if (!userInitiated && debugEl.value.trim()) return false;
+    debugEl.value = text;
+    if (grabBtn) grabBtn.textContent = 'Re-grab from panel';
+    statusEl.textContent = 'Loaded from the Debug panel — edit or re-grab if needed.';
+    statusEl.className = '';
+    return true;
   }
 
   async function runFlowDebugAnalysis() {
@@ -912,97 +975,220 @@
     outputEl.style.display = 'block';
   }
 
+  var ASK_CAMERA_SVG =
+    '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+      '<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>' +
+      '<circle cx="12" cy="13" r="4"/>' +
+    '</svg>';
+
   function enterAskMode(initialQuestion) {
     searchMode = 'ask';
-    setFooterHints('ask');
     var input = document.getElementById('sfnav-input');
-
-    askConversation = null;
-
     input.value = '';
-    input.placeholder = '';
     input.disabled = true;
+    input.style.display = 'none'; // @ask renders its own header bar
     document.getElementById('sfnav-results').style.display = 'none';
-    document.getElementById('sfnav-hint').textContent = '';
-    document.getElementById('sfnav-breadcrumb').innerHTML = renderBreadcrumbHtml([{ text: '@ask' }]);
-    document.getElementById('sfnav-breadcrumb').style.display = 'flex';
+    var hintEl = document.getElementById('sfnav-hint');
+    hintEl.textContent = '';
+    hintEl.style.display = 'none';
+    var breadcrumbEl = document.getElementById('sfnav-breadcrumb');
+    breadcrumbEl.textContent = '';
+    breadcrumbEl.style.display = 'none';
     document.getElementById('sfnav-ask').style.display = 'flex';
 
-    // Clear thread
-    document.getElementById('sfnav-ask-output').innerHTML = '';
+    wireAskPanel();
+    showAskHome(initialQuestion || '');
+  }
 
-    // Show composer, hide handoff
-    document.getElementById('sfnav-ask-composer').style.display = 'flex';
-    document.getElementById('sfnav-ask-handoff').style.display = 'none';
+  // ─── View 1: @ask home (input + recent) ───────────────────────────────────
 
-    // Reset composer
-    var statusEl = document.getElementById('sfnav-ask-status');
+  function showAskHome(initialText) {
+    if (askInFlight) askRunDetached = true;
+    askView = 'home';
+    askConversation = null;
+    askRecentSelIndex = -1;
+    askRecallIndex = -1;
+    askRecallDraft = '';
+    askHistoryExpanded = false;
+    setFooterHints('ask-home');
+
+    document.getElementById('sfnav-ask-home').style.display = 'flex';
+    document.getElementById('sfnav-ask-threadview').style.display = 'none';
+
+    document.getElementById('sfnav-ask-crumb').innerHTML =
+      '<span class="sfnav-ask-crumb-kw">@ask</span>' +
+      '<span class="sfnav-ask-crumb-sep">·</span>' +
+      '<span class="sfnav-ask-crumb-title">Ask Claude about this screen</span>';
+    document.getElementById('sfnav-ask-header-right').innerHTML =
+      '<span class="sfnav-ask-header-hint">esc to go back</span>';
+
+    var statusEl = document.getElementById('sfnav-ask-home-status');
     statusEl.textContent = '';
-    statusEl.className = '';
-    var qElInit = document.getElementById('sfnav-ask-question');
-    qElInit.value = initialQuestion || '';
-    qElInit.disabled = false;
-    qElInit.placeholder = 'What’s happening here? Why this error? Anything you want to know about the current screen…';
-    qElInit.style.height = 'auto';
+    statusEl.className = 'sfnav-ask-status-row';
+
+    var qEl = document.getElementById('sfnav-ask-question');
+    qEl.value = initialText || '';
+    qEl.disabled = false;
+    autoGrowAskTextarea(qEl);
     document.getElementById('sfnav-ask-run').disabled = false;
-    document.getElementById('sfnav-ask-run').innerHTML = 'Ask <span class="sfnav-kbd">↵</span>';
+
+    askIncludeScreenshot = true;
+    renderAskShotToggle();
+    refreshAskKeyWarning();
 
     if (typeof getAskHistory === 'function') {
       getAskHistory().then(function (entries) {
+        if (searchMode !== 'ask' || askView !== 'home') return;
         askHistoryEntries = entries || [];
         renderAskHistoryList();
       });
+    } else {
+      renderAskHistoryList();
     }
 
-    // Meta line: context breadcrumb + turn dots
-    var metaEl = document.getElementById('sfnav-ask-meta');
-    var ctx = (typeof getAskOrgContext === 'function') ? getAskOrgContext() : null;
-    var contextText = '';
-    if (ctx) {
-      var bits = [];
-      if (ctx.pageType && ctx.pageType !== 'other') bits.push(ctx.pageType);
-      if (ctx.sObject)   bits.push(ctx.sObject);
-      if (ctx.setupNode) bits.push(ctx.setupNode);
-      contextText = bits.join(' · ');
-      if (ctx.pageType === 'record' && ctx.sObject && ctx.recordId) {
-        contextText += ' · live fields';
-      }
-    }
-    metaEl.innerHTML =
-      '<span>' + esc(contextText) + '</span>' +
-      '<span id="sfnav-ask-turn-counter" aria-live="polite"></span>';
+    qEl.focus();
+  }
 
-    hasSoqlApiKey().then(function (ok) {
-      var el = document.getElementById('sfnav-ask-apistat');
-      if (!el) return;
-      if (ok) {
-        el.textContent = 'API key connected';
-        el.className = 'sfnav-apistat sfnav-apistat-ok';
-      } else {
-        el.innerHTML = 'No API key — <a href="#" class="sfnav-options-link">configure in Options</a>';
-        el.className = 'sfnav-apistat sfnav-apistat-missing';
-        var link = el.querySelector('.sfnav-options-link');
-        if (link) link.onclick = function (e) { e.preventDefault(); openOptions(); };
-      }
+  // ─── View 2: thread ────────────────────────────────────────────────────────
+
+  function showAskThreadView() {
+    askView = 'thread';
+    askRecentSelIndex = -1;
+    setFooterHints('ask-thread');
+    document.getElementById('sfnav-ask-home').style.display = 'none';
+    document.getElementById('sfnav-ask-threadview').style.display = 'flex';
+    document.getElementById('sfnav-ask-handoff').style.display = 'none';
+    document.getElementById('sfnav-ask-reply-composer').style.display = 'flex';
+    var statusEl = document.getElementById('sfnav-ask-thread-status');
+    statusEl.textContent = '';
+    statusEl.className = 'sfnav-ask-status-row';
+    askReplyIncludeScreenshot = false;
+    renderAskShotToggle();
+  }
+
+  // pendingFirstQ covers the gap before the first turn is committed to qas.
+  function updateAskThreadHeader(pendingFirstQ) {
+    var crumbEl = document.getElementById('sfnav-ask-crumb');
+    var rightEl = document.getElementById('sfnav-ask-header-right');
+    var qas = (askConversation && askConversation.qas) || [];
+    var firstQ = (qas[0] && qas[0].q) || pendingFirstQ || '';
+    var title = firstQ.length > 46 ? firstQ.slice(0, 45) + '…' : firstQ;
+    var n = qas.length;
+    crumbEl.innerHTML =
+      '<span class="sfnav-ask-crumb-kw">@ask</span>' +
+      '<span class="sfnav-ask-crumb-sep">›</span>' +
+      '<span class="sfnav-ask-crumb-title">' + esc(title) + '</span>' +
+      (n ? '<span class="sfnav-ask-turnpill">' + n + ' turn' + (n === 1 ? '' : 's') + '</span>' : '');
+    rightEl.innerHTML = '<button id="sfnav-ask-newthread" class="sfnav-ask-newthread" type="button">+ New thread</button>';
+    document.getElementById('sfnav-ask-newthread').onclick = function () { showAskHome(''); };
+  }
+
+  function resetAskReplyComposer() {
+    var replyEl = document.getElementById('sfnav-ask-reply');
+    replyEl.value = '';
+    replyEl.disabled = false;
+    autoGrowAskTextarea(replyEl);
+    document.getElementById('sfnav-ask-send').disabled = false;
+    askReplyIncludeScreenshot = false;
+    renderAskShotToggle();
+  }
+
+  // Resume a stored thread: rebuild a continuable conversation from the saved
+  // transcript and render it in the thread view. Never re-submits anything.
+  function resumeAskThread(entry) {
+    if (askInFlight) return;
+    if (typeof rebuildAskConversation !== 'function') return;
+    var conv = rebuildAskConversation(entry);
+    conv.historyId = entry.id;
+    conv.contextLine = entry.contextLine || '';
+    conv.ended = conv.ended || conv.turns >= MAX_ASK_TURNS;
+    askConversation = conv;
+
+    showAskThreadView();
+    var outputEl = document.getElementById('sfnav-ask-output');
+    outputEl.innerHTML = '';
+    (entry.turns || []).forEach(function (t) {
+      appendUserBubble(t.q, t.s ? { context: t.sc || entry.contextLine } : null);
+      appendAssistantMessage(t.a, null, t.t || entry.timestamp);
     });
+    updateAskThreadHeader();
 
+    if (conv.ended) {
+      showAskHandoff();
+    } else {
+      resetAskReplyComposer();
+      document.getElementById('sfnav-ask-reply').focus();
+    }
+    scrollAskThreadToBottom();
+  }
+
+  // ─── Shared @ask panel wiring ──────────────────────────────────────────────
+
+  function autoGrowAskTextarea(el) {
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 110) + 'px';
+  }
+
+  function askPrimaryTextarea() {
+    return document.getElementById(askView === 'thread' ? 'sfnav-ask-reply' : 'sfnav-ask-question');
+  }
+
+  function renderAskShotToggle() {
+    var homeBtn = document.getElementById('sfnav-ask-shot-toggle');
+    if (homeBtn) {
+      homeBtn.setAttribute('aria-pressed', askIncludeScreenshot ? 'true' : 'false');
+      homeBtn.innerHTML = ASK_CAMERA_SVG + '<span>' + (askIncludeScreenshot ? 'Capture screenshot ✓' : 'Capture screenshot') + '</span>';
+    }
+    var replyBtn = document.getElementById('sfnav-ask-reply-shot-toggle');
+    if (replyBtn) {
+      replyBtn.setAttribute('aria-pressed', askReplyIncludeScreenshot ? 'true' : 'false');
+      replyBtn.innerHTML = ASK_CAMERA_SVG + '<span>' + (askReplyIncludeScreenshot ? 'Capture new screenshot ✓' : 'Capture new screenshot') + '</span>';
+    }
+  }
+
+  // Healthy state is silent — the banner only appears when the key is missing.
+  function refreshAskKeyWarning() {
+    var el = document.getElementById('sfnav-ask-keywarn');
+    if (!el) return;
+    hasSoqlApiKey().then(function (ok) {
+      if (searchMode !== 'ask') return;
+      if (ok) {
+        el.style.display = 'none';
+        el.innerHTML = '';
+        return;
+      }
+      el.innerHTML = 'No API key configured — <a href="#" class="sfnav-options-link">Open settings</a>';
+      el.style.display = 'block';
+      var link = el.querySelector('.sfnav-options-link');
+      if (link) link.onclick = function (e) { e.preventDefault(); openOptions(); };
+    });
+  }
+
+  function wireAskPanel() {
     document.getElementById('sfnav-ask-run').onclick = runAskQuery;
+    document.getElementById('sfnav-ask-send').onclick = runAskQuery;
 
-    // Screenshot chip — default ON for first turn only
-    askIncludeScreenshot = true;
-    renderAskScreenChip();
-    var chipDismiss = document.querySelector('.sfnav-ask-chip-dismiss');
-    if (chipDismiss) chipDismiss.onclick = function () {
-      askIncludeScreenshot = false;
-      renderAskScreenChip();
+    document.getElementById('sfnav-ask-shot-toggle').onclick = function () {
+      askIncludeScreenshot = !askIncludeScreenshot;
+      renderAskShotToggle();
+      askPrimaryTextarea().focus();
+    };
+    document.getElementById('sfnav-ask-reply-shot-toggle').onclick = function () {
+      askReplyIncludeScreenshot = !askReplyIncludeScreenshot;
+      renderAskShotToggle();
+      askPrimaryTextarea().focus();
     };
 
     var qEl = document.getElementById('sfnav-ask-question');
     qEl.oninput = function () {
-      this.style.height = 'auto';
-      this.style.height = Math.min(this.scrollHeight, 110) + 'px';
+      askRecallIndex = -1; // editing breaks the recall cycle
+      autoGrowAskTextarea(this);
     };
-    qEl.onkeydown = function (e) {
+    qEl.onkeydown = handleAskHomeKeydown;
+
+    var replyEl = document.getElementById('sfnav-ask-reply');
+    replyEl.oninput = function () { autoGrowAskTextarea(this); };
+    replyEl.onkeydown = function (e) {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         runAskQuery();
@@ -1011,58 +1197,162 @@
         handleBack();
       }
     };
-
-    qEl.focus();
   }
 
-  function renderAskScreenChip() {
-    var chipRow = document.getElementById('sfnav-ask-chip-row');
-    if (chipRow) chipRow.style.display = askIncludeScreenshot ? '' : 'none';
+  // Flattened past questions, newest first, for terminal-style ArrowUp recall.
+  function askRecallList() {
+    var out = [];
+    askHistoryEntries.forEach(function (entry) {
+      var turns = entry.turns || [];
+      for (var i = turns.length - 1; i >= 0; i--) {
+        if (turns[i].q) out.push(turns[i].q);
+      }
+    });
+    return out;
+  }
+
+  function setAskRecentSelection(i) {
+    var rows = document.querySelectorAll('#sfnav-ask-history .sfnav-ask-history-item');
+    if (!rows.length) { askRecentSelIndex = -1; return; }
+    if (i < 0) i = -1;
+    if (i > rows.length - 1) i = rows.length - 1;
+    askRecentSelIndex = i;
+    rows.forEach(function (el, idx) { el.classList.toggle('selected', idx === askRecentSelIndex); });
+    if (i >= 0) rows[i].scrollIntoView({ block: 'nearest' });
+  }
+
+  function handleAskHomeKeydown(e) {
+    var qEl = this;
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      if (askRecentSelIndex >= 0 && askVisibleEntries[askRecentSelIndex]) {
+        resumeAskThread(askVisibleEntries[askRecentSelIndex]);
+        return;
+      }
+      runAskQuery();
+      return;
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      handleBack();
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      if (askRecentSelIndex >= 0) {
+        e.preventDefault();
+        setAskRecentSelection(askRecentSelIndex - 1); // above row 0 → back to textarea
+        return;
+      }
+      if (qEl.value === '' || askRecallIndex >= 0) {
+        var recall = askRecallList();
+        if (!recall.length) return;
+        e.preventDefault();
+        if (askRecallIndex === -1) askRecallDraft = qEl.value;
+        if (askRecallIndex < recall.length - 1) askRecallIndex++;
+        qEl.value = recall[askRecallIndex];
+        autoGrowAskTextarea(qEl);
+        qEl.selectionStart = qEl.selectionEnd = qEl.value.length;
+      }
+      return;
+    }
+    if (e.key === 'ArrowDown') {
+      if (askRecallIndex >= 0) {
+        e.preventDefault();
+        askRecallIndex--;
+        qEl.value = askRecallIndex === -1 ? askRecallDraft : askRecallList()[askRecallIndex];
+        autoGrowAskTextarea(qEl);
+        qEl.selectionStart = qEl.selectionEnd = qEl.value.length;
+        return;
+      }
+      if (askRecentSelIndex >= 0) {
+        e.preventDefault();
+        setAskRecentSelection(askRecentSelIndex + 1);
+        return;
+      }
+      // Move into the recent list — only when the caret has nowhere lower to go.
+      var caretAtEnd = qEl.selectionStart === qEl.value.length;
+      if (caretAtEnd && askVisibleEntries.length) {
+        e.preventDefault();
+        setAskRecentSelection(0);
+      }
+      return;
+    }
+    // Any character typed returns to composing.
+    if (askRecentSelIndex >= 0 && e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      setAskRecentSelection(-1);
+    }
+  }
+
+  // Short human label for where a screenshot was taken, e.g. "Case record page".
+  function askScreenContextLabel(ctx) {
+    if (!ctx) return null;
+    if (ctx.pageType === 'record' && ctx.sObject) return ctx.sObject + ' record page';
+    if (ctx.pageType === 'list-view' && ctx.sObject) return ctx.sObject + ' list view';
+    if (ctx.pageType === 'setup') return 'Setup' + (ctx.setupNode ? ' · ' + ctx.setupNode : '');
+    if (ctx.pageType === 'flow-builder') return 'Flow Builder';
+    if (ctx.pageType === 'app' && ctx.app) return ctx.app + ' app';
+    return null;
   }
 
   async function runAskQuery() {
     if (askInFlight) return;
-    if (askConversation && (askConversation.ended || askConversation.turns >= MAX_ASK_TURNS)) return;
+    var isThread = askView === 'thread';
+    var conv = isThread ? askConversation : null;
+    if (conv && (conv.ended || conv.turns >= MAX_ASK_TURNS)) return;
 
-    var qEl = document.getElementById('sfnav-ask-question');
-    var statusEl = document.getElementById('sfnav-ask-status');
-    var runBtn = document.getElementById('sfnav-ask-run');
+    var qEl = document.getElementById(isThread ? 'sfnav-ask-reply' : 'sfnav-ask-question');
+    var statusEl = document.getElementById(isThread ? 'sfnav-ask-thread-status' : 'sfnav-ask-home-status');
     var overlay = document.getElementById('sfnav-overlay');
 
     var question = qEl.value.trim();
     if (!question) {
       statusEl.textContent = 'Type a question first.';
-      statusEl.className = 'sfnav-ask-status-error';
+      statusEl.className = 'sfnav-ask-status-row sfnav-ask-status-error';
       return;
     }
 
     var hasKey = await hasSoqlApiKey();
     if (!hasKey) {
-      statusEl.innerHTML = 'No API key configured. <a href="#" class="sfnav-options-link">Open Options</a>.';
-      statusEl.className = 'sfnav-ask-status-error';
+      refreshAskKeyWarning();
+      statusEl.innerHTML = 'No API key configured — <a href="#" class="sfnav-options-link">Open settings</a>';
+      statusEl.className = 'sfnav-ask-status-row sfnav-ask-status-error';
       var link = statusEl.querySelector('.sfnav-options-link');
       if (link) link.onclick = function (e) { e.preventDefault(); openOptions(); };
       return;
     }
 
-    var isFollowUp = !!(askConversation && askConversation.messages);
-    var includeScreenshot = askIncludeScreenshot;
+    var isFollowUp = !!(conv && conv.messages && conv.messages.length);
+    var includeScreenshot = isThread ? askReplyIncludeScreenshot : askIncludeScreenshot;
+    var shotContext = includeScreenshot && typeof getAskOrgContext === 'function'
+      ? askScreenContextLabel(getAskOrgContext())
+      : null;
 
-    // Show the user bubble immediately, clear the input.
-    appendUserBubble(question);
-    hideAskHistory();
+    statusEl.textContent = '';
+    statusEl.className = 'sfnav-ask-status-row';
+
+    if (!isThread) {
+      // A question from home opens a fresh thread view.
+      showAskThreadView();
+      document.getElementById('sfnav-ask-output').innerHTML = '';
+      updateAskThreadHeader(question);
+      statusEl = document.getElementById('sfnav-ask-thread-status');
+    }
+
+    appendUserBubble(question, includeScreenshot ? { context: shotContext } : null);
     qEl.value = '';
-    qEl.style.height = 'auto';
+    autoGrowAskTextarea(qEl);
 
-    // Per-turn activity container sits between the user bubble and the answer.
+    // Per-turn activity container sits between the user bubble and the answer;
+    // the thinking line below it keeps the UI alive until the answer lands.
     var activityEl = createAskActivityContainer();
+    var thinkingEl = showAskThinking(includeScreenshot ? 'Screenshot captured' : (isFollowUp ? 'Thinking' : 'Loading record'));
 
     askInFlight = true;
-    runBtn.disabled = true;
-    qEl.disabled = true;
-    statusEl.className = 'sfnav-ask-status-loading sfnav-progress-dots';
-    var apistatEl = document.getElementById('sfnav-ask-apistat');
-    if (apistatEl) { apistatEl.textContent = ''; apistatEl.className = 'sfnav-apistat'; }
+    askRunDetached = false;
+    var replyEl = document.getElementById('sfnav-ask-reply');
+    var sendBtn = document.getElementById('sfnav-ask-send');
+    replyEl.disabled = true;
+    sendBtn.disabled = true;
 
     var prevDisplay = overlay.style.display;
     var restored = false;
@@ -1073,13 +1363,10 @@
     }
     if (!includeScreenshot) {
       restored = true;
-      statusEl.textContent = isFollowUp ? 'Thinking' : 'Loading record';
     } else {
-      statusEl.textContent = 'Capturing screen + loading record';
       overlay.style.display = 'none';
     }
 
-    var lockAfter = false;
     try {
       if (includeScreenshot) {
         await new Promise(function (resolve) {
@@ -1089,134 +1376,146 @@
       var result = await runAsk(question, function (event) {
         if (event.kind === 'captured') {
           restoreOverlay();
+          updateAskThinking(thinkingEl, isFollowUp ? 'Thinking' : 'Loading record');
         } else if (event.kind === 'enriched') {
-          var ctx = event.ctx;
-          if (ctx && ctx.recordFields) {
-            var n = Object.keys(ctx.recordFields).length;
-            statusEl.textContent = 'Asking the assistant (sent ' + n + ' record fields)';
-          } else {
-            statusEl.textContent = 'Asking the assistant';
-          }
+          updateAskThinking(thinkingEl, 'Thinking');
         } else if (event.kind === 'tool_call') {
           appendAskActivity(activityEl, event);
-          statusEl.textContent = 'Investigating';
+          updateAskThinking(thinkingEl, 'Investigating');
         } else if (event.kind === 'tool_result') {
           updateLastAskActivity(activityEl, event);
         } else if (event.kind === 'interim_text') {
           appendAskInterim(activityEl, event.text);
         } else if (event.kind === 'escalate') {
-          appendAskInterim(activityEl, 'Escalating to claude.ai — ' + event.reason);
+          appendAskInterim(activityEl, 'This needs a deeper session — ' + event.reason);
         }
-      }, isFollowUp ? askConversation : null, { includeScreenshot: includeScreenshot });
+      }, isFollowUp ? conv : null, { includeScreenshot: includeScreenshot });
       restoreOverlay();
 
+      var turnRecord = { q: question, a: result.text || '', t: Date.now() };
+      if (includeScreenshot) {
+        turnRecord.s = 1;
+        if (shotContext) turnRecord.sc = shotContext;
+      }
+
       if (isFollowUp) {
-        askConversation.messages = result.messages;
-        askConversation.turns += 1;
-        askConversation.qas.push({ q: question, a: result.text || '' });
-        if (result.escalate) askConversation.ended = true;
+        conv.messages = result.messages;
+        conv.turns += 1;
+        conv.qas.push(turnRecord);
+        if (result.escalate) conv.ended = true;
       } else {
-        askConversation = {
+        conv = {
           messages: result.messages,
           systemBlocks: result.systemBlocks,
           context: result.context,
           turns: 1,
           ended: !!result.escalate,
-          qas: [{ q: question, a: result.text || '' }]
+          qas: [turnRecord],
+          historyId: (typeof makeAskHistoryId === 'function') ? makeAskHistoryId() : String(Date.now()),
+          contextLine: ''
         };
       }
+
+      if (!conv.contextLine) {
+        var ctxForEntry = result.context || {};
+        var ctxBits = [];
+        if (ctxForEntry.pageType && ctxForEntry.pageType !== 'other') ctxBits.push(ctxForEntry.pageType);
+        if (ctxForEntry.sObject)   ctxBits.push(ctxForEntry.sObject);
+        if (ctxForEntry.setupNode) ctxBits.push(ctxForEntry.setupNode);
+        conv.contextLine = ctxBits.join(' · ');
+      }
+
+      if (typeof addToAskHistory === 'function' && result.text) {
+        var updated = await addToAskHistory({
+          id: conv.historyId,
+          turns: conv.qas,
+          contextLine: conv.contextLine,
+          update: true
+        });
+        if (updated) askHistoryEntries = updated;
+      }
+
+      if (askRunDetached || searchMode !== 'ask') return; // user walked away — history is saved
+
+      askConversation = conv;
+      removeAskThinking(thinkingEl);
 
       var debugPayload = (DEV_MODE && askDebugMode)
         ? { system: result.systemBlocks, messages: result.messages }
         : null;
-      appendAssistantMessage(result.text || '', debugPayload);
-      updateAskDots(askConversation.turns);
+      appendAssistantMessage(result.text || '', debugPayload, turnRecord.t);
+      updateAskThreadHeader();
 
-      var ctxForEntry = result.context || {};
-      var ctxBits = [];
-      if (ctxForEntry.pageType)  ctxBits.push(ctxForEntry.pageType);
-      if (ctxForEntry.sObject)   ctxBits.push(ctxForEntry.sObject);
-      if (ctxForEntry.setupNode) ctxBits.push(ctxForEntry.setupNode);
-      var contextLineForEntry = ctxBits.join(' · ');
-      if (typeof addToAskHistory === 'function' && result.text) {
-        var updated = await addToAskHistory({
-          turns: askConversation.qas,
-          contextLine: contextLineForEntry,
-          update: isFollowUp
-        });
-        if (updated) askHistoryEntries = updated;
-      }
-      statusEl.textContent = result.toolCallCount
-        ? result.toolCallCount + ' tool call' + (result.toolCallCount === 1 ? '' : 's')
-        : '';
-      statusEl.className = result.toolCallCount ? 'sfnav-ask-status-ok' : '';
-
-      if (askConversation.ended || askConversation.turns >= MAX_ASK_TURNS) {
-        lockAfter = true;
+      if (conv.ended || conv.turns >= MAX_ASK_TURNS) {
         showAskHandoff();
       } else {
-        qEl.placeholder = 'Ask a follow-up…';
-        runBtn.innerHTML = 'Reply <span class="sfnav-kbd">↵</span>';
-        askIncludeScreenshot = false;
-        renderAskScreenChip();
+        resetAskReplyComposer();
       }
     } catch (err) {
       restoreOverlay();
-      statusEl.textContent = 'Error: ' + err.message;
-      statusEl.className = 'sfnav-ask-status-error';
+      removeAskThinking(thinkingEl);
+      if (!askRunDetached && searchMode === 'ask' && askView === 'thread') {
+        statusEl.textContent = 'Error: ' + err.message;
+        statusEl.className = 'sfnav-ask-status-row sfnav-ask-status-error';
+      }
       console.warn('sfnav: ask failed —', err);
     } finally {
       askInFlight = false;
-      if (!lockAfter) {
-        runBtn.disabled = false;
-        qEl.disabled = false;
-        qEl.focus();
+      replyEl.disabled = false;
+      sendBtn.disabled = false;
+      if (!askRunDetached && searchMode === 'ask' && askView === 'thread'
+          && !(askConversation && (askConversation.ended || askConversation.turns >= MAX_ASK_TURNS))) {
+        replyEl.focus();
       }
     }
   }
 
-  // Used when replaying a history entry (no live conversation thread).
-  function appendAskTurnBlock(question, answer) {
-    if (question) appendUserBubble(question);
-    appendAssistantMessage(answer);
-  }
-
-  function appendUserBubble(question) {
+  // shot: { context } when this message included a screenshot; null otherwise.
+  function appendUserBubble(question, shot) {
     var outputEl = document.getElementById('sfnav-ask-output');
     var bubble = document.createElement('div');
     bubble.className = 'sfnav-ask-bubble-user';
-    bubble.textContent = question || '';
+    var textEl = document.createElement('div');
+    textEl.className = 'sfnav-ask-bubble-text';
+    textEl.textContent = question || '';
+    bubble.appendChild(textEl);
+    if (shot) {
+      var note = document.createElement('div');
+      note.className = 'sfnav-ask-bubble-note';
+      note.innerHTML = ASK_CAMERA_SVG + '<span>Screenshot' + (shot.context ? ' · ' + esc(shot.context) : '') + '</span>';
+      bubble.appendChild(note);
+    }
     outputEl.appendChild(bubble);
     scrollAskThreadToBottom();
   }
 
-  function appendAssistantMessage(answer, debugPayload) {
+  function appendAssistantMessage(answer, debugPayload, ts) {
     var outputEl = document.getElementById('sfnav-ask-output');
     var wrap = document.createElement('div');
     wrap.className = 'sfnav-ask-answer-wrap';
     var aDiv = document.createElement('div');
     aDiv.className = 'sfnav-ask-answer';
     aDiv.innerHTML = renderAskMarkdown(answer || '');
-    var iconClipboard = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
-    var iconCheck = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+    wrap.appendChild(aDiv);
+
+    var meta = document.createElement('div');
+    meta.className = 'sfnav-ask-answer-meta';
     var copyBtn = document.createElement('button');
-    copyBtn.className = 'sfnav-ask-copy';
-    copyBtn.title = 'Copy answer';
-    copyBtn.setAttribute('aria-label', 'Copy answer');
-    copyBtn.innerHTML = iconClipboard;
+    copyBtn.type = 'button';
+    copyBtn.className = 'sfnav-ask-answer-copy';
+    copyBtn.textContent = 'Copy';
     copyBtn.onclick = function () {
       navigator.clipboard.writeText(answer || '').then(function () {
-        copyBtn.innerHTML = iconCheck;
-        setTimeout(function () { copyBtn.innerHTML = iconClipboard; }, 1500);
+        copyBtn.textContent = 'Copied';
+        setTimeout(function () { copyBtn.textContent = 'Copy'; }, 1500);
       });
     };
-    wrap.appendChild(aDiv);
-    wrap.appendChild(copyBtn);
+    meta.appendChild(copyBtn);
     if (debugPayload) {
       var dbgBtn = document.createElement('button');
-      dbgBtn.className = 'sfnav-ask-copy sfnav-ask-debug-copy';
+      dbgBtn.type = 'button';
+      dbgBtn.className = 'sfnav-ask-answer-copy';
       dbgBtn.title = 'Copy debug payload';
-      dbgBtn.setAttribute('aria-label', 'Copy debug payload');
       dbgBtn.textContent = '{ }';
       dbgBtn.onclick = function () {
         var json = JSON.stringify(debugPayload, null, 2);
@@ -1226,10 +1525,43 @@
           setTimeout(function () { dbgBtn.textContent = prev; }, 1500);
         });
       };
-      wrap.appendChild(dbgBtn);
+      meta.appendChild(dbgBtn);
     }
+    var timeEl = document.createElement('span');
+    timeEl.className = 'sfnav-ask-answer-time';
+    timeEl.textContent = formatAskTimeAgo(ts || Date.now());
+    meta.appendChild(timeEl);
+    wrap.appendChild(meta);
+
     outputEl.appendChild(wrap);
     scrollAskThreadToBottom();
+  }
+
+  // ─── Thinking indicator (spinner + status while a turn is in flight) ───────
+
+  function showAskThinking(text) {
+    var outputEl = document.getElementById('sfnav-ask-output');
+    if (!outputEl) return null;
+    var el = document.createElement('div');
+    el.className = 'sfnav-ask-thinking';
+    el.innerHTML = '<span class="sfnav-ask-thinking-dot"></span><span class="sfnav-ask-thinking-text sfnav-progress-dots"></span>';
+    el.querySelector('.sfnav-ask-thinking-text').textContent = text;
+    outputEl.appendChild(el);
+    scrollAskThreadToBottom();
+    return el;
+  }
+
+  function updateAskThinking(el, text) {
+    if (!el) return;
+    var t = el.querySelector('.sfnav-ask-thinking-text');
+    if (t) t.textContent = text;
+    // Keep the indicator last in the thread even as activity items land above it.
+    if (el.parentNode && el.parentNode.lastChild !== el) el.parentNode.appendChild(el);
+    scrollAskThreadToBottom();
+  }
+
+  function removeAskThinking(el) {
+    if (el && el.parentNode) el.parentNode.removeChild(el);
   }
 
   // Creates a per-turn activity container appended to the output thread,
@@ -1248,63 +1580,95 @@
     if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight;
   }
 
-  function hideAskHistory() {
-    var listEl = document.getElementById('sfnav-ask-history');
-    if (listEl) listEl.style.display = 'none';
-  }
-
-  function updateAskDots(n) {
-    var el = document.getElementById('sfnav-ask-turn-counter');
-    if (!el) return;
-    el.textContent = n > 0 ? n + ' / ' + MAX_ASK_TURNS : '';
-  }
-
   function showAskHandoff() {
-    var composerEl = document.getElementById('sfnav-ask-composer');
+    var composerEl = document.getElementById('sfnav-ask-reply-composer');
     var handoffEl = document.getElementById('sfnav-ask-handoff');
     if (composerEl) composerEl.style.display = 'none';
     if (!handoffEl) return;
     handoffEl.innerHTML =
       '<div class="sfnav-ask-handoff-heading">This thread is wrapping up</div>' +
-      '<p class="sfnav-ask-handoff-body">Skipper keeps @ask short and grounded in your org. For deeper back-and-forth, claude.ai is the better fit.</p>' +
+      '<p class="sfnav-ask-handoff-body">Skipper keeps @ask short and grounded in your org. Want to dig deeper? The handover prompt packs this whole thread — questions, answers, and every query already run against your org — into one message you can paste into claude.ai, ChatGPT, or any other LLM to continue the investigation there.</p>' +
       '<div class="sfnav-ask-handoff-actions">' +
-        '<button id="sfnav-ask-handoff-open" class="sfnav-soql-btn-primary">Open in claude.ai ↗</button>' +
-        '<button id="sfnav-ask-handoff-new" class="sfnav-soql-btn-secondary">New @ask <span class="sfnav-kbd">Esc</span></button>' +
+        '<button id="sfnav-ask-handoff-copy" class="sfnav-soql-btn-primary">Copy handover prompt</button>' +
+        '<button id="sfnav-ask-handoff-new" class="sfnav-soql-btn-secondary">New thread</button>' +
       '</div>';
     handoffEl.style.display = 'flex';
-    var openBtn = document.getElementById('sfnav-ask-handoff-open');
-    if (openBtn) {
-      openBtn.onclick = function () {
-        var url = buildClaudeAiDeepLink();
-        window.open(url, '_blank');
+    var copyBtn = document.getElementById('sfnav-ask-handoff-copy');
+    if (copyBtn) {
+      copyBtn.onclick = function () {
+        var text = buildAskHandoverPrompt();
+        if (!text) return;
+        navigator.clipboard.writeText(text).then(function () {
+          var prev = copyBtn.textContent;
+          copyBtn.textContent = 'Copied';
+          setTimeout(function () { copyBtn.textContent = prev; }, 1500);
+        });
       };
     }
     var newBtn = document.getElementById('sfnav-ask-handoff-new');
     if (newBtn) {
-      newBtn.onclick = function () { enterAskMode(''); };
+      newBtn.onclick = function () { showAskHome(''); };
     }
     scrollAskThreadToBottom();
   }
 
-  function buildClaudeAiDeepLink() {
-    var MAX_CHARS = 1800;
-    if (!askConversation || !askConversation.qas || !askConversation.qas.length) {
-      return 'https://claude.ai/new';
+  // One line per tool call for the handover prompt, e.g. "SOQL: SELECT ...".
+  // Returns null for tools that don't belong in the list (escalateToDesktop).
+  function askHandoverToolLine(name, input) {
+    input = input || {};
+    switch (name) {
+      case 'runSoql':         return 'SOQL: ' + (input.query || '');
+      case 'runToolingSoql':  return 'Tooling API SOQL: ' + (input.query || '');
+      case 'describeSObject': return 'Described object ' + (input.sObject || '');
+      case 'getFieldHistory': return 'Field history for record ' + (input.recordId || '');
+      case 'searchApex':      return 'Searched Apex source for "' + (input.query || '') + '"';
+      case 'searchFlows':     return 'Searched active Flows for "' + (input.query || '') + '"';
+      case 'readApexClass':   return 'Read Apex ' + (input.kind === 'trigger' ? 'trigger' : 'class') + ' ' + (input.name || '');
+      default: return null;
     }
+  }
+
+  // Portable, untruncated version of the thread for pasting into any LLM.
+  // Assembled locally (no API call): the Q/As are already distilled answers,
+  // and the tool_use blocks in the message history tell the receiving model
+  // exactly which org data was already checked.
+  function buildAskHandoverPrompt() {
+    var conv = askConversation;
+    if (!conv || !conv.qas || !conv.qas.length) return '';
+
     var lines = [
-      'I was investigating this in my Salesforce org via the Skipper extension. Here’s the thread so far:',
-      ''
+      'I\'m a Salesforce admin. I was troubleshooting an issue in my org with an AI assistant that had read-only API access, and I\'m handing the thread over to you to continue.'
     ];
-    askConversation.qas.forEach(function (qa) {
-      lines.push('Q: ' + qa.q);
-      var answer = qa.a.length > 400 ? qa.a.slice(0, 397) + '…' : qa.a;
-      lines.push('A: ' + answer);
-      lines.push('');
+    var where = askScreenContextLabel(conv.context) || conv.contextLine || '';
+    if (conv.context && conv.context.recordId) {
+      where += (where ? ' — ' : '') + 'record Id ' + conv.context.recordId;
+    }
+    if (where) lines.push('', 'Where this happened: ' + where);
+
+    lines.push('', 'Thread so far:');
+    conv.qas.forEach(function (qa) {
+      lines.push('', 'Q: ' + qa.q, 'A: ' + qa.a);
     });
-    lines.push('Continue helping me figure this out.');
-    var text = lines.join('\n');
-    if (text.length > MAX_CHARS) text = text.slice(0, MAX_CHARS - 1) + '…';
-    return 'https://claude.ai/new?q=' + encodeURIComponent(text);
+
+    var toolLines = [];
+    (conv.messages || []).forEach(function (msg) {
+      if (msg.role !== 'assistant' || !Array.isArray(msg.content)) return;
+      msg.content.forEach(function (block) {
+        if (block.type !== 'tool_use') return;
+        var line = askHandoverToolLine(block.name, block.input);
+        if (line && toolLines.indexOf(line) === -1) toolLines.push(line);
+      });
+    });
+    if (toolLines.length) {
+      lines.push('', 'Org data the assistant already pulled:');
+      toolLines.forEach(function (l) { lines.push('- ' + l); });
+    }
+
+    lines.push(
+      '',
+      'You don\'t have access to my org. When you need org data, give me the exact SOQL query, Tooling API query, or Setup path, and I\'ll paste back the results. Pick up the investigation from here.'
+    );
+    return lines.join('\n');
   }
 
   // Human-readable label for each tool. Kept in content.js (not ask.js) so the
@@ -1316,7 +1680,7 @@
     getFieldHistory:   'Reading field history',
     searchApex:        'Searching Apex',
     readApexClass:     'Reading Apex class',
-    escalateToDesktop: 'Escalating to claude.ai'
+    escalateToDesktop: 'Recommending handover'
   };
 
   function appendAskActivity(activityEl, event) {
@@ -1357,30 +1721,6 @@
     activityEl.appendChild(li);
   }
 
-  // Display a stored history entry. A past entry has no retained message thread,
-  // so this resets the live conversation — typing afterwards starts fresh.
-  function renderAskOutput(entry) {
-    askConversation = null;
-    document.getElementById('sfnav-ask-output').innerHTML = '';
-    var composerEl = document.getElementById('sfnav-ask-composer');
-    if (composerEl) composerEl.style.display = 'flex';
-    var handoffEl = document.getElementById('sfnav-ask-handoff');
-    if (handoffEl) handoffEl.style.display = 'none';
-    var qEl = document.getElementById('sfnav-ask-question');
-    if (qEl) {
-      qEl.disabled = false;
-      qEl.placeholder = 'What’s happening here? Why this error? Anything you want to know about the current screen…';
-      qEl.style.height = 'auto';
-    }
-    var runBtn = document.getElementById('sfnav-ask-run');
-    if (runBtn) runBtn.disabled = false;
-    var statusEl = document.getElementById('sfnav-ask-status');
-    if (statusEl) { statusEl.textContent = ''; statusEl.className = ''; }
-    updateAskDots(0);
-    var turns = (entry && entry.turns) || [{ q: (entry && entry.question) || '', a: (entry && entry.answer) || '' }];
-    turns.forEach(function (t) { appendAskTurnBlock(t.q, t.a); });
-  }
-
   function formatAskTimeAgo(ts) {
     var diff = Date.now() - (ts || 0);
     if (diff < 0) diff = 0;
@@ -1396,31 +1736,51 @@
   var askHistoryExpanded = false;
 
   function renderAskHistoryList() {
+    var recentEl = document.getElementById('sfnav-ask-recent');
     var listEl = document.getElementById('sfnav-ask-history');
-    var labelEl = document.getElementById('sfnav-ask-history-label');
-    if (!listEl || !labelEl) return;
-    if (!askHistoryEntries.length || askConversation) {
-      listEl.style.display = 'none';
+    if (!recentEl || !listEl) return;
+    askRecentSelIndex = -1;
+    if (!askHistoryEntries.length) {
+      recentEl.style.display = 'none';
       listEl.innerHTML = '';
+      askVisibleEntries = [];
       return;
     }
-    listEl.style.display = 'block';
+    recentEl.style.display = 'block';
     listEl.innerHTML = '';
 
-    var COLLAPSED = 2;
+    var COLLAPSED = 3;
     var visible = askHistoryExpanded ? askHistoryEntries : askHistoryEntries.slice(0, COLLAPSED);
+    askVisibleEntries = visible;
 
+    var seenFirstQ = {};
     visible.forEach(function (entry) {
+      var entryTurns = entry.turns || [{ q: entry.question || '', a: entry.answer || '' }];
+      var firstQ = (entryTurns[0] && entryTurns[0].q) || '';
+      var lastQ = (entryTurns[entryTurns.length - 1] && entryTurns[entryTurns.length - 1].q) || '';
+      // Threads opening with the same question would render as twin rows —
+      // show the latest question for the later duplicates instead.
+      var displayQ = firstQ;
+      var qKey = firstQ.trim().toLowerCase();
+      if (seenFirstQ[qKey] && lastQ && lastQ !== firstQ) displayQ = lastQ;
+      seenFirstQ[qKey] = true;
+
+      var hasShot = entryTurns.some(function (t) { return t.s; });
+      var metaText = entryTurns.length + ' turn' + (entryTurns.length === 1 ? '' : 's') + ' · ' + formatAskTimeAgo(entry.timestamp);
+
       var li = document.createElement('li');
       li.className = 'sfnav-ask-history-item';
-      var entryTurns = entry.turns || [{ q: entry.question || '' }];
-      var firstQ = (entryTurns[0] && entryTurns[0].q) || '';
-      var metaText = (entryTurns.length > 1 ? entryTurns.length + ' turns · ' : '') + formatAskTimeAgo(entry.timestamp);
       li.innerHTML =
-        '<span class="sfnav-ask-history-q">' + esc(firstQ) + '</span>' +
-        '<span class="sfnav-ask-history-meta">' + esc(metaText) + '</span>';
+        '<span class="sfnav-ask-history-main">' +
+          '<span class="sfnav-ask-history-q">' + esc(displayQ) + '</span>' +
+          '<span class="sfnav-ask-history-meta">' +
+            (hasShot ? '<span class="sfnav-ask-history-cam">' + ASK_CAMERA_SVG + '</span>' : '') +
+            esc(metaText) +
+          '</span>' +
+        '</span>' +
+        '<span class="sfnav-ask-history-resume">Resume →</span>';
       li.addEventListener('click', function () {
-        renderAskOutput(entry);
+        resumeAskThread(entry);
       });
       listEl.appendChild(li);
     });
@@ -1429,8 +1789,8 @@
       var moreLi = document.createElement('li');
       moreLi.className = 'sfnav-ask-history-more';
       moreLi.textContent = askHistoryExpanded
-        ? 'Show less'
-        : '… ' + (askHistoryEntries.length - COLLAPSED) + ' more';
+        ? 'Show fewer'
+        : 'Show all conversations (' + askHistoryEntries.length + ') →';
       moreLi.addEventListener('click', function () {
         askHistoryExpanded = !askHistoryExpanded;
         renderAskHistoryList();
@@ -1493,15 +1853,19 @@
       };
     }
     if (searchMode === 'ask') {
-      var qEl = document.getElementById('sfnav-ask-question');
+      var qEl = askPrimaryTextarea();
       var answerEls = document.querySelectorAll('#sfnav-ask-output .sfnav-ask-answer');
       var aEl = answerEls.length ? answerEls[answerEls.length - 1] : null;
       var question = (qEl && qEl.value || '').trim();
+      if (!question && askConversation && askConversation.qas && askConversation.qas.length) {
+        question = (askConversation.qas[askConversation.qas.length - 1].q || '').trim();
+      }
       var answer = (aEl && aEl.textContent || '').trim();
       if ((!question || !answer) && askHistoryEntries && askHistoryEntries.length) {
-        var last = askHistoryEntries[0];
-        if (!question) question = ((last && last.question) || '').trim();
-        if (!answer)   answer   = ((last && last.answer)   || '').trim();
+        var lastTurns = (askHistoryEntries[0] && askHistoryEntries[0].turns) || [];
+        var lastTurn = lastTurns[lastTurns.length - 1] || {};
+        if (!question) question = (lastTurn.q || '').trim();
+        if (!answer)   answer   = (lastTurn.a || '').trim();
       }
       if (!question && !answer) return null;
       return {
@@ -1662,6 +2026,8 @@
   }
 
   function hideSoqlPanel() {
+    var inputEl = document.getElementById('sfnav-input');
+    if (inputEl) inputEl.style.display = ''; // @ask hides it in favor of its own header
     var soqlEl = document.getElementById('sfnav-soql');
     if (soqlEl) soqlEl.style.display = 'none';
     var fdEl = document.getElementById('sfnav-flowdebug');

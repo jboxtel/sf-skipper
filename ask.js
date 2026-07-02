@@ -442,11 +442,11 @@ var ASK_TOOLS = [
   },
   {
     name: 'escalateToDesktop',
-    description: 'Stop investigating and recommend the user move this question to claude.ai. Call this when the question would need reading more than 3 Apex classes, spans multiple subsystems, asks for a refactor, or you otherwise cannot ground a confident answer within the tool-call budget. Do NOT call this for questions you can answer directly — only when you would otherwise have to guess.',
+    description: 'Stop investigating and recommend the user hand this question over to a full LLM session. Call this when the question would need reading more than 3 Apex classes, spans multiple subsystems, asks for a refactor, or you otherwise cannot ground a confident answer within the tool-call budget. Do NOT call this for questions you can answer directly — only when you would otherwise have to guess.',
     input_schema: {
       type: 'object',
       properties: {
-        reason: { type: 'string', description: 'One sentence in admin terms: why this needs the desktop.' },
+        reason: { type: 'string', description: 'One sentence in admin terms: why this needs a deeper session.' },
         suggestedFollowup: { type: 'string', description: 'Optional: a refined version of the user\'s question for the handoff.' }
       },
       required: ['reason']
@@ -828,7 +828,19 @@ async function runAsk(question, onActivity, conversation, options) {
     messages = conversation.messages.slice();
     systemBlocks = conversation.systemBlocks;
     enrichedCtx = conversation.context;
-    messages.push({ role: 'user', content: question });
+    if (includeScreenshot) {
+      var followUpImage = await captureVisibleTab();
+      emit({ kind: 'captured' });
+      messages.push({
+        role: 'user',
+        content: [
+          { type: 'image', source: { type: 'base64', media_type: followUpImage.mediaType || 'image/jpeg', data: followUpImage.data } },
+          { type: 'text', text: 'A fresh screenshot of the current screen is attached.\n\n' + question }
+        ]
+      });
+    } else {
+      messages.push({ role: 'user', content: question });
+    }
   } else {
     var ctx = getAskOrgContext();
     var imageP = includeScreenshot
@@ -919,12 +931,12 @@ async function runAsk(question, onActivity, conversation, options) {
   }
 
   if (escalate) {
-    var lines = ['This question is bigger than @ask should chew on — try claude.ai instead.'];
+    var lines = ['This question is bigger than @ask should chew on — copy the handover prompt and continue in a full LLM session.'];
     lines.push('');
     lines.push('Reason: ' + escalate.reason);
     if (escalate.suggestedFollowup) {
       lines.push('');
-      lines.push('Suggested question for claude.ai:');
+      lines.push('Suggested question for the handover:');
       lines.push(escalate.suggestedFollowup);
     }
     finalText = lines.join('\n');
@@ -938,16 +950,35 @@ async function runAsk(question, onActivity, conversation, options) {
   return { text: finalText, context: enrichedCtx, toolCallCount: toolCallCount, escalate: escalate, messages: messages, systemBlocks: systemBlocks };
 }
 
+function makeAskHistoryId() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
+
 function getAskHistory() {
   return new Promise(function (resolve) {
     if (typeof chrome === 'undefined' || !chrome.storage) { resolve([]); return; }
     var key = getOrgCacheKey(ASK_HISTORY_KEY);
     chrome.storage.local.get(key, function (data) {
-      resolve(data[key] || []);
+      var list = data[key] || [];
+      // Entries written before threads became resumable have no id — assign
+      // one and write back so update-by-id works on them too.
+      var changed = false;
+      list.forEach(function (e) {
+        if (!e.id) { e.id = makeAskHistoryId(); changed = true; }
+      });
+      if (changed) {
+        var payload = {};
+        payload[key] = list;
+        chrome.storage.local.set(payload);
+      }
+      resolve(list);
     });
   });
 }
 
+// entry: { id, turns, contextLine, update }. With update:true the entry whose
+// id matches is replaced and moved to the front; otherwise a new entry is
+// prepended. Timestamp always reflects the latest activity.
 function addToAskHistory(entry) {
   return new Promise(function (resolve) {
     if (typeof chrome === 'undefined' || !chrome.storage) { resolve(); return; }
@@ -955,21 +986,42 @@ function addToAskHistory(entry) {
     chrome.storage.local.get(key, function (data) {
       var list = data[key] || [];
       var record = {
+        id: entry.id || makeAskHistoryId(),
         turns: entry.turns,
         contextLine: entry.contextLine || '',
-        timestamp: entry.update && list.length ? list[0].timestamp : Date.now()
+        timestamp: Date.now()
       };
-      if (entry.update && list.length) {
-        list[0] = record;
-      } else {
-        list.unshift(record);
+      if (entry.update && entry.id) {
+        list = list.filter(function (e) { return e.id !== entry.id; });
       }
+      list.unshift(record);
       list = list.slice(0, ASK_HISTORY_MAX);
       var payload = {};
       payload[key] = list;
       chrome.storage.local.set(payload, function () { resolve(list); });
     });
   });
+}
+
+// Rebuild a continuable conversation from a stored history entry. The original
+// screenshot and record snapshot aren't persisted, so the rebuilt thread is
+// plain text; the model re-grounds itself through tools on the next turn.
+function rebuildAskConversation(entry) {
+  var turns = (entry && entry.turns) || [];
+  var messages = [];
+  turns.forEach(function (t) {
+    messages.push({ role: 'user', content: t.q || '' });
+    messages.push({ role: 'assistant', content: [{ type: 'text', text: t.a || '' }] });
+  });
+  var systemPrompt = buildAskSystemPrompt({ pageType: 'other' }, false);
+  return {
+    messages: messages,
+    systemBlocks: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
+    context: null,
+    turns: turns.length,
+    ended: false,
+    qas: turns.slice()
+  };
 }
 
 function summarizeToolResult(name, result) {
