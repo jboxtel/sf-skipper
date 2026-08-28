@@ -42,6 +42,7 @@ FILES=(
   apps.js
   labels.js
   permsets.js
+  users.js
   flow-debug.js
   commands.js
   org-glossary.js
