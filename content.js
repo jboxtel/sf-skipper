@@ -8,12 +8,13 @@
   initApps();          // populate Lightning app cache from storage + API
   initLabels();        // populate custom label cache from storage + Tooling API
   initPermsets();      // populate permission set cache from storage + REST API
+  initUsers();         // populate user cache from storage + REST API
   if (typeof initSetupHarvest === 'function') initSetupHarvest();
 
   var paletteVisible = false;
   var selectedIndex = -1;
   var currentResults = [];
-  var searchMode = 'root'; // 'root' | 'object-picker' | 'object-scoped' | 'flow-picker' | 'app-picker' | 'soql' | 'flow-debug' | 'cmd-picker' | 'cmd-scoped' | 'permset-picker' | 'feedback'
+  var searchMode = 'root'; // 'root' | 'object-picker' | 'object-scoped' | 'flow-picker' | 'app-picker' | 'soql' | 'flow-debug' | 'cmd-picker' | 'cmd-scoped' | 'permset-picker' | 'user-picker' | 'feedback'
   var scopedObject = null;
   var scopedCmdt = null;
   var objectPickerFilter = '';
@@ -22,6 +23,7 @@
   var cmdtPickerFilter = '';
   var labelPickerFilter = '';
   var permsetPickerFilter = '';
+  var userPickerFilter = '';
   var soqlInFlight = false;
   var flowDebugInFlight = false;
   var askInFlight = false;
@@ -135,6 +137,7 @@
     'cmd-picker':     '@cmd',
     'label-picker':   '@label',
     'permset-picker': '@permset',
+    'user-picker':    '@user',
     'id-entry':       '@id'
   };
 
@@ -362,6 +365,8 @@
         renderResults(resolveLabelPicker(val));
       } else if (searchMode === 'permset-picker') {
         renderResults(resolvePermsetPicker(val));
+      } else if (searchMode === 'user-picker') {
+        renderResults(resolveUserPicker(val));
       } else if (searchMode === 'setup-picker') {
         renderResults(resolveSetupPicker(val));
       } else if (searchMode === 'id-entry') {
@@ -423,6 +428,7 @@
     cmdtPickerFilter = '';
     labelPickerFilter = '';
     permsetPickerFilter = '';
+    userPickerFilter = '';
     hideSoqlPanel();
     setFooterHints('root');
     var breadcrumbEl = document.getElementById('sfnav-breadcrumb');
@@ -454,6 +460,7 @@
       case 'cmd':     enterCmdPickerMode(filterText || '');     return;
       case 'label':   enterLabelPickerMode(filterText || '');   return;
       case 'permset': enterPermsetPickerMode(filterText || ''); return;
+      case 'user':    enterUserPickerMode(filterText || '');    return;
       case 'setup':   enterSetupPickerMode(filterText || '');   return;
       case 'id':      enterIdEntryMode(filterText || '');      return;
       case 'ask':     enterAskMode(filterText || '');           return;
@@ -708,6 +715,15 @@
     input.value = filterText || '';
     input.placeholder = 'Filter permission sets…';
     renderResults(resolvePermsetPicker(filterText || ''));
+    input.focus();
+  }
+
+  function enterUserPickerMode(filterText) {
+    searchMode = 'user-picker';
+    var input = document.getElementById('sfnav-input');
+    input.value = filterText || '';
+    input.placeholder = 'Filter users…';
+    renderResults(resolveUserPicker(filterText || ''));
     input.focus();
   }
 
@@ -2181,6 +2197,7 @@
     'refresh-apps':     { label: 'apps',            load: function () { return loadApps(); } },
     'refresh-labels':   { label: 'custom labels',   load: function () { return loadLabels(); } },
     'refresh-permsets': { label: 'permission sets', load: function () { return loadPermsets(); } },
+    'refresh-users':    { label: 'users',           load: function () { return loadUsers(); } },
     'refresh-objects':  { label: 'objects',         load: function () { return loadObjectsFromPage(); } },
   };
 
@@ -2236,6 +2253,7 @@
     if (typeof loadApps === 'function')            tasks.push(loadApps());
     if (typeof loadLabels === 'function')          tasks.push(loadLabels());
     if (typeof loadPermsets === 'function')        tasks.push(loadPermsets());
+    if (typeof loadUsers === 'function')           tasks.push(loadUsers());
 
     Promise.allSettled(tasks).then(function (results) {
       var failed = results.filter(function (r) { return r.status === 'rejected'; });
@@ -2332,6 +2350,15 @@
     if (!input) return;
     if (searchMode === 'permset-picker') {
       renderResults(resolvePermsetPicker(input.value));
+    }
+  });
+
+  document.addEventListener('sfnav:users-loaded', function () {
+    if (!paletteVisible) return;
+    var input = document.getElementById('sfnav-input');
+    if (!input) return;
+    if (searchMode === 'user-picker') {
+      renderResults(resolveUserPicker(input.value));
     }
   });
 

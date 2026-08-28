@@ -78,6 +78,20 @@ function toPermsetResult(ps) {
   };
 }
 
+function toUserResult(u) {
+  var sub = u.profile || u.username;
+  return {
+    label: u.name,
+    sublabel: u.isActive ? sub : 'Inactive — ' + sub,
+    // Setup's user detail page (not the standard Lightning record view) — the
+    // one with Login As, Reset Password, Permission Set assignment, etc.
+    // noredirect=1 stops it bouncing to the frontend record page.
+    url: getOrgBase() + '/lightning/setup/ManageUsers/page?address=%2F' + encodeURIComponent(u.id.slice(0, 15)) + '%3Fnoredirect%3D1',
+    type: 'user',
+    user: u,
+  };
+}
+
 function toFlowResult(flow) {
   return {
     label: flow.label,
@@ -127,6 +141,8 @@ var SHORTCUTS = [
     tipTitle: 'Navigate with @label',     tipBody: 'Search custom labels by name or translated value.',                                  tipExample: '@label welcome message' },
   { id: 'permset',    aliases: 'permset permsets ps',    label: '@permset',  sublabel: 'Permission sets',               group: 'browse',      hint: 'Press Enter to browse permission sets',
     tipTitle: 'Navigate with @permset',   tipBody: 'Open any permission set in the org by name.',                                        tipExample: '@permset salesforce admin' },
+  { id: 'user',       aliases: 'user users',             label: '@user',     sublabel: 'Org users',                     group: 'browse',      hint: 'Press Enter to browse users',
+    tipTitle: 'Navigate with @user',      tipBody: 'Find any user in the org by name, username, or profile.',                            tipExample: '@user jane doe' },
   { id: 'setup',      aliases: 'setup',                  label: '@setup',    sublabel: 'All setup quick links',         group: 'browse',      hint: 'Press Enter to browse all setup pages',
     tipTitle: 'Navigate with @setup',     tipBody: 'Search every Setup page directly — no menu clicking.',                               tipExample: '@setup failed flow interviews' },
   { id: 'ask',        aliases: 'ask',                    label: '@ask',      sublabel: 'Ask Claude about this screen',  group: 'ai',          action: 'ask',            hint: 'Press Enter to ask Claude about this screen',
@@ -382,6 +398,30 @@ function resolvePermsetPicker(filter) {
         : filter
           ? (count === 0 ? 'No permission sets match — refresh to reload from the org' : count + ' matching permission set' + (count === 1 ? '' : 's'))
           : all.length + ' permission set' + (all.length === 1 ? '' : 's') + ' — type to filter',
+  };
+}
+
+// User picker mode: filter across all org Users
+function resolveUserPicker(filter) {
+  var all = getAllUsers();
+  var filtered = filter
+    ? fuzzyFilter(filter, all, function (u) { return u.name + ' ' + (u.username || '') + ' ' + (u.email || ''); })
+    : all;
+  var count = filtered.length;
+  var results = filtered.slice(0, 30).map(toUserResult);
+  if (filter && getUsersState() !== 'loading') {
+    results.push(makeRefreshRow('refresh-users', 'user'));
+  }
+  return {
+    mode: 'user-picker',
+    results: results,
+    hint: getUsersState() === 'error'
+      ? 'Failed to load users: ' + getUsersError()
+      : all.length === 0
+        ? 'Loading users…'
+        : filter
+          ? (count === 0 ? 'No users match — refresh to reload from the org' : count + ' matching user' + (count === 1 ? '' : 's'))
+          : all.length + ' user' + (all.length === 1 ? '' : 's') + ' — type to filter',
   };
 }
 

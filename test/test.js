@@ -49,8 +49,8 @@ async function injectExtension(page) {
         runtime: {},
         storage: { local: { get: (_k, cb) => cb({}), set: () => {} } }
       };
-      // flows.js / apps.js / labels.js / permsets.js / soql.js / ask.js aren't
-      // injected — stub every symbol content.js / commands.js reaches for.
+      // flows.js / apps.js / labels.js / permsets.js / users.js / soql.js / ask.js
+      // aren't injected — stub every symbol content.js / commands.js reaches for.
       window.initFlows = () => {};
       window.getAllFlows = () => [];
       window.getFlowsState = () => 'idle';
@@ -71,6 +71,11 @@ async function injectExtension(page) {
       window.getPermsetsState = () => 'idle';
       window.getPermsetsError = () => '';
       window.resolvePermsetPicker = () => ({ mode: 'permset-picker', results: [], hint: '' });
+      window.initUsers = () => {};
+      window.getAllUsers = () => [];
+      window.getUsersState = () => 'idle';
+      window.getUsersError = () => '';
+      window.resolveUserPicker = () => ({ mode: 'user-picker', results: [], hint: '' });
       window.hasSoqlApiKey = () => Promise.resolve(false);
       window.generateSoql = () => Promise.reject(new Error('not stubbed'));
       window.getSoqlHistory = () => Promise.resolve([]);
