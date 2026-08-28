@@ -23,10 +23,14 @@ In dev mode, click the reload icon on `chrome://extensions` after editing any so
 
 ## Screenshots
 
-| | | |
-|---|---|---|
-| ![Command palette](screenshots/commandpallette.jpg) | ![Flow browser](screenshots/flows.png) | ![SOQL Generator](screenshots/soql.png) |
-| Open Skipper from anywhere — search objects, flows, apps, custom metadata, labels, permission sets, and Setup pages | Browse and filter every flow in your org with `@flow` | Generate SOQL from natural language, grounded in your org's real schema |
+| | |
+|---|---|
+| ![Command palette](screenshots/command-palette.png) | ![Object search](screenshots/object-search.png) |
+| Open Skipper from anywhere — search objects, flows, apps, custom metadata, labels, permission sets, and Setup pages | Drill into any object with `@` — fields, record types, layouts, and more |
+| ![Flow browser](screenshots/flow-browser.png) | ![SOQL Generator](screenshots/soql-generator.png) |
+| Browse and filter every flow in your org with `@flow` | Generate SOQL from natural language, grounded in your org's real schema |
+| ![AI assistant](screenshots/ask-ai.png) | |
+| Ask questions about your org with `@ask` — grounded in real metadata | |
 
 ## AI assistants
 
