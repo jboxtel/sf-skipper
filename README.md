@@ -17,7 +17,7 @@ Salesforce developers, consultants, and admins, especially anyone who hops betwe
 ## Install
 
 1. Install from the [Chrome Web Store](https://chromewebstore.google.com/detail/skipper-for-salesforce/gjgleklcolffnmdaededpmcolieodmpc), or load unpacked for development: clone the repo, open `chrome://extensions`, enable **Developer mode** (top-right), click **Load unpacked**, select the project folder.
-2. (For the AI assistants) Right-click the extension icon → **Options** → pick a provider (Gemini, Claude, or GPT) and paste your API key. Gemini has a free tier; the others are pay-as-you-go directly by the provider.
+2. (For the AI assistants) Right-click the extension icon → **Options** → pick a provider (Gemini, Claude, GPT, or OpenRouter) and paste your API key. Gemini has a free tier; the others are pay-as-you-go directly by the provider.
 
 In dev mode, click the reload icon on `chrome://extensions` after editing any source file.
 
@@ -38,7 +38,7 @@ Three AI features. Each one grounds the model in your org before answering:
 
 All three are strictly read-only, and **you own the outcome**: Skipper hands you a query, an analysis, or a suggested fix — you decide whether to act on it. 
 
-Bring your own provider key — **Gemini**, **Claude**, or **GPT**, chosen in Options. Your key is stored locally in this browser; prompts go directly to the provider you picked.
+Bring your own provider key — **Gemini**, **Claude**, **GPT**, or **OpenRouter**, chosen in Options. Your key is stored locally in this browser; prompts go directly to the provider you picked.
 
 ### `@ask` — Page Assistant
 
@@ -98,7 +98,7 @@ Full policy in [PRIVACY.md](PRIVACY.md). Short version:
 **There is no backend.** No server, no analytics, no telemetry. Your data stays in your browser. The only outbound traffic this extension produces is:
 
 - Calls to your own Salesforce org — the same REST and Tooling APIs the UI you're using already calls.
-- Calls to your chosen AI provider (`generativelanguage.googleapis.com` for Gemini, `api.anthropic.com` for Claude, or `api.openai.com` for GPT), but **only** when you actively use an AI feature and **only** if you've configured a key for that provider. If you never set a key, no data ever leaves your browser to any AI provider.
+- Calls to your chosen AI provider (`generativelanguage.googleapis.com` for Gemini, `api.anthropic.com` for Claude, `api.openai.com` for GPT, or `openrouter.ai` for OpenRouter), but **only** when you actively use an AI feature and **only** if you've configured a key for that provider. If you never set a key, no data ever leaves your browser to any AI provider.
 
 When you do use an AI feature, the prompt — and for `@debug` the flow metadata, for `@ask` the page screenshot plus any tool-call results — is sent to the provider you selected under your own API key, subject to that provider's terms. None of it passes through infrastructure I control.
 
@@ -119,7 +119,7 @@ Your API key is stored in `chrome.storage.local` (local to this browser profile,
 ```
 manifest.json          Manifest v3 declaration (see content_scripts.js for the canonical load order)
 background.js          Service worker: session cookie lookup, screenshot capture, AI provider proxy
-providers.js           Anthropic <-> Gemini/OpenAI adapter so content scripts stay provider-agnostic
+providers.js           Anthropic <-> Gemini/OpenAI/OpenRouter adapter so content scripts stay provider-agnostic
 content scripts        Palette UI, command resolution, per-org caches (objects, flows, apps, labels,
                        permission sets, custom metadata types) and the three AI features
                        (@soql, @debug, @ask), including the read-only askFetch transport gate
@@ -138,7 +138,7 @@ Skipper acts as your logged-in user, so it can only see what your profile alread
 
 ### Why bring-your-own-key?
 
-Two reasons. Your prompts, screenshots, and tool-call results never pass through infrastructure I control — they go straight from your browser to the provider under your own account, subject to whatever DPA you already have with them. And it lets you pick the provider (Gemini, Claude, or GPT) that your team's policy or budget already approves; you're not locked into mine.
+Two reasons. Your prompts, screenshots, and tool-call results never pass through infrastructure I control — they go straight from your browser to the provider under your own account, subject to whatever DPA you already have with them. And it lets you pick the provider (Gemini, Claude, GPT, or OpenRouter) that your team's policy or budget already approves; you're not locked into mine.
 
 ### Why strictly read-only?
 

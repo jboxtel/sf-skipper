@@ -1,8 +1,8 @@
 // LLM provider adapters. The rest of the extension speaks Anthropic Messages
 // shape — system / messages (text + image + tool_use + tool_result blocks) /
-// tools / tool_choice. This file translates that shape to/from OpenAI and
-// Gemini on the way out and back so the content scripts (ask.js, shared.js)
-// don't need provider-specific code paths.
+// tools / tool_choice. This file translates that shape to/from OpenAI,
+// OpenRouter, and Gemini on the way out and back so the content scripts
+// (ask.js, shared.js) don't need provider-specific code paths.
 //
 // Loaded by background.js via importScripts.
 
@@ -11,7 +11,8 @@ var PROVIDER_TIMEOUT_MS = 60000;
 var DEFAULT_MODEL = {
   gemini: 'gemini-2.5-flash',
   anthropic: 'claude-haiku-4-5-20251001',
-  openai: 'gpt-4.1-mini'
+  openai: 'gpt-4.1-mini',
+  openrouter: 'anthropic/claude-haiku-4.5'
 };
 
 // Resolve the active provider + key + model from sfnavOptions, handling the
@@ -42,7 +43,10 @@ function resolveProvider(opts) {
 }
 
 function missingKeyError(providerName) {
-  var label = providerName === 'gemini' ? 'Google' : providerName === 'openai' ? 'OpenAI' : 'Anthropic';
+  var label = providerName === 'gemini' ? 'Google'
+    : providerName === 'openai' ? 'OpenAI'
+    : providerName === 'openrouter' ? 'OpenRouter'
+    : 'Anthropic';
   return 'No ' + label + ' API key configured. Open the extension Options and paste your key.';
 }
 
@@ -64,9 +68,10 @@ async function providerMessageStep(opts, body) {
     });
   }
 
-  if (resolved.provider === 'anthropic') return callAnthropicRaw(resolved, body);
-  if (resolved.provider === 'openai')    return callOpenAI(resolved, body);
-  if (resolved.provider === 'gemini')    return callGemini(resolved, body);
+  if (resolved.provider === 'anthropic')  return callAnthropicRaw(resolved, body);
+  if (resolved.provider === 'openai')     return callOpenAI(resolved, body);
+  if (resolved.provider === 'gemini')     return callGemini(resolved, body);
+  if (resolved.provider === 'openrouter') return callOpenRouter(resolved, body);
   throw new Error('Unknown provider: ' + resolved.provider);
 }
 
@@ -224,7 +229,10 @@ function anthropicToolChoiceToOpenAI(toolChoice) {
   return null;
 }
 
-async function callOpenAI(resolved, body) {
+// Shared by any backend that speaks OpenAI's Chat Completions wire format —
+// currently OpenAI itself and OpenRouter (which proxies many vendors behind
+// the same request/response shape).
+async function callOpenAICompatible(resolved, body, url, extraHeaders) {
   var idToName = buildToolIdIndex(body.messages);
   var systemText = systemToText(body.system);
   var oaMessages = anthropicToOpenAIMessages(body.messages, idToName);
@@ -240,12 +248,12 @@ async function callOpenAI(resolved, body) {
   var tc = anthropicToolChoiceToOpenAI(body.tool_choice);
   if (tc != null) reqBody.tool_choice = tc;
 
-  var res = await timedFetch('https://api.openai.com/v1/chat/completions', {
+  var res = await timedFetch(url, {
     method: 'POST',
-    headers: {
+    headers: Object.assign({
       'Content-Type': 'application/json',
       'Authorization': 'Bearer ' + resolved.apiKey
-    },
+    }, extraHeaders || {}),
     body: JSON.stringify(reqBody)
   });
   var raw = await res.text();
@@ -256,6 +264,19 @@ async function callOpenAI(resolved, body) {
     throw new Error(msg);
   }
   return openAIToAnthropicResponse(parsed);
+}
+
+async function callOpenAI(resolved, body) {
+  return callOpenAICompatible(resolved, body, 'https://api.openai.com/v1/chat/completions');
+}
+
+// OpenRouter's app-attribution headers are optional (used for their public
+// model-usage rankings, not for auth) but cost nothing to send.
+async function callOpenRouter(resolved, body) {
+  return callOpenAICompatible(resolved, body, 'https://openrouter.ai/api/v1/chat/completions', {
+    'HTTP-Referer': 'https://github.com/jboxtel/sf-skipper',
+    'X-Title': 'Skipper for Salesforce'
+  });
 }
 
 function openAIToAnthropicResponse(parsed) {
