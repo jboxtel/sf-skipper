@@ -203,7 +203,7 @@ input:focus, select:focus, textarea:focus {
 
 .pg {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 7px;
   margin-bottom: 18px;
 }

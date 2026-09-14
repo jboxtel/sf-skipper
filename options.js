@@ -90,6 +90,39 @@ var PROVIDERS = {
       { id: 'gpt-4.1',      label: 'GPT-4.1 (more accurate)' },
       { id: 'gpt-4o',       label: 'GPT-4o' }
     ]
+  },
+  openrouter: {
+    label: 'OpenRouter',
+    productName: 'OpenRouter',
+    badge: 'OPENROUTER',
+    keyLabel: 'OpenRouter API key',
+    keyPlaceholder: 'sk-or-v1-…',
+    validate: function (k) {
+      if (!k) return null;
+      if (/^sk-ant-/.test(k)) {
+        return 'That looks like an Anthropic key (starts with "sk-ant-"). Switch to the Claude provider above.';
+      }
+      if (!/^sk-or-/.test(k)) {
+        return 'OpenRouter API keys start with "sk-or-". This looks like a different provider’s key.';
+      }
+      return null;
+    },
+    steps: function (a) {
+      return [
+        'Open ' + a('openrouter.ai/keys', 'https://openrouter.ai/keys') + ' and sign in (create an account if you don’t have one).',
+        'Add credit under Settings — OpenRouter is pay-as-you-go per request, no separate subscription.',
+        'Click <strong>Create Key</strong>, copy it (starts with <code>sk-or-</code>), and paste it below.'
+      ];
+    },
+    note: 'One key, many vendors — pick the underlying model below. Each request is billed by OpenRouter at that model’s per-token rate.',
+    defaultModel: 'anthropic/claude-haiku-4.5',
+    models: [
+      { id: 'anthropic/claude-haiku-4.5',        label: 'Claude Haiku 4.5 (fast, recommended)' },
+      { id: 'openai/gpt-4.1-mini',                label: 'GPT-4.1 mini' },
+      { id: 'google/gemini-2.5-flash',            label: 'Gemini 2.5 Flash' },
+      { id: 'deepseek/deepseek-chat',             label: 'DeepSeek Chat' },
+      { id: 'meta-llama/llama-3.3-70b-instruct',  label: 'Llama 3.3 70B' }
+    ]
   }
 };
 
@@ -121,7 +154,7 @@ var paletteShortcutChipEl = document.getElementById('paletteShortcutChip');
 
 var state = {
   provider: 'gemini',
-  providers: { gemini: {}, anthropic: {}, openai: {} },
+  providers: { gemini: {}, anthropic: {}, openai: {}, openrouter: {} },
   openInNewTab: true
 };
 
@@ -137,7 +170,7 @@ try {
 
 chrome.storage.local.get('sfnavOptions', function (data) {
   var opts = data.sfnavOptions || {};
-  state.providers = Object.assign({ gemini: {}, anthropic: {}, openai: {} }, opts.providers || {});
+  state.providers = Object.assign({ gemini: {}, anthropic: {}, openai: {}, openrouter: {} }, opts.providers || {});
 
   // Migrate the pre-multi-provider shape: a top-level anthropicApiKey + model
   // become providers.anthropic, and Anthropic becomes the active provider so
@@ -205,7 +238,7 @@ function renderProvider() {
 
   var p = PROVIDERS[state.provider];
 
-  // Subscription warning (anthropic / openai only)
+  // Billing/provider note — only some providers define one.
   if (p.note) {
     noteEl.textContent = p.note;
     noteEl.hidden = false;
