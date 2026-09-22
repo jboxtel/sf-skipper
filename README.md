@@ -14,12 +14,16 @@ Strictly read-only — no DML, no anonymous Apex, no metadata writes. There is n
 
 Salesforce developers, consultants, and admins, especially anyone who hops between client orgs and sandboxes, or who has to support an org they didn't build. Generic AI guesses at what a "typical" `Product2` looks like, but in real orgs half the fields have been renamed and the picklist values it confidently invents were never valid in your org. Skipper reads your org's actual schema before the model says a word. A developer gets a query that runs, and an admin gets an answer to *"which flow updated this field?"* grounded in their actual org, because the grounding does the heavy lifting, not the prompt.
 
-## Install
+## Install browser extension
 
-1. Install from the [Chrome Web Store](https://chromewebstore.google.com/detail/skipper-for-salesforce/gjgleklcolffnmdaededpmcolieodmpc), or load unpacked for development: clone the repo, open `chrome://extensions`, enable **Developer mode** (top-right), click **Load unpacked**, select the project folder.
+1. Install from the [Chrome Web Store](https://chromewebstore.google.com/detail/skipper-for-salesforce/gjgleklcolffnmdaededpmcolieodmpc)
 2. (For the AI assistants) Right-click the extension icon → **Options** → pick a provider (Gemini, Claude, or GPT) and paste your API key. Gemini has a free tier; the others are pay-as-you-go directly by the provider.
 
-In dev mode, click the reload icon on `chrome://extensions` after editing any source file.
+## Local development
+
+To run skipper in devlopment, clone the repo and open `chrome://extensions`, enable **Developer mode** (top-right), click **Load unpacked**, select the project folder.
+
+Skipper knows its running _unpacked_ and will add a `DEV_MODE=true` and set `.sfnav-dev` class so you can style it.
 
 ## Screenshots
 
