@@ -59,6 +59,10 @@
   color: var(--sf-ink);
 }
 
+#sfnav-palette.sfnav-dev {
+  border: 3px dotted #f59e0b;
+}
+
 /* ─── Breadcrumb ───────────────────────────────────── */
 
 #sfnav-breadcrumb {

@@ -256,6 +256,10 @@
         '<div id="sfnav-footer"><span id="sfnav-brand">Skipper for Salesforce<span id="sfnav-brand-help">help</span></span><a id="sfnav-feedback-link" href="#">feedback</a><span id="sfnav-footer-hints"></span></div>' +
       '</div>';
 
+    if (DEV_MODE) {
+      overlay.querySelector('#sfnav-palette').classList.add('sfnav-dev');
+    }
+
     document.body.appendChild(overlay);
 
     var overlayMouseDownOnBackdrop = false;
