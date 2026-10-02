@@ -52,6 +52,16 @@ async function sfFetch(url, init) {
   return fetch(url, Object.assign({}, init, { method: 'GET', body: undefined }));
 }
 
+// Second gate for surfaces that run user- or model-written SOQL (@ask tools,
+// @export): reject anything that isn't a SELECT before it reaches sfFetch.
+function ensureSelectOnly(query) {
+  var trimmed = String(query || '').trim().replace(/^\s*\(\s*/, '');
+  if (!/^select\s/i.test(trimmed)) throw new Error('Only SELECT queries are allowed');
+  if (/\b(insert|update|delete|upsert|merge|undelete)\b/i.test(trimmed)) {
+    throw new Error('DML keywords are not allowed in SOQL');
+  }
+}
+
 // Per-org cache key. The flow/app/object lists are tenant-specific, so caches
 // must be scoped by hostname or switching tabs across orgs surfaces stale data
 // from the previously-loaded org for up to the cache TTL.

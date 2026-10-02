@@ -95,7 +95,8 @@
 
   function buildHelpHTML() {
     var src = (typeof window.__sfnavGetShortcuts === 'function') ? window.__sfnavGetShortcuts() : [];
-    var browse = src.filter(function (s) { return s.group === 'browse'; });
+    // @export (group 'data') needs no API key, so it sits with the browse commands.
+    var browse = src.filter(function (s) { return s.group === 'browse' || s.group === 'data'; });
     var ai     = src.filter(function (s) { return s.group === 'ai'; });
 
     var html =

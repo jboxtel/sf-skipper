@@ -1,6 +1,6 @@
 # Privacy Policy — Skipper for Salesforce
 
-_Last updated: 2026-06-12_
+_Last updated: 2026-10-01_
 
 Skipper for Salesforce ("the extension") is a Chrome extension that adds a keyboard command palette to Salesforce, plus three optional AI assistants. This document describes what data the extension touches, where it goes, and what we (don't) do with it.
 
@@ -23,6 +23,9 @@ Once authenticated, the extension fetches and caches in `chrome.storage.local`:
 - On demand: object describes, record-type lists, Apex/Flow source bodies, validation rule formulas, field history — only when an AI feature requests them, and only via read-only endpoints.
 
 This data is per-browser-profile and never leaves your machine except to the AI provider you chose, and only when you actively use an AI feature.
+
+### Query results from `@export`
+When you run a query in `@export`, the rows Salesforce returns are shown in the palette and held in memory only while the page is open. They are not cached, are never sent to an AI provider or to us, and only leave the page when you click Copy or Download. The text of your last 10 queries per org is kept in `chrome.storage.local` for the Recent list.
 
 ### Your AI provider API key
 When you configure an AI provider in the Options page, the API key you paste is stored in `chrome.storage.local`. It is read by the extension's service worker (not by content scripts on the Salesforce page), and sent only as an authentication header to the provider you selected. It is never synced across browsers, never uploaded to any third party, never logged.

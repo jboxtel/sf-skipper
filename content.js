@@ -93,6 +93,7 @@
     'soql':       function () { runSoqlGeneration(); },
     'flow-debug': function () { runFlowDebugAnalysis(); },
     'ask':        function () { runAskQuery(); },
+    'export':     function () { runExportFromPanel(); },
     'feedback':   function () { runFeedbackSubmit(); }
   };
 
@@ -102,7 +103,7 @@
     'cmd-scoped':    function () { enterCmdPickerMode(cmdtPickerFilter); },
   };
 
-  var PANEL_MODES = { soql: 1, ask: 1, 'flow-debug': 1, feedback: 1 };
+  var PANEL_MODES = { soql: 1, ask: 1, 'flow-debug': 1, export: 1, feedback: 1 };
 
   function isFeedbackPanelOpen() {
     var el = document.getElementById('sfnav-feedback');
@@ -116,6 +117,7 @@
     { panelId: 'sfnav-soql',      inputId: 'sfnav-input' },
     { panelId: 'sfnav-flowdebug', inputId: 'sfnav-flowdebug-debug' },
     { panelId: 'sfnav-ask',       getInputId: function () { return askView === 'thread' ? 'sfnav-ask-reply' : 'sfnav-ask-question'; } },
+    { panelId: 'sfnav-export',    inputId: 'sfnav-export-query' },
     { panelId: 'sfnav-feedback',  inputId: 'sfnav-feedback-message' }
   ];
 
@@ -124,6 +126,7 @@
     'flow-debug': 'Enter to analyze · Shift+Enter for newline · Esc to go back',
     'ask-home':   '↑↓ history · shift+↵ newline',
     'ask-thread': 'shift+↵ newline · esc back to recent',
+    'export':     null,
     'feedback':   null
   };
   var DEFAULT_FOOTER_HINT = '↑↓ navigate · Enter to select · Esc to close';
@@ -182,7 +185,8 @@
           '<div id="sfnav-soql-output-wrap">' +
             '<pre id="sfnav-soql-output"></pre>' +
             '<div id="sfnav-soql-actions">' +
-              '<button id="sfnav-soql-copy" class="sfnav-soql-btn-primary">Copy</button>' +
+              '<button id="sfnav-soql-run" class="sfnav-soql-btn-primary" title="Run in @export">Run</button>' +
+              '<button id="sfnav-soql-copy" class="sfnav-soql-btn-secondary">Copy</button>' +
               '<button id="sfnav-soql-clear" class="sfnav-soql-btn-secondary">Clear</button>' +
             '</div>' +
           '</div>' +
@@ -239,6 +243,36 @@
               '<div id="sfnav-ask-thread-status" class="sfnav-ask-status-row"></div>' +
             '</div>' +
             '<div id="sfnav-ask-handoff" style="display:none"></div>' +
+          '</div>' +
+        '</div>' +
+        '<div id="sfnav-export" style="display:none">' +
+          '<div id="sfnav-export-header">' +
+            '<span id="sfnav-export-crumb">' +
+              '<span class="sfnav-ask-crumb-kw">@export</span>' +
+              '<span class="sfnav-ask-crumb-sep">·</span>' +
+              '<span class="sfnav-ask-crumb-title">Run SOQL against this org — read-only</span>' +
+            '</span>' +
+            '<span class="sfnav-ask-header-hint">esc to go back</span>' +
+          '</div>' +
+          '<div id="sfnav-export-editor">' +
+            '<textarea id="sfnav-export-query" rows="3" placeholder="SELECT Id, Name FROM Account LIMIT 100" spellcheck="false" autocomplete="off"></textarea>' +
+            '<ul id="sfnav-export-ac" style="display:none"></ul>' +
+          '</div>' +
+          '<div id="sfnav-export-toolbar">' +
+            '<button id="sfnav-export-run" class="sfnav-soql-btn-primary">Run <span class="sfnav-kbd"></span></button>' +
+            '<span id="sfnav-export-status"></span>' +
+            '<span class="sfnav-export-spacer"></span>' +
+            '<button class="sfnav-soql-btn-secondary sfnav-export-out" data-export="tsv" title="Tab-separated — paste straight into Excel or Sheets">Copy Excel</button>' +
+            '<button class="sfnav-soql-btn-secondary sfnav-export-out" data-export="csv">Copy CSV</button>' +
+            '<button class="sfnav-soql-btn-secondary sfnav-export-out" data-export="json">Copy JSON</button>' +
+            '<button class="sfnav-soql-btn-secondary sfnav-export-out" data-export="download">Download CSV</button>' +
+          '</div>' +
+          '<div id="sfnav-export-body">' +
+            '<div id="sfnav-export-recent" style="display:none">' +
+              '<div class="sfnav-section-header">Recent</div>' +
+              '<ul id="sfnav-export-history"></ul>' +
+            '</div>' +
+            '<div id="sfnav-export-grid"></div>' +
           '</div>' +
         '</div>' +
         '<div id="sfnav-feedback" style="display:none">' +
@@ -469,6 +503,7 @@
       case 'id':      enterIdEntryMode(filterText || '');      return;
       case 'ask':     enterAskMode(filterText || '');           return;
       case 'soql':       enterSoqlMode();        return;
+      case 'export':     enterExportMode(filterText || ''); return;
       case 'flow-debug': enterFlowDebugMode();   return;
       case 'refresh':    runRefresh();           return;
     }
@@ -547,6 +582,12 @@
         btn.textContent = 'Copied!';
         setTimeout(function () { btn.textContent = prev; }, 1500);
       });
+    };
+    document.getElementById('sfnav-soql-run').onclick = function () {
+      var soql = document.getElementById('sfnav-soql-output').textContent;
+      if (!soql) return;
+      hideSoqlPanel();
+      enterExportMode(soql, { run: true });
     };
     document.getElementById('sfnav-soql-clear').onclick = function () {
       document.getElementById('sfnav-input').value = '';
@@ -675,6 +716,304 @@
         listEl.appendChild(moreLi);
       }
     });
+  }
+
+  // ─── @export — SOQL runner ────────────────────────────────────────────────
+  // Logic lives in export.js; this is the panel wiring. Unlike the other
+  // panels, the palette widens (.sfnav-wide) so the grid has room.
+
+  var exportInFlight = false;
+  var exportAbort = null;   // AbortController for the running query
+  var exportResult = null;  // { records, table, objectName } from the last run
+  var exportAc = { items: [], index: 0, ctx: null, seq: 0 };
+  var exportWired = false;
+
+  function enterExportMode(prefill, opts) {
+    opts = opts || {};
+    searchMode = 'export';
+    var input = document.getElementById('sfnav-input');
+    input.value = '';
+    input.style.display = 'none'; // @export renders its own header + editor
+    document.getElementById('sfnav-results').style.display = 'none';
+    var hintEl = document.getElementById('sfnav-hint');
+    hintEl.textContent = '';
+    hintEl.style.display = 'none';
+    var breadcrumbEl = document.getElementById('sfnav-breadcrumb');
+    breadcrumbEl.textContent = '';
+    breadcrumbEl.style.display = 'none';
+    document.getElementById('sfnav-palette').classList.add('sfnav-wide');
+    document.getElementById('sfnav-export').style.display = 'flex';
+    setFooterHints('export');
+    wireExportPanel();
+
+    // Re-entering without a prefill keeps the last query and its results.
+    var q = document.getElementById('sfnav-export-query');
+    if (prefill) {
+      q.value = prefill;
+      exportResult = null;
+      document.getElementById('sfnav-export-status').textContent = '';
+    }
+    hideExportAutocomplete();
+    renderExportBody();
+    q.focus();
+    q.setSelectionRange(q.value.length, q.value.length);
+    if (opts.run && q.value.trim()) runExportFromPanel();
+  }
+
+  function wireExportPanel() {
+    if (exportWired) return;
+    exportWired = true;
+
+    var q = document.getElementById('sfnav-export-query');
+    document.querySelector('#sfnav-export-run .sfnav-kbd').textContent = sfnavModEnterKbd();
+
+    document.getElementById('sfnav-export-run').addEventListener('click', function () {
+      if (exportInFlight) { if (exportAbort) exportAbort.abort(); return; }
+      runExportFromPanel();
+    });
+
+    Array.prototype.forEach.call(document.querySelectorAll('.sfnav-export-out'), function (btn) {
+      btn.addEventListener('click', function () { runExportOutput(btn); });
+    });
+
+    q.addEventListener('keydown', function (e) {
+      if (exportAc.items.length) {
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          e.preventDefault();
+          var n = exportAc.items.length;
+          exportAc.index = (exportAc.index + (e.key === 'ArrowDown' ? 1 : n - 1)) % n;
+          renderExportAutocomplete();
+          return;
+        }
+        if ((e.key === 'Tab' || e.key === 'Enter') && !e.metaKey && !e.ctrlKey && !e.shiftKey) {
+          e.preventDefault();
+          acceptExportSuggestion(exportAc.index);
+          return;
+        }
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          e.stopPropagation();
+          hideExportAutocomplete();
+          return;
+        }
+      }
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        runExportFromPanel();
+        return;
+      }
+      if ((e.key === 'Tab' && !e.shiftKey) || (e.key === ' ' && e.ctrlKey)) {
+        e.preventDefault();
+        updateExportAutocomplete(true);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        handleBack();
+      }
+    });
+    q.addEventListener('input', function () {
+      updateExportAutocomplete(false);
+      if (!exportResult) renderExportBody(); // history only shows for an empty editor
+    });
+    q.addEventListener('click', hideExportAutocomplete);
+    q.addEventListener('blur', hideExportAutocomplete);
+  }
+
+  async function runExportFromPanel() {
+    if (exportInFlight) return;
+    var q = document.getElementById('sfnav-export-query');
+    var soql = q.value.trim();
+    if (!soql) return;
+    hideExportAutocomplete();
+
+    var statusEl = document.getElementById('sfnav-export-status');
+    exportInFlight = true;
+    exportAbort = new AbortController();
+    setExportRunning(true);
+    statusEl.textContent = 'Running';
+    statusEl.className = 'sfnav-soql-status-loading sfnav-progress-dots';
+
+    try {
+      var res = await runExportQuery(soql, {
+        signal: exportAbort.signal,
+        onProgress: function (loaded, total) {
+          statusEl.textContent = 'Loaded ' + loaded.toLocaleString() + ' of ' + total.toLocaleString();
+        }
+      });
+      var table = flattenExportRecords(res.records);
+      exportResult = { records: res.records, table: table, objectName: res.objectName };
+
+      var parts = [];
+      if (!res.records.length && res.totalSize) {
+        parts.push('Count: ' + res.totalSize.toLocaleString()); // SELECT COUNT() returns no rows
+      } else {
+        parts.push(res.records.length.toLocaleString() + (res.records.length === 1 ? ' row' : ' rows') +
+          (res.totalSize > res.records.length ? ' of ' + res.totalSize.toLocaleString() : ''));
+      }
+      parts.push(res.ms.toLocaleString() + ' ms');
+      if (res.truncated) parts.push('stopped at ' + EXPORT_MAX_ROWS.toLocaleString() + ' rows');
+      if (res.aborted) parts.push('stopped');
+      statusEl.textContent = parts.join(' · ');
+      statusEl.className = 'sfnav-soql-status-ok';
+      renderExportBody();
+      if (!res.aborted) addToExportHistory({ soql: soql, objectName: res.objectName, rows: res.totalSize });
+    } catch (err) {
+      statusEl.textContent = err.message;
+      statusEl.className = 'sfnav-soql-status-error';
+      console.warn('sfnav: @export query failed —', err);
+    } finally {
+      exportInFlight = false;
+      exportAbort = null;
+      setExportRunning(false);
+    }
+  }
+
+  function setExportRunning(running) {
+    var runBtn = document.getElementById('sfnav-export-run');
+    runBtn.firstChild.textContent = running ? 'Stop ' : 'Run ';
+    Array.prototype.forEach.call(document.querySelectorAll('.sfnav-export-out'), function (btn) {
+      btn.disabled = running || !exportResult || !exportResult.records.length;
+    });
+  }
+
+  // Grid when there are results, otherwise the recent-queries list.
+  function renderExportBody() {
+    var gridEl = document.getElementById('sfnav-export-grid');
+    var recentEl = document.getElementById('sfnav-export-recent');
+    setExportRunning(exportInFlight);
+    if (exportResult) {
+      recentEl.style.display = 'none';
+      gridEl.style.display = '';
+      if (exportResult.records.length) {
+        renderExportGrid(gridEl, exportResult.table);
+      } else {
+        gridEl.textContent = '';
+      }
+      return;
+    }
+    gridEl.textContent = '';
+    gridEl.style.display = 'none';
+    var editorEmpty = !document.getElementById('sfnav-export-query').value.trim();
+    if (!editorEmpty) { recentEl.style.display = 'none'; return; }
+    getExportHistory().then(function (history) {
+      if (searchMode !== 'export' || exportResult) return;
+      var listEl = document.getElementById('sfnav-export-history');
+      listEl.textContent = '';
+      recentEl.style.display = history.length ? '' : 'none';
+      history.forEach(function (entry) {
+        var li = document.createElement('li');
+        li.className = 'sfnav-soql-history-item';
+        var soqlEl = document.createElement('span');
+        soqlEl.className = 'sfnav-export-history-soql';
+        soqlEl.textContent = entry.soql;
+        soqlEl.title = entry.soql;
+        var objEl = document.createElement('span');
+        objEl.className = 'sfnav-soql-history-obj';
+        objEl.textContent = entry.objectName || '';
+        li.appendChild(soqlEl);
+        li.appendChild(objEl);
+        li.addEventListener('click', function () {
+          var q = document.getElementById('sfnav-export-query');
+          q.value = entry.soql;
+          recentEl.style.display = 'none';
+          q.focus();
+        });
+        listEl.appendChild(li);
+      });
+    });
+  }
+
+  function runExportOutput(btn) {
+    if (!exportResult || !exportResult.records.length) return;
+    var kind = btn.getAttribute('data-export');
+    if (kind === 'download') {
+      downloadExportFile(exportToCsv(exportResult.table), exportFileName(exportResult.objectName, 'csv'), 'text/csv;charset=utf-8');
+      return;
+    }
+    var text = kind === 'tsv' ? exportToTsv(exportResult.table)
+      : kind === 'csv' ? exportToCsv(exportResult.table)
+      : exportToJson(exportResult.records);
+    navigator.clipboard.writeText(text).then(function () {
+      var prev = btn.textContent;
+      btn.textContent = 'Copied!';
+      setTimeout(function () { btn.textContent = prev; }, 1500);
+    }, function (err) {
+      var statusEl = document.getElementById('sfnav-export-status');
+      statusEl.textContent = 'Copy failed: ' + err.message;
+      statusEl.className = 'sfnav-soql-status-error';
+    });
+  }
+
+  // force: Tab / Ctrl+Space open the list even with nothing typed yet.
+  function updateExportAutocomplete(force) {
+    var q = document.getElementById('sfnav-export-query');
+    if (q.selectionStart !== q.selectionEnd) { hideExportAutocomplete(); return; }
+    var caret = q.selectionStart;
+    var ctx = exportAutocompleteContext(q.value, caret);
+    if (!ctx) { hideExportAutocomplete(); return; }
+    var justDotted = q.value.charAt(caret - 1) === '.';
+    if (!force && ctx.kind !== 'value' && !ctx.prefix && !justDotted) { hideExportAutocomplete(); return; }
+
+    var seq = ++exportAc.seq;
+    exportAutocompleteSuggestions(ctx).then(function (items) {
+      if (seq !== exportAc.seq || searchMode !== 'export') return;
+      var exactOnly = items.length === 1 && items[0].value.toLowerCase() === ctx.prefix.toLowerCase();
+      if (!items.length || exactOnly) { hideExportAutocomplete(); return; }
+      exportAc.items = items;
+      exportAc.ctx = ctx;
+      exportAc.index = 0;
+      renderExportAutocomplete();
+    });
+  }
+
+  function renderExportAutocomplete() {
+    var listEl = document.getElementById('sfnav-export-ac');
+    listEl.textContent = '';
+    exportAc.items.forEach(function (item, i) {
+      var li = document.createElement('li');
+      if (i === exportAc.index) li.className = 'sfnav-export-ac-active';
+      var valueEl = document.createElement('span');
+      valueEl.className = 'sfnav-export-ac-value';
+      valueEl.textContent = item.value;
+      li.appendChild(valueEl);
+      if (item.detail) {
+        var detailEl = document.createElement('span');
+        detailEl.className = 'sfnav-export-ac-detail';
+        detailEl.textContent = item.detail;
+        li.appendChild(detailEl);
+      }
+      // mousedown + preventDefault keeps focus in the textarea (blur would close the list)
+      li.addEventListener('mousedown', function (e) {
+        e.preventDefault();
+        acceptExportSuggestion(i);
+      });
+      listEl.appendChild(li);
+    });
+    listEl.style.display = 'block';
+    var active = listEl.children[exportAc.index];
+    if (active) active.scrollIntoView({ block: 'nearest' });
+  }
+
+  function hideExportAutocomplete() {
+    exportAc.seq++; // drops any suggestion lookup still in flight
+    exportAc.items = [];
+    exportAc.ctx = null;
+    var listEl = document.getElementById('sfnav-export-ac');
+    if (listEl) listEl.style.display = 'none';
+  }
+
+  function acceptExportSuggestion(i) {
+    var item = exportAc.items[i];
+    var ctx = exportAc.ctx;
+    if (!item || !ctx) return;
+    var q = document.getElementById('sfnav-export-query');
+    var next = applyExportSuggestion(q.value, q.selectionStart, ctx, item);
+    q.value = next.text;
+    q.setSelectionRange(next.caret, next.caret);
+    hideExportAutocomplete();
+    // Picking a relationship ("Owner.") goes straight on to its fields.
+    if (/\.$/.test(item.value)) updateExportAutocomplete(true);
   }
 
   function enterFlowPickerMode(filterText) {
@@ -2016,6 +2355,12 @@
     if (askEl) askEl.style.display = 'none';
     var fbEl = document.getElementById('sfnav-feedback');
     if (fbEl) fbEl.style.display = 'none';
+    var exportEl = document.getElementById('sfnav-export');
+    if (exportEl) exportEl.style.display = 'none';
+    var paletteEl = document.getElementById('sfnav-palette');
+    if (paletteEl) paletteEl.classList.remove('sfnav-wide');
+    if (exportAbort) exportAbort.abort(); // leaving @export stops a long queryMore loop
+    hideExportAutocomplete();
     var resultsEl = document.getElementById('sfnav-results');
     if (resultsEl) resultsEl.style.display = '';
     var hintEl = document.getElementById('sfnav-hint');
@@ -2139,6 +2484,11 @@
 
     if (result && result.type === 'action' && result.action === 'ask') {
       enterAskMode('');
+      return;
+    }
+
+    if (result && result.type === 'action' && result.action === 'export') {
+      enterExportMode('');
       return;
     }
 
@@ -2313,6 +2663,10 @@
     if (!el) return;
     if (mode === 'feedback') {
       el.textContent = sfnavModEnterHint() + ' to send · Esc to go back';
+      return;
+    }
+    if (mode === 'export') {
+      el.textContent = sfnavModEnterHint() + ' to run · Tab to complete · Esc to go back';
       return;
     }
     el.textContent = FOOTER_HINTS[mode] || DEFAULT_FOOTER_HINT;

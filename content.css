@@ -444,6 +444,259 @@
   flex-shrink: 0;
 }
 
+/* ─── @export (SOQL runner) ────────────────────────── */
+
+/* The grid needs room — the palette widens only while @export is open. */
+#sfnav-palette.sfnav-wide {
+  width: min(1200px, 94vw);
+  height: 80vh;
+  max-height: 80vh;
+}
+
+#sfnav-export {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+#sfnav-export-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--sf-rule);
+  flex-shrink: 0;
+  font-family: var(--sf-sans);
+  font-size: 12px;
+}
+
+#sfnav-export-crumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--sf-ink-soft);
+}
+
+#sfnav-export-editor {
+  position: relative;
+  padding: 12px 18px 0;
+  flex-shrink: 0;
+}
+
+#sfnav-export-query {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 72px;
+  max-height: 30vh;
+  resize: vertical;
+  font-family: var(--sf-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--sf-ink);
+  background: var(--sf-rule-soft);
+  border: 1px solid var(--sf-rule);
+  border-radius: var(--sf-radius);
+  padding: 8px 12px;
+  outline: none;
+  transition: border-color var(--sf-transition);
+}
+
+#sfnav-export-query:focus {
+  border-color: var(--sf-ink-soft);
+}
+
+#sfnav-export-ac {
+  position: absolute;
+  left: 18px;
+  top: calc(100% + 2px);
+  z-index: 2;
+  width: min(520px, calc(100% - 36px));
+  max-height: 260px;
+  overflow-y: auto;
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-rule);
+  border-radius: var(--sf-radius);
+  box-shadow: 0 8px 24px -6px rgba(0, 0, 0, 0.18);
+}
+
+#sfnav-export-ac li {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 5px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+#sfnav-export-ac li:hover,
+#sfnav-export-ac li.sfnav-export-ac-active {
+  background: var(--sf-selection);
+}
+
+.sfnav-export-ac-value {
+  font-family: var(--sf-mono);
+  color: var(--sf-ink);
+  flex-shrink: 0;
+}
+
+.sfnav-export-ac-detail {
+  font-family: var(--sf-sans);
+  color: var(--sf-ink-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+#sfnav-export-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+#sfnav-export-toolbar .sfnav-soql-btn-secondary {
+  padding: 4px 10px;
+  font-size: 11px;
+}
+
+#sfnav-export-toolbar .sfnav-soql-btn-secondary:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+#sfnav-export-status {
+  font-family: var(--sf-sans);
+  font-size: 12px;
+  color: var(--sf-ink-soft);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sfnav-export-spacer { flex: 1; }
+
+#sfnav-export-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0 18px 12px;
+}
+
+#sfnav-export-history {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.sfnav-export-history-soql {
+  flex: 1;
+  font-family: var(--sf-mono);
+  font-size: 12px;
+  color: var(--sf-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#sfnav-export-grid {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--sf-rule);
+  border-radius: var(--sf-radius);
+}
+
+/* Salesforce page styles leak into injected tables — set everything explicitly. */
+table.sfnav-export-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: max-content;
+  min-width: 100%;
+  margin: 0;
+  font-family: var(--sf-mono);
+  font-size: 12px;
+  color: var(--sf-ink);
+  background: var(--sf-surface);
+}
+
+table.sfnav-export-table th,
+table.sfnav-export-table td {
+  padding: 5px 10px;
+  border: 0;
+  border-bottom: 1px solid var(--sf-rule-soft);
+  border-right: 1px solid var(--sf-rule-soft);
+  text-align: left;
+  vertical-align: top;
+  white-space: nowrap;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+table.sfnav-export-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--sf-rule-soft);
+  border-bottom: 1px solid var(--sf-rule);
+  font-family: var(--sf-sans);
+  font-weight: 500;
+  color: var(--sf-ink-soft);
+  cursor: pointer;
+  user-select: none;
+}
+
+table.sfnav-export-table th:hover { color: var(--sf-ink); }
+table.sfnav-export-table th.sfnav-export-sorted-asc::after  { content: ' ↑'; }
+table.sfnav-export-table th.sfnav-export-sorted-desc::after { content: ' ↓'; }
+
+table.sfnav-export-table tbody tr:hover td { background: var(--sf-rule-soft); }
+
+table.sfnav-export-table td a {
+  color: var(--sf-link) !important;
+  text-decoration: none !important;
+}
+
+table.sfnav-export-table td a:hover { text-decoration: underline !important; }
+
+table.sfnav-export-table td.sfnav-export-null::after {
+  content: 'null';
+  color: var(--sf-ink-faint);
+}
+
+table.sfnav-export-table td.sfnav-export-child {
+  color: var(--sf-ink-soft);
+  cursor: help;
+}
+
+.sfnav-export-more {
+  display: block;
+  width: 100%;
+  padding: 8px;
+  font-family: var(--sf-sans);
+  font-size: 12px;
+  color: var(--sf-ink-soft);
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--sf-rule);
+  cursor: pointer;
+}
+
+.sfnav-export-more:hover { color: var(--sf-ink); }
+
 /* ─── Flow Debug Panel ─────────────────────────────── */
 
 #sfnav-flowdebug {

@@ -454,14 +454,6 @@ var ASK_TOOLS = [
   }
 ];
 
-function ensureSelectOnly(query) {
-  var trimmed = String(query || '').trim().replace(/^\s*\(\s*/, '');
-  if (!/^select\s/i.test(trimmed)) throw new Error('Only SELECT queries are allowed');
-  if (/\b(insert|update|delete|upsert|merge|undelete)\b/i.test(trimmed)) {
-    throw new Error('DML keywords are not allowed in SOQL');
-  }
-}
-
 function capRowsForPrompt(rows) {
   if (!Array.isArray(rows)) return rows;
   var capped = rows.slice(0, 50).map(function (r) {

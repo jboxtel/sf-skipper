@@ -37,7 +37,7 @@ async function injectExtension(page) {
   // Inject scripts as script tags so const/let declarations are shared across all of them.
   // Order matters: salesforce-urls (getApiBase) → shared (sfRestPreamble) → objects/commands.
   // markdown.js holds esc + renderAskMarkdown, used by content.js.
-  for (const file of ['salesforce-urls.js', 'shared.js', 'markdown.js', 'objects.js', 'commands.js']) {
+  for (const file of ['salesforce-urls.js', 'shared.js', 'markdown.js', 'objects.js', 'commands.js', 'export.js']) {
     await page.addScriptTag({ path: path.join(EXT, file) });
   }
 
@@ -80,6 +80,12 @@ async function injectExtension(page) {
       window.generateSoql = () => Promise.reject(new Error('not stubbed'));
       window.getSoqlHistory = () => Promise.resolve([]);
       window.addToSoqlHistory = () => Promise.resolve();
+      // soql.js isn't injected — @export autocomplete reads its describe cache
+      window.fetchDescribe = (apiName) => Promise.resolve(apiName === 'Account' ? [
+        { name: 'Id', label: 'Account ID', type: 'id' },
+        { name: 'Name', label: 'Account Name', type: 'string' },
+        { name: 'OwnerId', label: 'Owner', type: 'reference', referenceTo: ['User'], relationshipName: 'Owner' }
+      ] : []);
       // flow-debug.js isn't injected — stub the symbols content.js / commands.js touch
       window.isFlowBuilderPage = () => false;
       window.getFlowIdFromUrl = () => null;
@@ -364,6 +370,114 @@ async function openPalette(page) {
       return display === 'none';
     },
     'palette still visible after Escape',
+  );
+
+  // ── Test 12: @export runs SOQL and renders a grid ───────────────────────
+  console.log('\n@export');
+  await page.evaluate(() => {
+    window.__queryUrls = [];
+    window.__clipboard = null;
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: (t) => { window.__clipboard = t; return Promise.resolve(); } }
+    });
+    const realFetch = window.fetch;
+    const rec = (n, owner) => ({
+      attributes: { type: 'Account' }, Id: '00100000000000' + n + 'AAA', Name: 'Acme ' + n,
+      Owner: owner ? { attributes: { type: 'User' }, Name: owner } : null
+    });
+    window.fetch = (url, init) => {
+      if (url.indexOf('/query/') !== -1 || url.indexOf('/query-more/') !== -1) {
+        window.__queryUrls.push(url);
+        const body = url.indexOf('/query-more/') !== -1
+          ? { totalSize: 3, done: true, records: [rec(3, 'Kim')] }
+          : { totalSize: 3, done: false, nextRecordsUrl: '/services/data/v61.0/query-more/01g-2000', records: [rec(1, null), rec(2, 'Jo')] };
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(body) });
+      }
+      return realFetch(url, init);
+    };
+  });
+
+  await openPalette(page);
+  await page.fill('#sfnav-input', '@export ');
+  await page.waitForTimeout(50);
+
+  await assert(
+    '@export opens the wide panel with the editor focused',
+    async () => page.evaluate(() =>
+      document.getElementById('sfnav-export').style.display === 'flex' &&
+      document.getElementById('sfnav-palette').classList.contains('sfnav-wide') &&
+      document.activeElement.id === 'sfnav-export-query'),
+    'panel not shown, palette not wide, or editor not focused',
+  );
+
+  await page.keyboard.type('SELECT  FROM Account');
+  await page.evaluate(() => document.getElementById('sfnav-export-query').setSelectionRange(7, 7));
+  await page.keyboard.type('Na');
+  await page.waitForSelector('#sfnav-export-ac li', { timeout: 1000 }).catch(() => null);
+  await page.keyboard.press('Tab');
+
+  await assert(
+    'autocomplete suggests fields and Tab inserts one',
+    async () => (await page.$eval('#sfnav-export-query', el => el.value)) === 'SELECT Name FROM Account',
+    'editor value: ' + await page.$eval('#sfnav-export-query', el => el.value),
+  );
+
+  await page.fill('#sfnav-export-query', 'SELECT Id, Name, Owner.Name FROM Account');
+  await page.keyboard.press('Control+Enter');
+  await page.waitForFunction(() => /3 rows/.test(document.getElementById('sfnav-export-status').textContent), null, { timeout: 2000 }).catch(() => null);
+
+  await assert(
+    'follows nextRecordsUrl and shows every row',
+    async () => page.evaluate(() =>
+      window.__queryUrls.length === 2 &&
+      document.querySelectorAll('#sfnav-export-grid tbody tr').length === 3),
+    'status: ' + await page.$eval('#sfnav-export-status', el => el.textContent),
+  );
+
+  await assert(
+    'flattens parent lookups into dotted columns and links Ids',
+    async () => page.evaluate(() => {
+      const heads = Array.from(document.querySelectorAll('#sfnav-export-grid th')).map(th => th.textContent);
+      return heads.join(',') === 'Id,Name,Owner.Name' &&
+        !!document.querySelector('#sfnav-export-grid td a[href$="/001000000000001AAA"]');
+    }),
+    'unexpected columns or missing Id link',
+  );
+
+  await page.click('.sfnav-export-out[data-export="tsv"]');
+  await page.waitForTimeout(50);
+
+  await assert(
+    'Copy Excel puts tab-separated rows on the clipboard',
+    async () => page.evaluate(() => (window.__clipboard || '').split('\n')[0] === 'Id\tName\tOwner.Name' &&
+      window.__clipboard.split('\n').length === 4),
+    'clipboard: ' + JSON.stringify(await page.evaluate(() => window.__clipboard)),
+  );
+
+  const urlsBefore = await page.evaluate(() => window.__queryUrls.length);
+  await page.fill('#sfnav-export-query', 'DELETE FROM Account');
+  await page.keyboard.press('Control+Enter');
+  await page.waitForTimeout(50);
+
+  await assert(
+    'non-SELECT queries are rejected before any request',
+    async () => page.evaluate((n) =>
+      window.__queryUrls.length === n &&
+      /Only SELECT/.test(document.getElementById('sfnav-export-status').textContent), urlsBefore),
+    'status: ' + await page.$eval('#sfnav-export-status', el => el.textContent),
+  );
+
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(50);
+
+  await assert(
+    'Escape returns to the root palette at normal width',
+    async () => page.evaluate(() =>
+      document.getElementById('sfnav-export').style.display === 'none' &&
+      !document.getElementById('sfnav-palette').classList.contains('sfnav-wide') &&
+      document.activeElement.id === 'sfnav-input'),
+    'still in @export or palette still wide',
   );
 
   // ── Summary ──────────────────────────────────────────────────────────────

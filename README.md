@@ -67,7 +67,19 @@ Describe what you want in plain English — *"active products in the Hardware fa
 
 This is what the grounding pipeline buys you: the same prompt against two different orgs produces two different queries, because the model is reading each org's real schema instead of guessing from what a "typical" Product2 looks like.
 
-The query is copied to your clipboard. **Skipper never executes the query for you** — you run it in Developer Console, Workbench, or wherever you normally run SOQL.
+Copy the query, or press **Run** to open it in [`@export`](#export--query-runner) and see the rows right away. Skipper only runs a query when you press Run.
+
+### `@export` — Query runner
+
+Run any SOQL `SELECT` against the org you're on and see the results in the palette, similar to Data Export in Salesforce Inspector. No AI provider or API key is needed.
+
+- Write or paste a query and press `⌘↵` / `Ctrl+↵`. Every page of results is loaded (up to 50,000 rows), and Stop cancels a long run.
+- Autocomplete suggests object names after `FROM`, fields and relationships (`Owner.`) in `SELECT` / `WHERE` / `ORDER BY`, and picklist values inside quotes. Press `Tab` to accept.
+- Parent lookups become columns like `Owner.Name`. Child subqueries show a row count, with the rows in a tooltip. Ids link to the record. Click a column header to sort.
+- **Copy Excel** (tab-separated, pastes straight into Excel or Sheets), **Copy CSV**, **Copy JSON**, or **Download CSV**.
+- Your last 10 queries per org appear under **Recent**.
+
+`@export SELECT Id, Name FROM Account` opens the runner with that query filled in. It's read-only like everything else: only `SELECT` is accepted, and requests go through the GET-only transport. Results stay in your browser.
 
 ### `@debug` — Flow Debug Assistant
 
@@ -93,6 +105,7 @@ Press `⌘⇧K` (Mac) or `Ctrl+Shift+K` (Windows/Linux) on any Salesforce page. 
 | `@label` | Fuzzy-search Custom Labels across MasterLabel, API name, and value |
 | `@permset` | Open any permission set in the org by name (real admin-managed sets, not the hidden profile-backed ones) |
 | `@setup` | Filter the full Setup pages registry without leaving the palette |
+| `@export` | Run SOQL and view, copy, or download the results |
 | `refresh` | Re-fetch flows, apps, objects, labels, and permission set caches |
 
 Type the shortcut alone to open the picker, or `@cmd foo` / `@flow foo` / `@object foo` to open it pre-filtered. Backspace on an empty input goes back; Escape closes the palette.
@@ -130,7 +143,8 @@ background.js          Service worker: session cookie lookup, screenshot capture
 providers.js           Anthropic <-> Gemini/OpenAI adapter so content scripts stay provider-agnostic
 content scripts        Palette UI, command resolution, per-org caches (objects, flows, apps, labels,
                        permission sets, custom metadata types) and the three AI features
-                       (@soql, @debug, @ask), including the read-only askFetch transport gate
+                       (@soql, @debug, @ask), the @export query runner, and the read-only
+                       askFetch transport gate
 options.{html,js,css}  Settings page (provider, API key, model)
 ```
 
@@ -142,7 +156,7 @@ Caches, session cookies, and AI grounding calls are all scoped to the host of th
 
 ### Does Skipper work if I don't have extensive rights in the org?
 
-Skipper acts as your logged-in user, so it can only see what your profile already allows. The command palette and `@soql` work with normal Read access. `@debug` and `@ask` read Flow and Apex source via the Tooling API, which typically requires `View All Setup` (most admin profiles have it; most standard users don't). If a permission blocks a call, you'll see the Salesforce API error rather than a fabricated answer.
+Skipper acts as your logged-in user, so it can only see what your profile already allows. The command palette, `@soql`, and `@export` work with normal Read access. `@debug` and `@ask` read Flow and Apex source via the Tooling API, which typically requires `View All Setup` (most admin profiles have it; most standard users don't). If a permission blocks a call, you'll see the Salesforce API error rather than a fabricated answer.
 
 ### Why bring-your-own-key?
 

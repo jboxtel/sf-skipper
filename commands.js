@@ -151,6 +151,8 @@ var SHORTCUTS = [
     tipTitle: '@soql — SOQL from plain English', tipBody: 'Describe your query in natural language. Requires Anthropic API key.',       tipExample: '@soql accounts with no opportunity\n  in the last 6 months' },
   { id: 'flow-debug', aliases: 'debug flow-debug',       label: '@debug',    sublabel: 'Analyze a flow with Claude',    group: 'ai',          action: 'flow-debug',     hint: 'Press Enter to debug this flow', disabledHint: 'Open a flow first — then press Enter to debug it', disabledSublabel: 'Open a flow first',
     tipTitle: '@debug — Diagnose flow errors', tipBody: 'From Flow Builder after a debug run. Paste the debug log; Claude finds the root cause.', tipExample: '@debug\n[paste full debug log]' },
+  { id: 'export',     aliases: 'export query',           label: '@export',   sublabel: 'Run SOQL and view the results', group: 'data',        action: 'export',         hint: 'Press Enter to open the query runner',
+    tipTitle: '@export — Run SOQL',       tipBody: 'Run any SELECT query and see the rows. Copy as Excel, CSV or JSON. Read-only, no AI key needed.', tipExample: '@export SELECT Id, Name FROM Account' },
   { id: 'refresh',    aliases: 'refresh reload',         label: '@refresh',  sublabel: 'Reload cached metadata',        group: 'maintenance', action: 'refresh',        hint: 'Press Enter to refresh the flow + object caches',
     tipTitle: '@refresh',                 tipBody: 'Reload the flow, object, app, label and permission set caches.',                    tipExample: '@refresh' }
 ];
@@ -224,6 +226,8 @@ function getRootResults() {
     results.push(result);
   });
 
+  appendShortcutGroup(results, 'Data', 'data', 'action');
+
   results.push(makeHeader('Setup'));
   SETUP_QUICK_LINKS.slice(0, 8).forEach(function (link) {
     results.push(toQuickLinkResult(link));
@@ -236,6 +240,7 @@ function getShortcutResults() {
   var results = [];
   appendShortcutGroup(results, 'Browse', 'browse', 'shortcut');
   appendShortcutGroup(results, 'AI Tools', 'ai', 'shortcut');
+  appendShortcutGroup(results, 'Data', 'data', 'shortcut');
   appendShortcutGroup(results, 'Maintenance', 'maintenance', 'shortcut');
 
   return results;
