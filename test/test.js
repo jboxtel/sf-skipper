@@ -403,6 +403,29 @@ async function openPalette(page) {
   await page.waitForTimeout(50);
 
   await assert(
+    '@export stays hidden until its labs flag is on',
+    async () => page.evaluate(() =>
+      document.getElementById('sfnav-export').style.display !== 'flex' &&
+      !Array.from(document.querySelectorAll('.sfnav-item')).some(el => el.textContent.includes('@export'))),
+    '@export reachable without the labs flag',
+  );
+
+  await page.fill('#sfnav-input', '@labs');
+  await page.waitForTimeout(50);
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(50);
+
+  await assert(
+    '@labs → Enter turns the export flag on',
+    async () => page.evaluate(() => sfnavLabEnabled('export') &&
+      /export is on/.test(document.getElementById('sfnav-hint').textContent)),
+    'hint: ' + await page.$eval('#sfnav-hint', el => el.textContent),
+  );
+
+  await page.fill('#sfnav-input', '@export ');
+  await page.waitForTimeout(50);
+
+  await assert(
     '@export opens the wide panel with the editor focused',
     async () => page.evaluate(() =>
       document.getElementById('sfnav-export').style.display === 'flex' &&

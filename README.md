@@ -73,6 +73,8 @@ Copy the query, or press **Run** to open it in [`@export`](#export--query-runner
 
 Run any SOQL `SELECT` against the org you're on and see the results in the palette, similar to Data Export in Salesforce Inspector. No AI provider or API key is needed.
 
+> **Labs feature.** `@export` is hidden by default. To turn it on, open the palette, type `@labs`, select **Turn on export**, and press Enter. The setting applies to this browser profile only. Repeat the same steps to turn it off.
+
 - Write or paste a query and press `⌘↵` / `Ctrl+↵`. Every page of results is loaded (up to 50,000 rows), and Stop cancels a long run.
 - Autocomplete suggests object names after `FROM`, fields and relationships (`Owner.`) in `SELECT` / `WHERE` / `ORDER BY`, and picklist values inside quotes. Press `Tab` to accept.
 - Parent lookups become columns like `Owner.Name`. Child subqueries show a row count, with the rows in a tooltip. Ids link to the record. Click a column header to sort.

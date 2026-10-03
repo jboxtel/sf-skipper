@@ -583,6 +583,7 @@
         setTimeout(function () { btn.textContent = prev; }, 1500);
       });
     };
+    document.getElementById('sfnav-soql-run').style.display = sfnavLabEnabled('export') ? '' : 'none';
     document.getElementById('sfnav-soql-run').onclick = function () {
       var soql = document.getElementById('sfnav-soql-output').textContent;
       if (!soql) return;
@@ -2142,7 +2143,7 @@
   }
 
   // Lets onboarding.js read live shortcut metadata for the cheat sheet.
-  window.__sfnavGetShortcuts = function () { return SHORTCUTS.slice(); };
+  window.__sfnavGetShortcuts = function () { return sfnavVisibleShortcuts(); };
 
   var feedbackInFlight = false;
   var feedbackContext = null;
@@ -2487,6 +2488,11 @@
       return;
     }
 
+    if (result && result.type === 'action' && result.action === 'labs-toggle') {
+      toggleLab(result.flag);
+      return;
+    }
+
     if (result && result.type === 'action' && result.action === 'export') {
       enterExportMode('');
       return;
@@ -2588,6 +2594,17 @@
         console.warn('sfnav: entity ID lookup failed —', err);
         openUrl(result.url);
       });
+  }
+
+  function toggleLab(flag) {
+    var on = !sfnavLabEnabled(flag);
+    sfnavSetLab(flag, on); // in-memory state flips immediately; the storage write can lag
+    var input = document.getElementById('sfnav-input');
+    renderResults(resolveInput(input ? input.value : '@labs'));
+    var hintEl = document.getElementById('sfnav-hint');
+    if (hintEl) hintEl.textContent = on
+      ? flag + ' is on — type @' + flag + ' to use it.'
+      : flag + ' is off.';
   }
 
   function executeShortcut(keyword) {

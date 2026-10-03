@@ -122,12 +122,67 @@ function makeRefreshRow(action, noun) {
   };
 }
 
+// ─── Labs ────────────────────────────────────────────────────────────────
+// Features that ship in the store build but stay hidden until a user opts in
+// from the unlisted `@labs` command. A SHORTCUTS row with `labs: '<flag>'` is
+// invisible to lookups, menus and fuzzy search until that flag is on. Flags
+// live in their own storage key (per browser profile, not synced) so an
+// Options save can't clobber them.
+var SFNAV_LABS_KEY = 'sfnavLabs';
+var SFNAV_LABS = {
+  export: '@export — run SOQL and view the results'
+};
+var sfnavLabsState = {};
+
+(function loadLabs() {
+  if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) return;
+  chrome.storage.local.get(SFNAV_LABS_KEY, function (data) {
+    sfnavLabsState = (data && data[SFNAV_LABS_KEY]) || {};
+  });
+  if (chrome.storage.onChanged && chrome.storage.onChanged.addListener) {
+    chrome.storage.onChanged.addListener(function (changes, area) {
+      if (area === 'local' && changes[SFNAV_LABS_KEY]) sfnavLabsState = changes[SFNAV_LABS_KEY].newValue || {};
+    });
+  }
+})();
+
+function sfnavLabEnabled(flag) {
+  return !!sfnavLabsState[flag];
+}
+
+// Updates in-memory state right away so the palette can re-render before
+// the storage write lands.
+function sfnavSetLab(flag, on) {
+  sfnavLabsState = Object.assign({}, sfnavLabsState);
+  if (on) sfnavLabsState[flag] = true; else delete sfnavLabsState[flag];
+  return new Promise(function (resolve) {
+    if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) { resolve(); return; }
+    var payload = {};
+    payload[SFNAV_LABS_KEY] = sfnavLabsState;
+    chrome.storage.local.set(payload, function () { resolve(); });
+  });
+}
+
+function getLabsResults() {
+  return Object.keys(SFNAV_LABS).map(function (flag) {
+    var on = sfnavLabEnabled(flag);
+    return {
+      label: (on ? 'Turn off ' : 'Turn on ') + flag,
+      sublabel: SFNAV_LABS[flag] + (on ? ' · on' : ' · off'),
+      url: '#',
+      type: 'action',
+      action: 'labs-toggle',
+      flag: flag
+    };
+  });
+}
+
 // One declarative table for every @keyword shortcut. Adding a new shortcut
 // means one row here plus a case in enterShortcutMode (content.js). The
 // `aliases` field is space-separated so the existing 1-word lookup stays
 // trivial; `action` is set on rows that fire a panel/action (vs. opening a
 // picker). `disabledHint` covers the @debug case that depends on the active
-// page.
+// page. `labs` hides the row until that labs flag is on (see above).
 var SHORTCUTS = [
   { id: 'object',     aliases: 'object objects',         label: '@object',   sublabel: 'All standard & custom objects', group: 'browse',      hint: 'Press Enter to browse all objects',
     tipTitle: 'Navigate with @object',    tipBody: 'Browse standard and custom objects, drill into fields, layouts, validation rules.', tipExample: '@object Case' },
@@ -151,7 +206,7 @@ var SHORTCUTS = [
     tipTitle: '@soql — SOQL from plain English', tipBody: 'Describe your query in natural language. Requires Anthropic API key.',       tipExample: '@soql accounts with no opportunity\n  in the last 6 months' },
   { id: 'flow-debug', aliases: 'debug flow-debug',       label: '@debug',    sublabel: 'Analyze a flow with Claude',    group: 'ai',          action: 'flow-debug',     hint: 'Press Enter to debug this flow', disabledHint: 'Open a flow first — then press Enter to debug it', disabledSublabel: 'Open a flow first',
     tipTitle: '@debug — Diagnose flow errors', tipBody: 'From Flow Builder after a debug run. Paste the debug log; Claude finds the root cause.', tipExample: '@debug\n[paste full debug log]' },
-  { id: 'export',     aliases: 'export query',           label: '@export',   sublabel: 'Run SOQL and view the results', group: 'data',        action: 'export',         hint: 'Press Enter to open the query runner',
+  { id: 'export',     aliases: 'export query',           label: '@export',   sublabel: 'Run SOQL and view the results', group: 'data',        action: 'export',         labs: 'export', hint: 'Press Enter to open the query runner',
     tipTitle: '@export — Run SOQL',       tipBody: 'Run any SELECT query and see the rows. Copy as Excel, CSV or JSON. Read-only, no AI key needed.', tipExample: '@export SELECT Id, Name FROM Account' },
   { id: 'refresh',    aliases: 'refresh reload',         label: '@refresh',  sublabel: 'Reload cached metadata',        group: 'maintenance', action: 'refresh',        hint: 'Press Enter to refresh the flow + object caches',
     tipTitle: '@refresh',                 tipBody: 'Reload the flow, object, app, label and permission set caches.',                    tipExample: '@refresh' }
@@ -160,11 +215,15 @@ var SHORTCUTS = [
 function sfnavFindShortcut(value) {
   var input = String(value || '').trim().replace(/^@/, '').toLowerCase();
   if (!input) return null;
-  return SHORTCUTS.find(function (s) { return s.aliases.split(' ').indexOf(input) !== -1; }) || null;
+  return sfnavVisibleShortcuts().find(function (s) { return s.aliases.split(' ').indexOf(input) !== -1; }) || null;
 }
 
 function sfnavGetShortcutsByGroup(group) {
-  return SHORTCUTS.filter(function (s) { return s.group === group; });
+  return sfnavVisibleShortcuts().filter(function (s) { return s.group === group; });
+}
+
+function sfnavVisibleShortcuts() {
+  return SHORTCUTS.filter(function (s) { return !s.labs || sfnavLabEnabled(s.labs); });
 }
 
 // Parse `@flow foo` / `@cmd bar` into {shortcut, filter}. Returns null if the
@@ -226,7 +285,7 @@ function getRootResults() {
     results.push(result);
   });
 
-  appendShortcutGroup(results, 'Data', 'data', 'action');
+  if (sfnavGetShortcutsByGroup('data').length) appendShortcutGroup(results, 'Data', 'data', 'action');
 
   results.push(makeHeader('Setup'));
   SETUP_QUICK_LINKS.slice(0, 8).forEach(function (link) {
@@ -240,7 +299,7 @@ function getShortcutResults() {
   var results = [];
   appendShortcutGroup(results, 'Browse', 'browse', 'shortcut');
   appendShortcutGroup(results, 'AI Tools', 'ai', 'shortcut');
-  appendShortcutGroup(results, 'Data', 'data', 'shortcut');
+  if (sfnavGetShortcutsByGroup('data').length) appendShortcutGroup(results, 'Data', 'data', 'shortcut');
   appendShortcutGroup(results, 'Maintenance', 'maintenance', 'shortcut');
 
   return results;
@@ -499,6 +558,15 @@ function resolveInput(rawInput) {
     };
   }
 
+  // Unlisted: `@labs` lists the hidden features and toggles them on Enter.
+  if (rawInput.startsWith('@') && input === 'labs') {
+    return {
+      mode: 'labs',
+      results: getLabsResults(),
+      hint: 'Labs — early features. Press Enter to turn one on or off.'
+    };
+  }
+
   // Exact shortcut keyword → its hint card. Action-bearing shortcuts (@soql,
   // @ask, @debug) also surface the action result so Enter has somewhere to
   // land.
@@ -522,7 +590,7 @@ function resolveInput(rawInput) {
   // Falling through to a global fuzzy across objects/setup makes hits like
   // `@a` → Account confusing. Bare-text search (no @) still spans everything.
   if (rawInput.startsWith('@')) {
-    var shortcutMatches = fuzzyFilter(input, SHORTCUTS, function (s) {
+    var shortcutMatches = fuzzyFilter(input, sfnavVisibleShortcuts(), function (s) {
       return s.label + ' ' + s.aliases;
     }).map(function (s) { return makeShortcutResult(s, 'shortcut'); });
     return {
