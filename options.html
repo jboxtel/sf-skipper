@@ -42,73 +42,98 @@
       </aside>
 
       <main class="main">
-        <!-- PROVIDER -->
+        <!-- PROVIDER — three-screen flow:
+             Screen 1 pick + paste → Screen 2 recognized → Screen 3 connected -->
         <div class="pane on" id="pane-provider">
           <div class="ph">
-            <h1>AI Provider</h1>
-            <p>Powers @soql, @debug, and @ask. Your key is stored locally in this browser only — never sent anywhere except the provider you choose.</p>
+            <h1>Provider</h1>
+            <p>The AI features @soql, @debug and @ask need a key from an AI provider. Pick a provider below and paste your key. Gemini is free to start. <strong>Everything else in Skipper works without a key.</strong></p>
           </div>
 
-          <div class="cs" id="connectedStatus" hidden>
-            <div class="cs-b" id="csProvider">—</div>
-            <div class="cs-k" id="csKey">—</div>
-            <div class="cs-s"><div class="dot g"></div><span id="csState">Saved</span></div>
-          </div>
-
-          <div class="sec">
-            <div class="sl">Choose provider</div>
-            <div class="pg" id="providerCards" role="radiogroup" aria-label="AI provider">
-              <button type="button" class="pc" data-provider="gemini" role="radio" aria-checked="false">
-                <span class="sdot"></span>
-                <span class="pn">Gemini</span>
-                <span class="ps">Google</span>
-              </button>
-              <button type="button" class="pc" data-provider="anthropic" role="radio" aria-checked="false">
-                <span class="sdot"></span>
-                <span class="pn">Claude</span>
-                <span class="ps">Anthropic</span>
-              </button>
-              <button type="button" class="pc" data-provider="openai" role="radio" aria-checked="false">
-                <span class="sdot"></span>
-                <span class="pn">GPT</span>
-                <span class="ps">OpenAI</span>
-              </button>
-              <button type="button" class="pc" data-provider="openrouter" role="radio" aria-checked="false">
-                <span class="sdot"></span>
-                <span class="pn">OpenRouter</span>
-                <span class="ps">Many vendors</span>
-              </button>
+          <!-- Screen 1 — Pick a provider, then paste a key. The pills drive
+               the steps, billing note and key field below them. -->
+          <div class="fscr" id="scr-paste">
+            <div>
+              <div class="fl" id="providerPillsLbl">Choose your AI provider</div>
+              <div class="ppills" id="providerPills" role="radiogroup" aria-labelledby="providerPillsLbl">
+                <button type="button" class="ppill" role="radio" aria-checked="false" data-provider="gemini">Gemini <span class="ppill-sub">Google</span></button>
+                <button type="button" class="ppill" role="radio" aria-checked="false" data-provider="anthropic">Claude <span class="ppill-sub">Anthropic</span></button>
+                <button type="button" class="ppill" role="radio" aria-checked="false" data-provider="openai">GPT <span class="ppill-sub">OpenAI</span></button>
+                <button type="button" class="ppill" role="radio" aria-checked="false" data-provider="openrouter">OpenRouter <span class="ppill-sub">many models</span></button>
+              </div>
             </div>
 
-            <div class="callout a" id="providerNote" hidden></div>
-
-            <div class="how">
-              <div class="hw-lbl">How to get a key</div>
-              <ol class="hs" id="providerSteps"></ol>
+            <!-- Shown when the selected pill already has a saved key: switch to it without re-pasting. -->
+            <div class="savedkey" id="savedKey" hidden>
+              <span id="savedKeyText"></span>
+              <button type="button" class="btn bs bsm" id="useSavedKey">Use this key</button>
             </div>
+
+            <!-- Steps and billing note stay folded away; most people already have a key. -->
+            <details class="howto" id="howTo">
+              <summary id="howLbl">Don’t have a key yet? Here’s how to get one</summary>
+              <div class="howto-body">
+                <ol class="hs" id="providerSteps"></ol>
+                <p class="howto-note" id="providerNote"></p>
+              </div>
+            </details>
 
             <div class="fg">
               <div>
-                <label class="fl" id="apiKeyLabel" for="apiKey">API key</label>
+                <label class="fl" id="apiKeyLabel" for="apiKey">Paste your key</label>
                 <div class="iw">
-                  <input id="apiKey" type="password" placeholder="" autocomplete="off" spellcheck="false" />
+                  <input id="apiKey" type="password" placeholder="Paste your key here" autocomplete="off" spellcheck="false" />
                   <button class="ir" id="revealKey" type="button" aria-label="Show key">
                     <svg id="eyeShow" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M1 7s2.2-4.5 6-4.5S13 7 13 7s-2.2 4.5-6 4.5S1 7 1 7z"/><circle cx="7" cy="7" r="1.7"/></svg>
                     <svg id="eyeHide" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2" hidden><path d="M2 2l10 10M5.5 5.8A1.8 1.8 0 0 0 8.2 8.5M3.5 4C2.2 5 1 7 1 7s2.2 4.5 6 4.5c1.3 0 2.5-.4 3.4-1M5.5 2.8C6 2.6 6.5 2.5 7 2.5c3.8 0 6 4.5 6 4.5s-.6 1.2-1.7 2.3" stroke-linecap="round"/></svg>
                   </button>
                 </div>
-                <p class="field-warn" id="keyFormatWarn" hidden></p>
+                <div class="unrec" id="unrecognized" hidden>
+                  <p class="unrec-msg" id="unrecMsg"></p>
+                  <div class="nb"><button type="button" id="useAnyway">Use it anyway</button></div>
+                </div>
               </div>
+            </div>
 
+            <div class="actions"><span id="pasteStatus"></span></div>
+          </div>
+
+          <!-- Screen 2 — Key recognized -->
+          <div class="fscr" id="scr-recognized" hidden>
+            <div class="matchline" id="matchLine"></div>
+            <div class="keypreview" id="keyPreview"></div>
+            <p class="notthis"><a href="#" id="clearDraft">Not this provider? Clear and paste a different key.</a></p>
+            <p class="keptkey callout n" id="keptKey" hidden></p>
+
+            <div class="fg">
               <div>
                 <label class="fl" for="model">Model</label>
+                <input id="modelFilter" class="model-filter" type="search" placeholder="Filter models" autocomplete="off" spellcheck="false" hidden />
                 <select id="model"></select>
+                <p class="field-hint" id="modelHint" hidden></p>
               </div>
-
               <div class="actions">
                 <button id="save" class="btn bp" type="button">Save and test</button>
                 <span id="status"></span>
               </div>
+            </div>
+          </div>
+
+          <!-- Screen 3 — Connected -->
+          <div class="fscr" id="scr-connected" hidden>
+            <div class="conn-badge" id="connBadge">Connected to Claude (Anthropic)</div>
+            <div class="conn-key" id="connKey">—</div>
+            <div class="conn-model">
+              <span class="conn-model-lbl">Model: <span id="connModelName">—</span></span>
+              <span class="conn-model-ctl">
+                <label class="fl" for="connModel" hidden>Change model</label>
+                <select id="connModel" aria-label="Change model"></select>
+              </span>
+              <span id="modelStatus"></span>
+            </div>
+            <div class="connopts">
+              <a href="#" id="replaceKey">Change provider or key</a>
+              <a href="#" id="removeKey">Remove key</a>
             </div>
           </div>
         </div>

@@ -13,3 +13,4 @@ docs/
 scripts/
 presentation/
 evals/
+.env

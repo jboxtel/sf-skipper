@@ -9,6 +9,7 @@ var PROVIDERS = {
     label: 'Google',
     productName: 'Gemini',
     badge: 'GEMINI',
+    keyPrefix: 'AIza',
     keyLabel: 'Google API key',
     keyPlaceholder: 'AIza…',
     validate: function (k) {
@@ -25,7 +26,7 @@ var PROVIDERS = {
         'Copy the key (starts with <code>AIza</code>) and paste it below.'
       ];
     },
-    note: null,
+    note: 'The free tier is enough for everyday use. On the free tier Google may use your prompts to improve its products; add billing in AI Studio to turn that off.',
     defaultModel: 'gemini-2.5-flash',
     models: [
       { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash (recommended, free tier)' },
@@ -36,6 +37,7 @@ var PROVIDERS = {
     label: 'Anthropic',
     productName: 'Claude',
     badge: 'CLAUDE',
+    keyPrefix: 'sk-ant-',
     keyLabel: 'Anthropic API key',
     keyPlaceholder: 'sk-ant-…',
     validate: function (k) {
@@ -64,6 +66,7 @@ var PROVIDERS = {
     label: 'OpenAI',
     productName: 'GPT',
     badge: 'GPT',
+    keyPrefix: 'sk-',
     keyLabel: 'OpenAI API key',
     keyPlaceholder: 'sk-…',
     validate: function (k) {
@@ -95,6 +98,7 @@ var PROVIDERS = {
     label: 'OpenRouter',
     productName: 'OpenRouter',
     badge: 'OPENROUTER',
+    keyPrefix: 'sk-or-',
     keyLabel: 'OpenRouter API key',
     keyPlaceholder: 'sk-or-v1-…',
     validate: function (k) {
@@ -116,46 +120,79 @@ var PROVIDERS = {
     },
     note: 'One key, many vendors — pick the underlying model below. Each request is billed by OpenRouter at that model’s per-token rate.',
     defaultModel: 'anthropic/claude-haiku-4.5',
+    // The full catalogue is fetched from openrouter.ai at render time; `models`
+    // is only the offline fallback when that request fails.
+    dynamicModels: true,
     models: [
       { id: 'anthropic/claude-haiku-4.5',        label: 'Claude Haiku 4.5 (fast, recommended)' },
       { id: 'openai/gpt-4.1-mini',                label: 'GPT-4.1 mini' },
-      { id: 'google/gemini-2.5-flash',            label: 'Gemini 2.5 Flash' },
-      { id: 'deepseek/deepseek-chat',             label: 'DeepSeek Chat' },
-      { id: 'meta-llama/llama-3.3-70b-instruct',  label: 'Llama 3.3 70B' }
+      { id: 'google/gemini-2.5-flash',            label: 'Gemini 2.5 Flash' }
     ]
   }
 };
 
 // ─── DOM refs ───────────────────────────────────────────────────────────────
 
+// ─── DOM refs (provider flow: paste → recognized → connected) ───────────────
+
 var navEl         = document.getElementById('nav');
-var cardsEl       = document.getElementById('providerCards');
-var stepsEl       = document.getElementById('providerSteps');
-var noteEl        = document.getElementById('providerNote');
-var keyLabelEl    = document.getElementById('apiKeyLabel');
+var scrPasteEl    = document.getElementById('scr-paste');
+var scrRecogEl    = document.getElementById('scr-recognized');
+var scrConnEl     = document.getElementById('scr-connected');
 var apiKeyEl      = document.getElementById('apiKey');
-var keyWarnEl     = document.getElementById('keyFormatWarn');
 var revealEl      = document.getElementById('revealKey');
 var eyeShowEl     = document.getElementById('eyeShow');
 var eyeHideEl     = document.getElementById('eyeHide');
+var unrecEl       = document.getElementById('unrecognized');
+var unrecMsgEl    = document.getElementById('unrecMsg');
+var useAnywayEl   = document.getElementById('useAnyway');
+var pillsEl       = document.getElementById('providerPills');
+var howLblEl      = document.getElementById('howLbl');
+var stepsEl       = document.getElementById('providerSteps');
+var noteEl        = document.getElementById('providerNote');
+var apiKeyLabelEl = document.getElementById('apiKeyLabel');
+var savedKeyEl    = document.getElementById('savedKey');
+var savedKeyTextEl = document.getElementById('savedKeyText');
+var useSavedKeyEl = document.getElementById('useSavedKey');
+var pasteStatusEl = document.getElementById('pasteStatus');
+var matchLineEl   = document.getElementById('matchLine');
+var keyPreviewEl  = document.getElementById('keyPreview');
+var clearDraftEl  = document.getElementById('clearDraft');
+var keptKeyEl     = document.getElementById('keptKey');
 var modelEl       = document.getElementById('model');
+var modelFilterEl = document.getElementById('modelFilter');
+var modelHintEl   = document.getElementById('modelHint');
 var saveEl        = document.getElementById('save');
 var statusEl      = document.getElementById('status');
+var connBadgeEl   = document.getElementById('connBadge');
+var connKeyEl     = document.getElementById('connKey');
+var connModelNameEl = document.getElementById('connModelName');
+var connModelEl   = document.getElementById('connModel');
+var modelStatusEl = document.getElementById('modelStatus');
+var replaceKeyEl  = document.getElementById('replaceKey');
+var removeKeyEl   = document.getElementById('removeKey');
 var openInEl      = document.getElementById('openIn');
 var replayEl      = document.getElementById('replayWalkthrough');
 var walkStatusEl  = document.getElementById('walkthroughStatus');
 var versionEl     = document.getElementById('version');
 var aboutVerEl    = document.getElementById('aboutVersion');
-var connectedEl   = document.getElementById('connectedStatus');
-var csProviderEl  = document.getElementById('csProvider');
-var csKeyEl       = document.getElementById('csKey');
-var csStateEl     = document.getElementById('csState');
 var paletteShortcutChipEl = document.getElementById('paletteShortcutChip');
 
 var state = {
   provider: 'gemini',
   providers: { gemini: {}, anthropic: {}, openai: {}, openrouter: {} },
   openInNewTab: true
+};
+
+// The provider pane is a three-screen flow (vsr/gen-4/candidates/w4-repaired.md):
+// paste a key → the key names its provider → save-and-test → connected. Nothing is
+// written to storage until a test succeeds, so a half-finished replacement never
+// disturbs a working key.
+var flow = {
+  mode: 'paste',   // 'paste' | 'recognized' | 'connected'
+  choice: 'gemini', // provider pill selected on the paste screen
+  draft: { key: '', provider: null, manual: false, model: '' },
+  pasteNote: null  // { text, kind } shown on the paste screen (e.g. after Remove key)
 };
 
 // ─── Version stamp ──────────────────────────────────────────────────────────
@@ -189,8 +226,12 @@ chrome.storage.local.get('sfnavOptions', function (data) {
 
   state.openInNewTab = opts.openInNewTab !== false;
   openInEl.value = state.openInNewTab ? 'new' : 'same';
+  flow.choice = PROVIDERS[state.provider] ? state.provider : 'gemini';
+  // A saved key for the active provider means we're already set up — open on
+  // the Connected screen rather than asking for a key again.
+  if (hasSavedKey(state.provider)) flow.mode = 'connected';
 
-  renderProvider();
+  renderFlow();
 });
 
 // ─── Pane switching ─────────────────────────────────────────────────────────
@@ -214,14 +255,15 @@ function esc(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-function linkHtml(label, url) {
-  return '<a href="' + esc(url) + '" target="_blank" rel="noopener">' + esc(label) + ' &nearr;</a>';
+// Spec format: first 7 characters, a run of bullets, last 4
+// ("sk-ant-••••" as a preview, "sk-ant-••••1234" when connected).
+function maskPreview(key) {
+  return key ? key.slice(0, 7) + '••••' : '';
 }
 
-function maskKey(key) {
+function maskConnected(key) {
   if (!key) return '';
-  if (key.length <= 8) return '••••' + key.slice(-2);
-  return key.slice(0, 8) + '••••••••••••' + key.slice(-4);
+  return key.length <= 11 ? maskPreview(key) : maskPreview(key) + key.slice(-4);
 }
 
 if (paletteShortcutChipEl && typeof sfnavPaletteShortcutParts === 'function') {
@@ -230,79 +272,347 @@ if (paletteShortcutChipEl && typeof sfnavPaletteShortcutParts === 'function') {
     .join('');
 }
 
-function renderProvider() {
-  Array.prototype.forEach.call(cardsEl.querySelectorAll('.pc'), function (el) {
-    var match = el.getAttribute('data-provider') === state.provider;
-    el.setAttribute('aria-checked', match ? 'true' : 'false');
-  });
+// ─── Provider flow rendering ────────────────────────────────────────────
 
-  var p = PROVIDERS[state.provider];
+var MATCH_LINES = {
+  gemini: "That's a Gemini key (Google).",
+  anthropic: "That's a Claude key (Anthropic).",
+  openai: "That's a GPT key (OpenAI).",
+  openrouter: "That's an OpenRouter key."
+};
 
-  // Billing/provider note — only some providers define one.
-  if (p.note) {
-    noteEl.textContent = p.note;
-    noteEl.hidden = false;
-  } else {
-    noteEl.hidden = true;
-  }
+// Distinguishes "could not reach the provider" from a provider rejecting the
+// key: fetch/timeout failures surface as network-flavoured error strings.
+var NETWORK_ERR_RE = /failed to fetch|networkerror|load failed|abort|timed?.?out|err_(connection|internet|name|address)|could not resolve|getaddrinfo/i;
 
-  // 3-step "how to get a key"
-  stepsEl.innerHTML = '';
-  p.steps(linkHtml).forEach(function (line) {
-    var li = document.createElement('li');
-    var span = document.createElement('span');
-    span.innerHTML = line;
-    li.appendChild(span);
-    stepsEl.appendChild(li);
-  });
+function showScreen(mode) {
+  scrPasteEl.hidden = mode !== 'paste';
+  scrRecogEl.hidden = mode !== 'recognized';
+  scrConnEl.hidden = mode !== 'connected';
+}
 
-  // Key field rebinding
-  keyLabelEl.textContent = p.keyLabel;
-  apiKeyEl.placeholder = p.keyPlaceholder;
-  apiKeyEl.value = (state.providers[state.provider] && state.providers[state.provider].apiKey) || '';
-  // Reset reveal to masked on provider switch
+function renderFlow() {
+  if (flow.mode === 'connected') renderConnected();
+  else if (flow.mode === 'recognized') renderRecognized();
+  else renderPaste();
+  showScreen(flow.mode);
+}
+
+function resetDraft() {
+  flow.draft = { key: '', provider: null, manual: false, model: '' };
+}
+
+function renderPaste() {
+  apiKeyEl.value = flow.draft.key;
   apiKeyEl.type = 'password';
   eyeShowEl.hidden = false;
   eyeHideEl.hidden = true;
-  validateKeyFormat();
+  unrecEl.hidden = true;
+  pasteStatusEl.textContent = flow.pasteNote ? flow.pasteNote.text : '';
+  pasteStatusEl.className = flow.pasteNote ? (flow.pasteNote.kind || '') : '';
+  renderProviderChoice();
+}
 
-  // Model dropdown
-  modelEl.innerHTML = '';
-  p.models.forEach(function (m) {
-    var opt = document.createElement('option');
-    opt.value = m.id;
-    opt.textContent = m.label;
-    modelEl.appendChild(opt);
+// Everything on the paste screen that depends on the selected pill. Kept
+// apart from renderPaste so switching pills never clears a half-typed key.
+function renderProviderChoice() {
+  var name = flow.choice;
+  var p = PROVIDERS[name];
+  Array.prototype.forEach.call(pillsEl.querySelectorAll('.ppill'), function (pill) {
+    var on = pill.getAttribute('data-provider') === name;
+    pill.setAttribute('aria-checked', on ? 'true' : 'false');
+    pill.tabIndex = on ? 0 : -1; // roving tabindex: arrows move within the group
+    var saved = hasSavedKey(pill.getAttribute('data-provider'));
+    pill.classList.toggle('has-key', saved);
+    pill.title = saved ? 'Key saved' : '';
   });
-  var savedModel = (state.providers[state.provider] && state.providers[state.provider].model) || p.defaultModel;
-  modelEl.value = savedModel;
+  if (hasSavedKey(name)) {
+    var current = name === state.provider;
+    savedKeyTextEl.textContent = (current ? 'You’re using your ' : 'You have a saved ') + p.productName +
+      ' key (' + maskConnected(state.providers[name].apiKey) + ').';
+    useSavedKeyEl.textContent = current ? 'Keep using it' : 'Use this key';
+    savedKeyEl.hidden = false;
+  } else {
+    savedKeyEl.hidden = true;
+  }
+  howLblEl.textContent = 'Don’t have a ' + p.productName + ' key yet? Here’s how to get one';
+  stepsEl.innerHTML = p.steps(function (text, href) {
+    return '<a href="' + href + '" target="_blank" rel="noopener">' + esc(text) + '</a>';
+  }).map(function (step) { return '<li><span>' + step + '</span></li>'; }).join('');
+  noteEl.textContent = p.note;
+  apiKeyLabelEl.textContent = 'Paste your ' + p.productName + ' key';
+  apiKeyEl.placeholder = 'Starts with ' + p.keyPrefix + '…';
+  useAnywayEl.textContent = 'Use it as a ' + p.productName + ' key anyway';
+}
 
-  renderConnectedStatus();
+function hasSavedKey(name) {
+  return !!(state.providers[name] && state.providers[name].apiKey);
+}
+
+function selectProvider(name, focus) {
+  if (!PROVIDERS[name] || name === flow.choice) return;
+  flow.choice = name;
+  renderProviderChoice();
+  handleKeyInput(); // re-word the not-recognized message for the new pill
+  if (focus) pillsEl.querySelector('[data-provider="' + name + '"]').focus();
+}
+
+// Called on input/paste into the key field: a recognized prefix jumps straight
+// to Screen 2 — under the provider the key belongs to, even if a different pill
+// was selected. A long enough unrecognized value offers to use it anyway with
+// the selected provider.
+function handleKeyInput() {
+  var v = apiKeyEl.value.trim();
+  flow.pasteNote = null;
+  if (!v) {
+    unrecEl.hidden = true;
+    resetDraft();
+    return;
+  }
+  var det = detectProvider(v);
+  if (det) {
+    enterRecognized(v, det, false);
+    return;
+  }
+  var p = PROVIDERS[flow.choice];
+  unrecMsgEl.textContent = 'This doesn’t look like a ' + p.productName + ' key — those start with ' +
+    p.keyPrefix + '. Check you copied the whole key.';
+  unrecEl.hidden = v.length < 16;
+}
+
+// Prefixes are unambiguous in this set, with one ordering trap: sk-ant- and
+// sk-or- must both be tested before the bare sk- that means OpenAI.
+function detectProvider(k) {
+  if (/^sk-ant-/.test(k)) return 'anthropic';
+  if (/^sk-or-/.test(k))  return 'openrouter';
+  if (/^sk-/.test(k))     return 'openai';
+  if (/^AIza/.test(k))    return 'gemini';
+  return null;
+}
+
+function enterRecognized(key, providerName, manual) {
+  flow.choice = providerName; // "Clear and paste a different key" comes back on this pill
+  flow.draft = { key: key, provider: providerName, manual: manual, model: '' };
+  flow.mode = 'recognized';
+  renderFlow();
+}
+
+function renderRecognized() {
+  var name = flow.draft.provider;
+  var p = PROVIDERS[name];
+  if (flow.draft.manual) {
+    matchLineEl.textContent = 'You named this a ' + p.productName + ' key (' + p.label + '). Skipper could not confirm it from the prefix.';
+  } else {
+    matchLineEl.textContent = MATCH_LINES[name];
+  }
+  keyPreviewEl.textContent = maskPreview(flow.draft.key);
+
+  // If another provider already has a working key, say so — replacing a key
+  // must never silently drop it.
+  var others = ['gemini', 'anthropic', 'openai', 'openrouter'].filter(function (n) {
+    return n !== name && state.providers[n] && state.providers[n].apiKey;
+  });
+  var prevActive = others.indexOf(state.provider) > -1 ? state.provider : others[0];
+  if (prevActive) {
+    keptKeyEl.textContent = 'Your ' + PROVIDERS[prevActive].productName + ' key is kept.';
+    keptKeyEl.hidden = false;
+  } else {
+    keptKeyEl.hidden = true;
+  }
+
+  renderModelMenuFor(name);
   setStatus('');
 }
 
-function renderConnectedStatus() {
-  var p = PROVIDERS[state.provider];
-  var key = state.providers[state.provider] && state.providers[state.provider].apiKey;
-  if (!key) {
-    connectedEl.hidden = true;
-    return;
-  }
-  connectedEl.hidden = false;
-  csProviderEl.textContent = p.badge;
-  csKeyEl.textContent = maskKey(key);
-  csStateEl.textContent = 'Saved';
+function renderConnected() {
+  var name = state.provider;
+  var p = PROVIDERS[name];
+  var stored = state.providers[name] || {};
+  connBadgeEl.textContent = 'Connected to ' + p.productName + (p.label !== p.productName ? ' (' + p.label + ')' : '');
+  connKeyEl.textContent = maskConnected(stored.apiKey || '');
+  connModelNameEl.textContent = stored.model || p.defaultModel;
+  setModelStatus('', '');
+  renderConnectedModels(name);
 }
 
-function validateKeyFormat() {
-  var p = PROVIDERS[state.provider];
-  var msg = p.validate(apiKeyEl.value.trim());
-  if (msg) {
-    keyWarnEl.textContent = msg;
-    keyWarnEl.hidden = false;
-  } else {
-    keyWarnEl.hidden = true;
+// ─── Model menu ─────────────────────────────────────────────────────────────
+// Single-vendor providers ship a hand-picked shortlist. OpenRouter fronts a few
+// hundred models, so its menu is built from the live catalogue at
+// openrouter.ai/api/v1/models (public, no key needed), cached for a day.
+
+var OR_MODELS_KEY = 'sfnavOrModels2'; // v2: catalogue filtered to image-capable models
+try { chrome.storage.local.remove('sfnavOrModels'); } catch (_) {} // drop the v1 cache
+var OR_MODELS_TTL = 24 * 60 * 60 * 1000;
+var orModels = null;   // normalized catalogue for this page session
+var modelReq = 0;      // guards against a slow fetch landing after a provider switch
+
+function fillModelSelectInto(selectEl, list, selected) {
+  selectEl.innerHTML = '';
+  var has = list.some(function (m) { return m.id === selected; });
+
+  // The current model always stays selectable, even when a filter excludes it —
+  // otherwise Save would write back an empty model.
+  if (selected && !has) {
+    var cur = document.createElement('optgroup');
+    cur.label = 'Current';
+    cur.appendChild(optionFor({ id: selected, label: selected }));
+    selectEl.appendChild(cur);
   }
+
+  var groups = {};
+  var order = [];
+  list.forEach(function (m) {
+    if (!m.group) { selectEl.appendChild(optionFor(m)); return; }
+    if (!groups[m.group]) {
+      groups[m.group] = document.createElement('optgroup');
+      groups[m.group].label = m.groupLabel || m.group;
+      order.push(m.group);
+    }
+    groups[m.group].appendChild(optionFor(m));
+  });
+  order.forEach(function (g) { selectEl.appendChild(groups[g]); });
+
+  selectEl.value = selected;
+}
+
+// Keep only models that advertise tool support — @soql, @debug and @ask are
+// entirely tool-call driven, so a model without `tools` fails on the first turn.
+function normalizeOrModels(data) {
+  var out = [];
+  (data || []).forEach(function (m) {
+    if (!m || !m.id) return;
+    // Every model in the menu has to work with every feature: @soql/@ask need
+    // tool calling, and @ask sends a screenshot, so text-only models are out.
+    if ((m.supported_parameters || []).indexOf('tools') === -1) return;
+    if (((m.architecture && m.architecture.input_modalities) || []).indexOf('image') === -1) return;
+    var name = m.name || m.id;
+    var split = name.indexOf(': ');
+    var vendorSlug = m.id.indexOf('/') > -1 ? m.id.split('/')[0] : 'other';
+    out.push({
+      id: m.id,
+      label: split > -1 ? name.slice(split + 2) : name,
+      group: vendorSlug,
+      groupLabel: split > -1 ? name.slice(0, split) : vendorSlug
+    });
+  });
+  out.sort(function (a, b) {
+    if (a.groupLabel !== b.groupLabel) return a.groupLabel.localeCompare(b.groupLabel);
+    return a.label.localeCompare(b.label);
+  });
+  return out;
+}
+
+function loadOrModels() {
+  if (orModels) return Promise.resolve(orModels);
+  return new Promise(function (resolve) {
+    chrome.storage.local.get(OR_MODELS_KEY, function (data) {
+      var cached = (data && data[OR_MODELS_KEY]) || null;
+      var fresh = cached && cached.models && cached.models.length &&
+                  (Date.now() - cached.fetchedAt) < OR_MODELS_TTL;
+      if (fresh) { orModels = cached.models; resolve(orModels); return; }
+
+      fetch('https://openrouter.ai/api/v1/models')
+        .then(function (r) {
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          return r.json();
+        })
+        .then(function (json) {
+          var list = normalizeOrModels(json && json.data);
+          if (!list.length) throw new Error('empty catalogue');
+          orModels = list;
+          var store = {};
+          store[OR_MODELS_KEY] = { fetchedAt: Date.now(), models: list };
+          chrome.storage.local.set(store);
+          resolve(list);
+        })
+        .catch(function () {
+          // A stale cache still beats the five-model fallback.
+          if (cached && cached.models && cached.models.length) {
+            orModels = cached.models;
+            resolve(orModels);
+          } else {
+            resolve(null);
+          }
+        });
+    });
+  });
+}
+
+function optionFor(m) {
+  var opt = document.createElement('option');
+  opt.value = m.id;
+  opt.textContent = m.label;
+  return opt;
+}
+
+function setModelHint(text, kind) {
+  modelHintEl.textContent = text || '';
+  modelHintEl.className = 'field-hint' + (kind ? ' ' + kind : '');
+  modelHintEl.hidden = !text;
+}
+
+function renderModelMenuFor(providerName) {
+  var p = PROVIDERS[providerName];
+  var selected = flow.draft.model ||
+    (state.providers[providerName] && state.providers[providerName].model) || p.defaultModel;
+  var req = ++modelReq;
+  modelFilterEl.value = '';
+
+  if (!p.dynamicModels) {
+    modelFilterEl.hidden = true;
+    setModelHint('');
+    fillModelSelectInto(modelEl, p.models, selected);
+    return;
+  }
+
+  modelFilterEl.hidden = false;
+  // Seed with the built-in shortlist so the menu is never empty while loading.
+  fillModelSelectInto(modelEl, orModels || p.models, selected);
+  if (!orModels) setModelHint('Loading the OpenRouter catalogue…');
+
+  loadOrModels().then(function (list) {
+    if (req !== modelReq) return; // provider changed while the fetch was in flight
+    if (!list) {
+      setModelHint('Showing ' + p.models.length + ' offline models. Could not reach the OpenRouter catalogue.', 'err');
+      return;
+    }
+    applyModelFilterFor(providerName);
+  });
+}
+
+function applyModelFilterFor(providerName) {
+  var p = PROVIDERS[providerName];
+  var list = orModels || p.models;
+  var q = (modelFilterEl.value || '').trim().toLowerCase();
+  var shown = !q ? list : list.filter(function (m) {
+    return (m.id + ' ' + m.label).toLowerCase().indexOf(q) > -1;
+  });
+  var selected = flow.draft.model ||
+    (state.providers[providerName] && state.providers[providerName].model) || p.defaultModel;
+  fillModelSelectInto(modelEl, shown, selected);
+  setModelHint('Showing ' + shown.length + ' of ' + list.length + ' tool-capable models' +
+    (q ? ' match “' + q + '”' : '') + '.');
+}
+
+function renderConnectedModels(providerName) {
+  var p = PROVIDERS[providerName];
+  var selected = (state.providers[providerName] && state.providers[providerName].model) || p.defaultModel;
+  var req = ++modelReq;
+  if (!p.dynamicModels) {
+    fillModelSelectInto(connModelEl, p.models, selected);
+    return;
+  }
+  fillModelSelectInto(connModelEl, orModels || p.models, selected);
+  loadOrModels().then(function (list) {
+    if (req !== modelReq) return;
+    if (list) fillModelSelectInto(connModelEl, list, selected);
+    // Catalogue unreachable: the short offline list stays selectable.
+  });
+}
+
+function setModelStatus(text, kind) {
+  modelStatusEl.textContent = text || '';
+  modelStatusEl.className = kind || '';
 }
 
 function setStatus(text, kind) {
@@ -317,21 +627,41 @@ function setWalkStatus(text, kind) {
 
 // ─── Event handlers ─────────────────────────────────────────────────────────
 
-cardsEl.addEventListener('click', function (e) {
-  var card = e.target.closest('.pc');
-  if (!card) return;
-  var name = card.getAttribute('data-provider');
-  if (!name || name === state.provider) return;
-  // Persist the in-flight key for the previous provider so switching back
-  // doesn't lose what the user typed.
-  state.providers[state.provider] = state.providers[state.provider] || {};
-  state.providers[state.provider].apiKey = apiKeyEl.value.trim();
-  state.providers[state.provider].model = modelEl.value;
+apiKeyEl.addEventListener('input', handleKeyInput);
+
+// Switch to a provider whose key is already saved — no re-paste, no re-test
+// (it passed its test when it was saved).
+useSavedKeyEl.addEventListener('click', function () {
+  var name = flow.choice;
+  if (!hasSavedKey(name)) return;
   state.provider = name;
-  renderProvider();
+  mergeOptions({ provider: name });
+  resetDraft();
+  flow.pasteNote = null;
+  flow.mode = 'connected';
+  renderFlow();
 });
 
-apiKeyEl.addEventListener('input', validateKeyFormat);
+useAnywayEl.addEventListener('click', function () {
+  var key = apiKeyEl.value.trim();
+  if (!key) return;
+  enterRecognized(key, flow.choice, true);
+});
+
+pillsEl.addEventListener('click', function (e) {
+  var pill = e.target.closest('.ppill');
+  if (pill) selectProvider(pill.getAttribute('data-provider'), false);
+});
+
+pillsEl.addEventListener('keydown', function (e) {
+  var order = Object.keys(PROVIDERS);
+  var i = order.indexOf(flow.choice);
+  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') i = (i + 1) % order.length;
+  else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') i = (i + order.length - 1) % order.length;
+  else return;
+  e.preventDefault();
+  selectProvider(order[i], true);
+});
 
 revealEl.addEventListener('click', function () {
   var hidden = apiKeyEl.type === 'password';
@@ -340,42 +670,90 @@ revealEl.addEventListener('click', function () {
   eyeHideEl.hidden = !hidden;
 });
 
-saveEl.addEventListener('click', async function () {
-  var key = apiKeyEl.value.trim();
-  if (!key) { setStatus('Enter an API key first', 'err'); return; }
+clearDraftEl.addEventListener('click', function (e) {
+  e.preventDefault();
+  resetDraft();
+  flow.pasteNote = null;
+  flow.mode = 'paste';
+  renderFlow();
+  apiKeyEl.focus();
+});
 
-  state.providers[state.provider] = state.providers[state.provider] || {};
-  state.providers[state.provider].apiKey = key;
-  state.providers[state.provider].model = modelEl.value;
-  await mergeOptions({
-    provider: state.provider,
-    providers: state.providers,
-    openInNewTab: openInEl.value !== 'same'
+saveEl.addEventListener('click', function () {
+  var key = flow.draft.key;
+  var name = flow.draft.provider;
+  if (!key || !name) return;
+  flow.draft.model = modelEl.value;
+
+  // Test first with a transient opts override — storage is only written on
+  // success, so a failed test never disturbs an already-working key.
+  var patched = {};
+  Object.keys(state.providers).forEach(function (n) {
+    patched[n] = Object.assign({}, state.providers[n]);
   });
+  patched[name] = Object.assign({}, patched[name], { apiKey: key, model: flow.draft.model });
+  var testOpts = { provider: name, providers: patched, openInNewTab: state.openInNewTab };
 
   saveEl.disabled = true;
-  setStatus('Saving + testing…', 'loading');
-  chrome.runtime.sendMessage({ type: 'provider.test' }, function (resp) {
+  setStatus('Testing…', 'loading');
+  chrome.runtime.sendMessage({ type: 'provider.test', opts: testOpts }, function (resp) {
     saveEl.disabled = false;
-    if (chrome.runtime.lastError) {
-      setStatus('Error: ' + chrome.runtime.lastError.message, 'err');
+    if (chrome.runtime.lastError) { setStatus('Error: ' + chrome.runtime.lastError.message, 'err'); return; }
+    if (!resp) { setStatus('No response from background', 'err'); return; }
+    if (!resp.ok) {
+      if (NETWORK_ERR_RE.test(resp.error)) {
+        setStatus('Could not reach ' + PROVIDERS[name].productName + '. Check your connection and try again.', 'err');
+      } else {
+        setStatus('Failed: ' + resp.error, 'err');
+      }
       return;
     }
-    if (!resp) { setStatus('No response from background', 'err'); return; }
-    if (!resp.ok) { setStatus('Failed: ' + resp.error, 'err'); return; }
-    var p = PROVIDERS[state.provider];
-    setStatus('Connected to ' + p.productName + ' (' + (resp.model || '—') + ')', 'ok');
-    renderConnectedStatus();
+    state.providers = patched;
+    state.provider = name;
+    mergeOptions({ provider: name, providers: patched });
+    flow.mode = 'connected';
+    renderFlow();
   });
+});
+
+modelEl.addEventListener('change', function () {
+  flow.draft.model = modelEl.value;
 });
 
 openInEl.addEventListener('change', function () {
   mergeOptions({ openInNewTab: openInEl.value !== 'same' });
 });
 
-modelEl.addEventListener('change', function () {
+modelFilterEl.addEventListener('input', function () {
+  var name = flow.draft.provider;
+  if (name && PROVIDERS[name].dynamicModels) applyModelFilterFor(name);
+});
+
+connModelEl.addEventListener('change', function () {
   state.providers[state.provider] = state.providers[state.provider] || {};
-  state.providers[state.provider].model = modelEl.value;
+  state.providers[state.provider].model = connModelEl.value;
+  mergeOptions({ providers: state.providers });
+  connModelNameEl.textContent = connModelEl.value;
+  setModelStatus('Model updated.', 'ok');
+});
+
+replaceKeyEl.addEventListener('click', function (e) {
+  e.preventDefault();
+  resetDraft();
+  flow.pasteNote = null;
+  flow.mode = 'paste';
+  renderFlow();
+  apiKeyEl.focus();
+});
+
+removeKeyEl.addEventListener('click', function (e) {
+  e.preventDefault();
+  delete state.providers[state.provider].apiKey;
+  mergeOptions({ providers: state.providers });
+  resetDraft();
+  flow.pasteNote = { text: 'Key removed. @soql, @debug and @ask won\'t respond until you add one.', kind: 'ok' };
+  flow.mode = 'paste';
+  renderFlow();
 });
 
 replayEl.addEventListener('click', async function () {

@@ -4,6 +4,7 @@
    ═══════════════════════════════════════════════════════ */
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+[hidden] { display: none !important; }
 
 :root {
   --bg: #f5f4f1;
@@ -121,7 +122,7 @@ html, body {
 
 /* ─── Form controls ───────────────────────────────────── */
 
-label.fl {
+.fl {
   display: block;
   font-size: 10px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -134,6 +135,7 @@ label.fl {
 input[type=text],
 input[type=password],
 input[type=email],
+input[type=search],
 textarea,
 select {
   width: 100%;
@@ -173,6 +175,24 @@ input:focus, select:focus, textarea:focus {
   display: flex;
 }
 .ir:hover { color: var(--text); }
+
+/* Drop Chrome's native macOS select chrome (system arrow jammed against the
+   edge, its own height) so selects match the text inputs; draw our own chevron. */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  height: 33px;
+  padding-right: 30px;
+  line-height: 1.3;
+  cursor: pointer;
+  text-overflow: ellipsis;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6' fill='none' stroke='%236b6a64' stroke-width='1.3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1l4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 11px center;
+  background-size: 10px 6px;
+}
+select:hover { border-color: var(--t3); }
+select:disabled { cursor: default; opacity: .6; }
 
 /* Inline navigation/walkthrough selects sit on the right of a row */
 .cr .crc select { width: auto; min-width: 130px; font-size: 12.5px; }
@@ -312,6 +332,18 @@ input:focus, select:focus, textarea:focus {
   margin-top: 6px;
 }
 
+.field-hint {
+  font-size: 11px;
+  color: var(--t2);
+  margin-top: 6px;
+}
+.field-hint.err { color: var(--amber); }
+
+/* OpenRouter's catalogue is a few hundred models — the filter narrows the
+   menu below it. Hidden for the single-vendor providers. */
+.model-filter { margin-bottom: 7px; }
+.model-filter::-webkit-search-cancel-button { cursor: pointer; }
+
 .actions {
   display: flex;
   align-items: center;
@@ -414,3 +446,167 @@ kbd {
 .walk-status.ok { color: var(--green); }
 .walk-status.err { color: var(--red); }
 .walk-status.loading { color: var(--t2); }
+
+/* ─── Provider flow — three screens (paste / recognized / connected) ─── */
+
+.fscr { display: flex; flex-direction: column; gap: 14px; }
+
+/* Screen 1 — unrecognized-key block: message plus inline naming buttons */
+.unrec { margin-top: 6px; }
+.unrec-msg { font-size: 11.5px; color: var(--amber); line-height: 1.5; }
+.nb { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 9px; }
+.nb button {
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--t1, inherit);
+  background: var(--surface, #fff);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  padding: 5px 11px;
+  cursor: pointer;
+}
+.nb button:hover { border-color: var(--accent); color: var(--accent); }
+
+/* Provider pills — pick first, then the steps / note / key field follow */
+.ppills { display: flex; flex-wrap: wrap; gap: 8px; }
+.ppill {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 7px 14px;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border2);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: border-color .12s, background .12s, color .12s;
+}
+.ppill:hover { border-color: var(--t3); }
+.ppill:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ppill-sub { font-size: 11px; font-weight: 400; color: var(--t3); transition: color .12s; }
+.ppill[aria-checked="true"] { background: var(--accent); border-color: var(--accent); color: var(--afg); }
+.ppill[aria-checked="true"] .ppill-sub { color: rgba(255, 255, 255, .6); }
+/* The flow stacks with .fscr gap; drop the callouts' own bottom margin. */
+#scr-paste .callout { margin-bottom: 0; }
+
+/* A small green dot on pills whose provider already has a saved key */
+.ppill.has-key::after {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+  align-self: center;
+}
+.ppill[aria-checked="true"].has-key::after { background: #6fd39b; }
+
+.savedkey {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 13px;
+  font-size: 12px;
+  color: var(--green);
+  background: var(--gbg);
+  border: 1px solid #cfe8da;
+  border-radius: var(--r);
+}
+.savedkey span { min-width: 0; }
+.savedkey .btn { flex-shrink: 0; }
+
+/* Folded "how to get a key" steps */
+.howto summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--t2);
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+.howto summary::-webkit-details-marker { display: none; }
+.howto summary::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-right: 1.3px solid currentColor;
+  border-bottom: 1.3px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform .12s;
+}
+.howto[open] summary::before { transform: rotate(45deg); }
+.howto summary:hover { color: var(--text); }
+.howto summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+.howto-body {
+  margin-top: 10px;
+  padding: 12px 14px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+}
+.howto-note {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--t2);
+}
+
+/* Screen 2 — match line, masked preview, kept-key note */
+.matchline { font-size: 13px; font-weight: 600; color: var(--t1); }
+.keypreview {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  color: var(--t2);
+}
+.notthis, .notthis a { font-size: 11.5px; color: var(--t2); }
+.notthis a:hover { color: var(--accent); }
+.keptkey { margin-bottom: 0; }
+
+/* Screen 3 — connected state */
+.conn-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--green);
+}
+.conn-badge::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--green);
+}
+.conn-key {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  color: var(--t2);
+}
+.conn-model {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.conn-model-lbl { font-size: 12px; color: var(--t2); }
+.conn-model select { max-width: 320px; }
+#modelStatus { font-size: 11.5px; }
+#modelStatus.ok { color: var(--green); }
+#modelStatus.err { color: var(--red); }
+.connopts { display: flex; gap: 16px; }
+.connopts a { font-size: 12px; color: var(--accent); text-decoration: none; }
+.connopts a:hover { text-decoration: underline; }
+.connopts a#removeKey { color: var(--red); }
+
+#pasteStatus { font-size: 11.5px; }
+#pasteStatus.ok { color: var(--green); }
+#pasteStatus.err { color: var(--red); }
