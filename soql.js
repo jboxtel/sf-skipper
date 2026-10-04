@@ -825,7 +825,7 @@ function buildObjectListMessage(prompt) {
 }
 
 function parseSoqlResponse(text) {
-  if (!text) throw new Error('Empty response');
+  if (!text) throw emptyModelResponseError(null);
   // Strip code fences if present
   var cleaned = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
   // Find the first complete top-level JSON object. Models sometimes append
@@ -1920,8 +1920,15 @@ async function generateSoql(prompt, onProgress) {
 
   for (var attempt = 0; attempt <= SOQL_VALIDATE_RETRIES; attempt++) {
     notify(attempt === 0 ? 'Writing query' : 'Retrying (attempt ' + (attempt + 1) + ')');
-    var text = await callClaude(systemPrompt, userMessage);
-    var parsed = parseSoqlResponse(text);
+    var parsed;
+    try {
+      parsed = parseSoqlResponse(await callClaude(systemPrompt, userMessage));
+    } catch (genErr) {
+      // An empty answer is worth another try (thinking models sometimes spend
+      // the whole budget); anything else, or the last attempt, fails as before.
+      if (genErr.emptyResponse && attempt < SOQL_VALIDATE_RETRIES) continue;
+      throw genErr;
+    }
     lastParsed = parsed;
 
     notify('Validating');
@@ -2151,6 +2158,27 @@ function hasSoqlApiKey() {
       var active = opts.provider || 'gemini';
       var p = (opts.providers && opts.providers[active]) || {};
       resolve(!!p.apiKey);
+    });
+  });
+}
+
+// Which provider (and model, when one was picked) the AI features will use —
+// for the "Using OpenRouter · z-ai/glm-5.3" line in the palette. Resolves to
+// null when there's no key. Mirrors the shape hasSoqlApiKey reads.
+var SOQL_PROVIDER_LABELS = { gemini: 'Gemini', anthropic: 'Claude', openai: 'GPT', openrouter: 'OpenRouter' };
+
+function getActiveProviderSummary() {
+  return new Promise(function (resolve) {
+    if (typeof chrome === 'undefined' || !chrome.storage) { resolve(null); return; }
+    chrome.storage.local.get('sfnavOptions', function (data) {
+      var opts = data.sfnavOptions || {};
+      if (!opts.provider && opts.anthropicApiKey) {
+        resolve({ label: 'Claude', model: opts.model || '' });
+        return;
+      }
+      var active = opts.provider || 'gemini';
+      var p = (opts.providers && opts.providers[active]) || {};
+      resolve(p.apiKey ? { label: SOQL_PROVIDER_LABELS[active] || active, model: p.model || '' } : null);
     });
   });
 }

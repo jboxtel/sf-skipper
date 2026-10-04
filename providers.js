@@ -232,7 +232,7 @@ function anthropicToolChoiceToOpenAI(toolChoice) {
 // Shared by any backend that speaks OpenAI's Chat Completions wire format —
 // currently OpenAI itself and OpenRouter (which proxies many vendors behind
 // the same request/response shape).
-async function callOpenAICompatible(resolved, body, url, extraHeaders) {
+async function callOpenAICompatible(resolved, body, url, extraHeaders, extraBody) {
   var idToName = buildToolIdIndex(body.messages);
   var systemText = systemToText(body.system);
   var oaMessages = anthropicToOpenAIMessages(body.messages, idToName);
@@ -247,6 +247,7 @@ async function callOpenAICompatible(resolved, body, url, extraHeaders) {
   if (tools) reqBody.tools = tools;
   var tc = anthropicToolChoiceToOpenAI(body.tool_choice);
   if (tc != null) reqBody.tool_choice = tc;
+  if (extraBody) Object.assign(reqBody, extraBody);
 
   var res = await timedFetch(url, {
     method: 'POST',
@@ -272,10 +273,20 @@ async function callOpenAI(resolved, body) {
 
 // OpenRouter's app-attribution headers are optional (used for their public
 // model-usage rankings, not for auth) but cost nothing to send.
+//
+// Reasoning: OpenRouter fronts models that always think (GLM, DeepSeek R1,
+// o-series…). Ask for low effort and leave the reasoning text out of the
+// response — we never read it — and give a little more room, since thinking
+// tokens count against max_tokens. Models that don't reason ignore the field.
+var OPENROUTER_MIN_MAX_TOKENS = 2048;
+
 async function callOpenRouter(resolved, body) {
-  return callOpenAICompatible(resolved, body, 'https://openrouter.ai/api/v1/chat/completions', {
+  var routed = Object.assign({}, body, { max_tokens: Math.max(body.max_tokens || 0, OPENROUTER_MIN_MAX_TOKENS) });
+  return callOpenAICompatible(resolved, routed, 'https://openrouter.ai/api/v1/chat/completions', {
     'HTTP-Referer': 'https://github.com/jboxtel/sf-skipper',
     'X-Title': 'Skipper for Salesforce'
+  }, {
+    reasoning: { effort: 'low', exclude: true }
   });
 }
 
@@ -401,6 +412,18 @@ function anthropicToolChoiceToGemini(toolChoice, tools) {
   return null;
 }
 
+// Skipper's pipelines (planner + validation + retries, the @ask tool loop) do
+// the multi-step work themselves, so model-side thinking mostly adds latency
+// and cost — and its tokens share the output budget, which can leave nothing
+// for the answer. Gemini 2.5 thinks by default: Flash can switch it off, Pro
+// can't go below 128 tokens. Other models don't take the setting.
+function geminiThinkingConfig(model) {
+  var m = String(model || '');
+  if (/gemini-2\.5-flash/.test(m)) return { thinkingBudget: 0 };
+  if (/gemini-2\.5-pro/.test(m))   return { thinkingBudget: 128 };
+  return null;
+}
+
 async function callGemini(resolved, body) {
   var idToName = buildToolIdIndex(body.messages);
   var contents = anthropicToGeminiContents(body.messages, idToName);
@@ -408,6 +431,8 @@ async function callGemini(resolved, body) {
     contents: contents,
     generationConfig: { maxOutputTokens: body.max_tokens }
   };
+  var thinking = geminiThinkingConfig(body.model);
+  if (thinking) reqBody.generationConfig.thinkingConfig = thinking;
   var sys = systemToText(body.system);
   if (sys) reqBody.system_instruction = { parts: [{ text: sys }] };
   var gtools = anthropicToolsToGemini(body.tools);

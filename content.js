@@ -223,6 +223,7 @@
                 '<button id="sfnav-ask-run" class="sfnav-soql-btn-primary">Ask</button>' +
               '</div>' +
               '<div id="sfnav-ask-home-status" class="sfnav-ask-status-row"></div>' +
+              '<div id="sfnav-ask-provider" class="sfnav-apistat sfnav-apistat-ok" style="display:none"></div>' +
             '</div>' +
             '<div id="sfnav-ask-recent" style="display:none">' +
               '<div class="sfnav-section-header">Recent — ↵ to resume thread</div>' +
@@ -602,19 +603,7 @@
       document.getElementById('sfnav-input').focus();
     };
 
-    hasSoqlApiKey().then(function (ok) {
-      var el = document.getElementById('sfnav-soql-apistat');
-      if (!el) return;
-      if (ok) {
-        el.textContent = 'API key connected';
-        el.className = 'sfnav-apistat sfnav-apistat-ok';
-      } else {
-        el.innerHTML = 'No API key — <a href="#" class="sfnav-options-link">configure in Options</a>';
-        el.className = 'sfnav-apistat sfnav-apistat-missing';
-        var link = el.querySelector('.sfnav-options-link');
-        if (link) link.onclick = function (e) { e.preventDefault(); openOptions(); };
-      }
-    });
+    renderProviderStatus('sfnav-soql-apistat');
 
     input.focus();
   }
@@ -1176,19 +1165,7 @@
         });
     }
 
-    hasSoqlApiKey().then(function (ok) {
-      var el = document.getElementById('sfnav-flowdebug-apistat');
-      if (!el) return;
-      if (ok) {
-        el.textContent = 'API key connected';
-        el.className = 'sfnav-apistat sfnav-apistat-ok';
-      } else {
-        el.innerHTML = 'No API key — <a href="#" class="sfnav-options-link">configure in Options</a>';
-        el.className = 'sfnav-apistat sfnav-apistat-missing';
-        var link = el.querySelector('.sfnav-options-link');
-        if (link) link.onclick = function (e) { e.preventDefault(); openOptions(); };
-      }
-    });
+    renderProviderStatus('sfnav-flowdebug-apistat');
 
     document.getElementById('sfnav-flowdebug-run').onclick = runFlowDebugAnalysis;
 
@@ -1370,7 +1347,7 @@
     document.getElementById('sfnav-ask-crumb').innerHTML =
       '<span class="sfnav-ask-crumb-kw">@ask</span>' +
       '<span class="sfnav-ask-crumb-sep">·</span>' +
-      '<span class="sfnav-ask-crumb-title">Ask Claude about this screen</span>';
+      '<span class="sfnav-ask-crumb-title">Ask AI about this screen</span>';
     document.getElementById('sfnav-ask-header-right').innerHTML =
       '<span class="sfnav-ask-header-hint">esc to go back</span>';
 
@@ -1499,16 +1476,42 @@
   }
 
   // Healthy state is silent — the banner only appears when the key is missing.
+  // "Using OpenRouter · z-ai/glm-5.3" when a key is set, otherwise a link to
+  // Options. Shared by the @soql and @debug panels.
+  function renderProviderStatus(elId) {
+    getActiveProviderSummary().then(function (summary) {
+      var el = document.getElementById(elId);
+      if (!el) return;
+      if (summary) {
+        el.textContent = 'Using ' + summary.label + (summary.model ? ' · ' + summary.model : '');
+        el.title = 'Change in Options';
+        el.className = 'sfnav-apistat sfnav-apistat-ok';
+      } else {
+        el.innerHTML = 'No API key — <a href="#" class="sfnav-options-link">configure in Options</a>';
+        el.className = 'sfnav-apistat sfnav-apistat-missing';
+        var link = el.querySelector('.sfnav-options-link');
+        if (link) link.onclick = function (e) { e.preventDefault(); openOptions(); };
+      }
+    });
+  }
+
   function refreshAskKeyWarning() {
     var el = document.getElementById('sfnav-ask-keywarn');
+    var providerEl = document.getElementById('sfnav-ask-provider');
     if (!el) return;
-    hasSoqlApiKey().then(function (ok) {
+    getActiveProviderSummary().then(function (summary) {
       if (searchMode !== 'ask') return;
-      if (ok) {
+      if (summary) {
         el.style.display = 'none';
         el.innerHTML = '';
+        if (providerEl) {
+          providerEl.textContent = 'Using ' + summary.label + (summary.model ? ' · ' + summary.model : '');
+          providerEl.title = 'Change in Options';
+          providerEl.style.display = '';
+        }
         return;
       }
+      if (providerEl) providerEl.style.display = 'none';
       el.innerHTML = 'No API key configured — <a href="#" class="sfnav-options-link">Open settings</a>';
       el.style.display = 'block';
       var link = el.querySelector('.sfnav-options-link');
@@ -1807,7 +1810,16 @@
       restoreOverlay();
       removeAskThinking(thinkingEl);
       if (!askRunDetached && searchMode === 'ask' && askView === 'thread') {
-        statusEl.textContent = 'Error: ' + err.message;
+        // Text-only models (some OpenRouter picks) reject the screenshot with a
+        // vendor error that means nothing to most people — say what to do.
+        if (/image input|support(s)? images?|vision/i.test(err.message || '')) {
+          statusEl.innerHTML = 'This model can’t read screenshots. Turn off the screenshot and ask again, or ' +
+            '<a href="#" class="sfnav-options-link">pick another model in Options</a>.';
+          var optLink = statusEl.querySelector('.sfnav-options-link');
+          if (optLink) optLink.onclick = function (e) { e.preventDefault(); openOptions(); };
+        } else {
+          statusEl.textContent = 'Error: ' + err.message;
+        }
         statusEl.className = 'sfnav-ask-status-row sfnav-ask-status-error';
       }
       console.warn('sfnav: ask failed —', err);

@@ -77,6 +77,7 @@ async function injectExtension(page) {
       window.getUsersError = () => '';
       window.resolveUserPicker = () => ({ mode: 'user-picker', results: [], hint: '' });
       window.hasSoqlApiKey = () => Promise.resolve(false);
+      window.getActiveProviderSummary = () => Promise.resolve(null);
       window.generateSoql = () => Promise.reject(new Error('not stubbed'));
       window.getSoqlHistory = () => Promise.resolve([]);
       window.addToSoqlHistory = () => Promise.resolve();

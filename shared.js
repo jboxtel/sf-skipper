@@ -130,6 +130,17 @@ async function sfRestPreamble() {
 //     resolves to the tool's parsed input object (already a JS object) instead
 //     of a string. Use this whenever you need a JSON-shaped response — far
 //     more robust than asking the model to emit JSON and then JSON.parse-ing.
+// The model answered with no text. Usually a thinking model spent the whole
+// output budget reasoning (stopReason 'max_tokens'). Flagged so callers with a
+// retry loop can try again instead of failing the whole request.
+function emptyModelResponseError(stopReason) {
+  var err = new Error(stopReason === 'max_tokens'
+    ? 'The model ran out of space before answering — it may be a reasoning model. Try again, or pick a faster model in Options.'
+    : 'The model returned an empty answer. Try again, or pick a different model in Options.');
+  err.emptyResponse = true;
+  return err;
+}
+
 function callClaude(systemPrompt, userMessage, opts) {
   opts = opts || {};
   return new Promise(function (resolve, reject) {
@@ -151,6 +162,7 @@ function callClaude(systemPrompt, userMessage, opts) {
           resolve(resp.toolInput);
           return;
         }
+        if (!resp.text) { reject(emptyModelResponseError(resp.stopReason)); return; }
         resolve(resp.text);
       }
     );

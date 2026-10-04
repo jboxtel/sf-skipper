@@ -68,7 +68,8 @@ async function handleSoqlGenerate(req, sendResponse) {
     sendResponse({
       ok: true,
       text: (textBlock && textBlock.text) || '',
-      toolInput: (toolBlock && toolBlock.input) || null
+      toolInput: (toolBlock && toolBlock.input) || null,
+      stopReason: resp.stop_reason || null
     });
   } catch (err) {
     if (err && err.name === 'AbortError') {
