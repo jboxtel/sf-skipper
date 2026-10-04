@@ -250,29 +250,33 @@
             '<span id="sfnav-export-crumb">' +
               '<span class="sfnav-ask-crumb-kw">@export</span>' +
               '<span class="sfnav-ask-crumb-sep">·</span>' +
-              '<span class="sfnav-ask-crumb-title">Run SOQL against this org — read-only</span>' +
+              '<span class="sfnav-ask-crumb-title">Run a SOQL query</span>' +
             '</span>' +
             '<span class="sfnav-ask-header-hint">esc to go back</span>' +
           '</div>' +
-          '<div id="sfnav-export-editor">' +
-            '<textarea id="sfnav-export-query" rows="3" placeholder="SELECT Id, Name FROM Account LIMIT 100" spellcheck="false" autocomplete="off"></textarea>' +
-            '<ul id="sfnav-export-ac" style="display:none"></ul>' +
+          '<div class="sfnav-ask-composer">' +
+            '<div id="sfnav-export-editor">' +
+              '<textarea id="sfnav-export-query" rows="2" placeholder="SELECT Id, Name FROM Account LIMIT 100" spellcheck="false" autocomplete="off"></textarea>' +
+              '<ul id="sfnav-export-ac" style="display:none"></ul>' +
+            '</div>' +
+            '<div class="sfnav-ask-composer-row">' +
+              '<span id="sfnav-export-status"></span>' +
+              '<span class="sfnav-ask-composer-hint" id="sfnav-export-kbdhint"></span>' +
+              '<button id="sfnav-export-run" class="sfnav-soql-btn-primary">Run</button>' +
+            '</div>' +
           '</div>' +
-          '<div id="sfnav-export-toolbar">' +
-            '<button id="sfnav-export-run" class="sfnav-soql-btn-primary">Run <span class="sfnav-kbd"></span></button>' +
-            '<span id="sfnav-export-status"></span>' +
-            '<span class="sfnav-export-spacer"></span>' +
-            '<button class="sfnav-soql-btn-secondary sfnav-export-out" data-export="tsv" title="Tab-separated — paste straight into Excel or Sheets">Copy Excel</button>' +
-            '<button class="sfnav-soql-btn-secondary sfnav-export-out" data-export="csv">Copy CSV</button>' +
-            '<button class="sfnav-soql-btn-secondary sfnav-export-out" data-export="json">Copy JSON</button>' +
-            '<button class="sfnav-soql-btn-secondary sfnav-export-out" data-export="download">Download CSV</button>' +
-          '</div>' +
-          '<div id="sfnav-export-body">' +
-            '<div id="sfnav-export-recent" style="display:none">' +
-              '<div class="sfnav-section-header">Recent</div>' +
-              '<ul id="sfnav-export-history"></ul>' +
+          '<div id="sfnav-export-result" style="display:none">' +
+            '<div id="sfnav-export-result-bar">' +
+              '<span id="sfnav-export-summary"></span>' +
+              '<button class="sfnav-soql-btn-primary sfnav-export-out" data-export="tsv" title="Tab-separated — pastes straight into Excel or Sheets">Copy</button>' +
+              '<button class="sfnav-soql-btn-secondary sfnav-export-out" data-export="json">Copy JSON</button>' +
+              '<button class="sfnav-soql-btn-secondary sfnav-export-out" data-export="download">Download CSV</button>' +
             '</div>' +
             '<div id="sfnav-export-grid"></div>' +
+          '</div>' +
+          '<div id="sfnav-export-recent" style="display:none">' +
+            '<div class="sfnav-section-header">Recent</div>' +
+            '<ul id="sfnav-export-history"></ul>' +
           '</div>' +
         '</div>' +
         '<div id="sfnav-feedback" style="display:none">' +
@@ -720,12 +724,13 @@
   }
 
   // ─── @export — SOQL runner ────────────────────────────────────────────────
-  // Logic lives in export.js; this is the panel wiring. Unlike the other
-  // panels, the palette widens (.sfnav-wide) so the grid has room.
+  // Logic lives in export.js; this is the panel wiring. The panel opens at
+  // the normal palette width and widens (.sfnav-wide) only once there are
+  // rows to show.
 
   var exportInFlight = false;
   var exportAbort = null;   // AbortController for the running query
-  var exportResult = null;  // { records, table, objectName } from the last run
+  var exportResult = null;  // { records, table, objectName, summary } from the last run
   var exportAc = { items: [], index: 0, ctx: null, seq: 0 };
   var exportWired = false;
 
@@ -742,7 +747,6 @@
     var breadcrumbEl = document.getElementById('sfnav-breadcrumb');
     breadcrumbEl.textContent = '';
     breadcrumbEl.style.display = 'none';
-    document.getElementById('sfnav-palette').classList.add('sfnav-wide');
     document.getElementById('sfnav-export').style.display = 'flex';
     setFooterHints('export');
     wireExportPanel();
@@ -752,9 +756,10 @@
     if (prefill) {
       q.value = prefill;
       exportResult = null;
-      document.getElementById('sfnav-export-status').textContent = '';
     }
+    setExportStatus('', '');
     hideExportAutocomplete();
+    autoGrowExportEditor();
     renderExportBody();
     q.focus();
     q.setSelectionRange(q.value.length, q.value.length);
@@ -766,7 +771,7 @@
     exportWired = true;
 
     var q = document.getElementById('sfnav-export-query');
-    document.querySelector('#sfnav-export-run .sfnav-kbd').textContent = sfnavModEnterKbd();
+    document.getElementById('sfnav-export-kbdhint').textContent = sfnavModEnterKbd() + ' to run';
 
     document.getElementById('sfnav-export-run').addEventListener('click', function () {
       if (exportInFlight) { if (exportAbort) exportAbort.abort(); return; }
@@ -814,11 +819,26 @@
       }
     });
     q.addEventListener('input', function () {
+      autoGrowExportEditor();
       updateExportAutocomplete(false);
       if (!exportResult) renderExportBody(); // history only shows for an empty editor
     });
     q.addEventListener('click', hideExportAutocomplete);
     q.addEventListener('blur', hideExportAutocomplete);
+  }
+
+  function autoGrowExportEditor() {
+    var q = document.getElementById('sfnav-export-query');
+    q.style.height = 'auto';
+    q.style.height = Math.min(q.scrollHeight + 2, 200) + 'px';
+  }
+
+  // The line under the editor: progress while running, errors, copy failures.
+  // Success goes in the result bar instead.
+  function setExportStatus(text, cls) {
+    var statusEl = document.getElementById('sfnav-export-status');
+    statusEl.textContent = text;
+    statusEl.className = cls || '';
   }
 
   async function runExportFromPanel() {
@@ -828,22 +848,18 @@
     if (!soql) return;
     hideExportAutocomplete();
 
-    var statusEl = document.getElementById('sfnav-export-status');
     exportInFlight = true;
     exportAbort = new AbortController();
     setExportRunning(true);
-    statusEl.textContent = 'Running';
-    statusEl.className = 'sfnav-soql-status-loading sfnav-progress-dots';
+    setExportStatus('Running', 'sfnav-soql-status-loading sfnav-progress-dots');
 
     try {
       var res = await runExportQuery(soql, {
         signal: exportAbort.signal,
         onProgress: function (loaded, total) {
-          statusEl.textContent = 'Loaded ' + loaded.toLocaleString() + ' of ' + total.toLocaleString();
+          setExportStatus('Loaded ' + loaded.toLocaleString() + ' of ' + total.toLocaleString(), 'sfnav-soql-status-loading');
         }
       });
-      var table = flattenExportRecords(res.records);
-      exportResult = { records: res.records, table: table, objectName: res.objectName };
 
       var parts = [];
       if (!res.records.length && res.totalSize) {
@@ -852,16 +868,22 @@
         parts.push(res.records.length.toLocaleString() + (res.records.length === 1 ? ' row' : ' rows') +
           (res.totalSize > res.records.length ? ' of ' + res.totalSize.toLocaleString() : ''));
       }
+      if (res.objectName) parts.push(res.objectName);
       parts.push(res.ms.toLocaleString() + ' ms');
       if (res.truncated) parts.push('stopped at ' + EXPORT_MAX_ROWS.toLocaleString() + ' rows');
       if (res.aborted) parts.push('stopped');
-      statusEl.textContent = parts.join(' · ');
-      statusEl.className = 'sfnav-soql-status-ok';
+
+      exportResult = {
+        records: res.records,
+        table: flattenExportRecords(res.records),
+        objectName: res.objectName,
+        summary: parts.join(' · ')
+      };
+      setExportStatus('', '');
       renderExportBody();
       if (!res.aborted) addToExportHistory({ soql: soql, objectName: res.objectName, rows: res.totalSize });
     } catch (err) {
-      statusEl.textContent = err.message;
-      statusEl.className = 'sfnav-soql-status-error';
+      setExportStatus(err.message, 'sfnav-soql-status-error');
       console.warn('sfnav: @export query failed —', err);
     } finally {
       exportInFlight = false;
@@ -872,29 +894,42 @@
 
   function setExportRunning(running) {
     var runBtn = document.getElementById('sfnav-export-run');
-    runBtn.firstChild.textContent = running ? 'Stop ' : 'Run ';
+    runBtn.textContent = running ? 'Stop' : 'Run';
+    runBtn.classList.toggle('sfnav-soql-btn-secondary', running);
+    runBtn.classList.toggle('sfnav-soql-btn-primary', !running);
     Array.prototype.forEach.call(document.querySelectorAll('.sfnav-export-out'), function (btn) {
-      btn.disabled = running || !exportResult || !exportResult.records.length;
+      btn.disabled = running;
     });
   }
 
-  // Grid when there are results, otherwise the recent-queries list.
+  // Result list when there are results, otherwise the recent-queries list.
   function renderExportBody() {
+    var resultEl = document.getElementById('sfnav-export-result');
     var gridEl = document.getElementById('sfnav-export-grid');
     var recentEl = document.getElementById('sfnav-export-recent');
-    setExportRunning(exportInFlight);
+    var paletteEl = document.getElementById('sfnav-palette');
+    var hasRows = !!exportResult && exportResult.records.length > 0;
+
+    paletteEl.classList.toggle('sfnav-wide', hasRows);
     if (exportResult) {
       recentEl.style.display = 'none';
-      gridEl.style.display = '';
-      if (exportResult.records.length) {
+      resultEl.style.display = 'flex';
+      document.getElementById('sfnav-export-summary').textContent = exportResult.summary;
+      Array.prototype.forEach.call(document.querySelectorAll('.sfnav-export-out'), function (btn) {
+        btn.style.display = hasRows ? '' : 'none';
+      });
+      if (hasRows) {
+        gridEl.style.display = '';
         renderExportGrid(gridEl, exportResult.table);
       } else {
         gridEl.textContent = '';
+        gridEl.style.display = 'none';
       }
       return;
     }
+
+    resultEl.style.display = 'none';
     gridEl.textContent = '';
-    gridEl.style.display = 'none';
     var editorEmpty = !document.getElementById('sfnav-export-query').value.trim();
     if (!editorEmpty) { recentEl.style.display = 'none'; return; }
     getExportHistory().then(function (history) {
@@ -917,6 +952,7 @@
         li.addEventListener('click', function () {
           var q = document.getElementById('sfnav-export-query');
           q.value = entry.soql;
+          autoGrowExportEditor();
           recentEl.style.display = 'none';
           q.focus();
         });
@@ -932,17 +968,13 @@
       downloadExportFile(exportToCsv(exportResult.table), exportFileName(exportResult.objectName, 'csv'), 'text/csv;charset=utf-8');
       return;
     }
-    var text = kind === 'tsv' ? exportToTsv(exportResult.table)
-      : kind === 'csv' ? exportToCsv(exportResult.table)
-      : exportToJson(exportResult.records);
+    var text = kind === 'tsv' ? exportToTsv(exportResult.table) : exportToJson(exportResult.records);
     navigator.clipboard.writeText(text).then(function () {
       var prev = btn.textContent;
       btn.textContent = 'Copied!';
       setTimeout(function () { btn.textContent = prev; }, 1500);
     }, function (err) {
-      var statusEl = document.getElementById('sfnav-export-status');
-      statusEl.textContent = 'Copy failed: ' + err.message;
-      statusEl.className = 'sfnav-soql-status-error';
+      setExportStatus('Copy failed: ' + err.message, 'sfnav-soql-status-error');
     });
   }
 

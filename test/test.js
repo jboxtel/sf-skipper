@@ -426,12 +426,12 @@ async function openPalette(page) {
   await page.waitForTimeout(50);
 
   await assert(
-    '@export opens the wide panel with the editor focused',
+    '@export opens at normal width with the editor focused',
     async () => page.evaluate(() =>
       document.getElementById('sfnav-export').style.display === 'flex' &&
-      document.getElementById('sfnav-palette').classList.contains('sfnav-wide') &&
+      !document.getElementById('sfnav-palette').classList.contains('sfnav-wide') &&
       document.activeElement.id === 'sfnav-export-query'),
-    'panel not shown, palette not wide, or editor not focused',
+    'panel not shown, palette already wide, or editor not focused',
   );
 
   await page.keyboard.type('SELECT  FROM Account');
@@ -448,14 +448,15 @@ async function openPalette(page) {
 
   await page.fill('#sfnav-export-query', 'SELECT Id, Name, Owner.Name FROM Account');
   await page.keyboard.press('Control+Enter');
-  await page.waitForFunction(() => /3 rows/.test(document.getElementById('sfnav-export-status').textContent), null, { timeout: 2000 }).catch(() => null);
+  await page.waitForFunction(() => /3 rows/.test(document.getElementById('sfnav-export-summary').textContent), null, { timeout: 2000 }).catch(() => null);
 
   await assert(
-    'follows nextRecordsUrl and shows every row',
+    'follows nextRecordsUrl, shows every row and widens the palette',
     async () => page.evaluate(() =>
       window.__queryUrls.length === 2 &&
-      document.querySelectorAll('#sfnav-export-grid tbody tr').length === 3),
-    'status: ' + await page.$eval('#sfnav-export-status', el => el.textContent),
+      document.querySelectorAll('#sfnav-export-grid tbody tr').length === 3 &&
+      document.getElementById('sfnav-palette').classList.contains('sfnav-wide')),
+    'summary: ' + await page.$eval('#sfnav-export-summary', el => el.textContent),
   );
 
   await assert(

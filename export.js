@@ -298,12 +298,20 @@ function renderExportGrid(container, table, opts) {
       return td;
     }
     if (isExportChildCell(v)) {
-      td.textContent = '[' + v.childCount + ']';
+      var pill = document.createElement('span');
+      pill.className = 'sfnav-export-pill';
+      pill.textContent = v.childCount + (v.childCount === 1 ? ' row' : ' rows');
+      td.appendChild(pill);
       td.title = JSON.stringify(v.childRows, null, 2);
-      td.className = 'sfnav-export-child';
       return td;
     }
     var text = exportCellText(v);
+    if (typeof v === 'number') {
+      // Display only — exports keep the raw value.
+      td.className = 'sfnav-export-num';
+      td.textContent = v.toLocaleString();
+      return td;
+    }
     if (_isExportIdCell(col, v)) {
       var a = document.createElement('a');
       a.href = origin + '/' + v;
