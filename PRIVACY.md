@@ -80,7 +80,7 @@ This is the only data the extension ever sends to a server we control, and only 
 
 ## Data retention
 
-All data the extension stores is in `chrome.storage.local` on your device. To clear it: remove the extension via `chrome://extensions`, or open the Options page and clear individual fields, or use Chrome's developer tools to inspect `chrome.storage.local` directly.
+All data the extension stores is in `chrome.storage.local` on your device. To clear it: in Options, **Saved data → Clear** removes history, learned org terms and cached org metadata; **Remove key** or **Sign out** removes your AI provider credentials. Removing the extension via `chrome://extensions` deletes everything.
 
 The only exception is feedback you submit: those messages are stored on our feedback backend (Supabase) so we can read and act on them. To request deletion of feedback you've sent, email the address below and we'll remove it. Everything else the extension touches stays in `chrome.storage.local` on your device, with no server-side copy to remove.
 

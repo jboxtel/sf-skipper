@@ -191,6 +191,7 @@ var modelStatusEl = document.getElementById('modelStatus');
 var replaceKeyEl  = document.getElementById('replaceKey');
 var removeKeyEl   = document.getElementById('removeKey');
 var openInEl      = document.getElementById('openIn');
+var askShotEl     = document.getElementById('askShot');
 var replayEl      = document.getElementById('replayWalkthrough');
 var walkStatusEl  = document.getElementById('walkthroughStatus');
 var versionEl     = document.getElementById('version');
@@ -245,6 +246,7 @@ chrome.storage.local.get(['sfnavOptions', CHATGPT_AUTH_KEY], function (data) {
 
   state.openInNewTab = opts.openInNewTab !== false;
   openInEl.value = state.openInNewTab ? 'new' : 'same';
+  askShotEl.value = opts.askScreenshot === false ? 'off' : 'on';
   flow.choice = PROVIDERS[state.provider] ? pillOf(state.provider) : 'gemini';
   // A saved key for the active provider means we're already set up — open on
   // the Connected screen rather than asking for a key again.
@@ -864,6 +866,17 @@ openInEl.addEventListener('change', function () {
   mergeOptions({ openInNewTab: openInEl.value !== 'same' });
 });
 
+// chrome:// pages can't be opened by a plain link, but the extension can open
+// one in a new tab.
+document.getElementById('shortcutsLink').addEventListener('click', function (e) {
+  e.preventDefault();
+  chrome.tabs.create({ url: 'chrome://extensions/shortcuts' });
+});
+
+askShotEl.addEventListener('change', function () {
+  mergeOptions({ askScreenshot: askShotEl.value !== 'off' });
+});
+
 modelFilterEl.addEventListener('input', function () {
   var name = flow.draft.provider;
   if (name && PROVIDERS[name].dynamicModels) applyModelFilterFor(name);
@@ -902,6 +915,74 @@ removeKeyEl.addEventListener('click', function (e) {
   flow.mode = 'paste';
   renderFlow();
 });
+
+// ─── Saved data ─────────────────────────────────────────────────────────────
+// Per-org data the palette keeps, stored as "<base>:<org host>". Clearing it
+// leaves settings, keys, the ChatGPT sign-in, labs flags and model lists alone.
+// Cached metadata is fetched again the next time the palette needs it.
+
+var ORG_DATA_BASES = [
+  'sfnavAskHistory', 'sfnavExportHistory',              // history
+  'sfnavOrgGlossary',                                   // learned org terms
+  'sfnavCustomObjects', 'sfnavApps', 'sfnavFlows',      // cached metadata (cache-factory
+  'sfnavLabels', 'sfnavPermsets', 'sfnavUsers'          // also writes <base>LoadedAt)
+];
+
+var dataSummaryEl = document.getElementById('dataSummary');
+var dataStatusEl  = document.getElementById('dataStatus');
+var clearDataEl   = document.getElementById('clearData');
+var clearArmed    = null; // timer while the button reads "Click again to clear"
+
+function orgDataKeys(all) {
+  return Object.keys(all).filter(function (k) {
+    var base = k.split(':')[0];
+    return ORG_DATA_BASES.indexOf(base.replace(/LoadedAt$/, '')) > -1;
+  });
+}
+
+function renderDataSummary() {
+  chrome.storage.local.get(null, function (all) {
+    var keys = orgDataKeys(all || {});
+    var hosts = {};
+    keys.forEach(function (k) { var h = k.split(':')[1]; if (h) hosts[h] = true; });
+    var orgs = Object.keys(hosts).length;
+    clearDataEl.disabled = !keys.length;
+    if (!keys.length) {
+      dataSummaryEl.textContent = 'No history, learned org terms or cached org metadata saved yet.';
+      return;
+    }
+    chrome.storage.local.getBytesInUse(keys, function (bytes) {
+      var size = bytes < 1024 * 1024 ? Math.max(1, Math.round(bytes / 1024)) + ' KB' : (bytes / 1024 / 1024).toFixed(1) + ' MB';
+      dataSummaryEl.textContent = 'History, learned org terms and cached metadata for ' + orgs +
+        (orgs === 1 ? ' org' : ' orgs') + ' (' + size + '). Your settings, keys and ChatGPT sign-in are kept.';
+    });
+  });
+}
+
+function disarmClear() {
+  clearTimeout(clearArmed);
+  clearArmed = null;
+  clearDataEl.textContent = 'Clear';
+}
+
+// Two clicks, no confirm() dialog: the first arms the button for a few seconds.
+clearDataEl.addEventListener('click', function () {
+  if (!clearArmed) {
+    clearDataEl.textContent = 'Click again to clear';
+    clearArmed = setTimeout(disarmClear, 4000);
+    return;
+  }
+  disarmClear();
+  chrome.storage.local.get(null, function (all) {
+    chrome.storage.local.remove(orgDataKeys(all || {}), function () {
+      dataStatusEl.textContent = 'Cleared. Reload any open Salesforce tabs to start fresh there.';
+      dataStatusEl.className = 'st ok';
+      renderDataSummary();
+    });
+  });
+});
+
+renderDataSummary();
 
 // ─── Sign in with ChatGPT ───────────────────────────────────────────────────
 // Sign in (opens a ChatGPT tab), then the same one-word test as Save and test.

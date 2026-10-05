@@ -132,9 +132,21 @@
           <div class="cr">
             <div class="crt">
               <div class="rl">Keyboard shortcut</div>
-              <div class="rd">Chrome controls shortcut bindings. To change it, visit <code>chrome://extensions/shortcuts</code>.</div>
+              <div class="rd">Chrome controls shortcut bindings. To change it, open <a href="#" id="shortcutsLink">Chrome’s keyboard shortcuts</a>.</div>
             </div>
             <div class="crc" id="paletteShortcutChip"><kbd>⌘</kbd><kbd>⇧</kbd><kbd>K</kbd></div>
+          </div>
+          <div class="cr">
+            <div class="crt">
+              <div class="rl">@ask screenshot</div>
+              <div class="rd">Whether a new @ask question includes a screenshot of the page. You can still switch it for each question.</div>
+            </div>
+            <div class="crc">
+              <select id="askShot">
+                <option value="on">On by default</option>
+                <option value="off">Off by default</option>
+              </select>
+            </div>
           </div>
           <div class="cr">
             <div class="crt">
@@ -171,6 +183,16 @@
               <span id="fbStatus"></span>
             </div>
           </div>
+          </div>
+          <div class="cr">
+            <div class="crt">
+              <div class="rl">Saved data</div>
+              <div class="rd" id="dataSummary">History, learned org terms and cached org metadata. Your settings, keys and ChatGPT sign-in are kept.</div>
+              <div id="dataStatus" class="st"></div>
+            </div>
+            <div class="crc">
+              <button id="clearData" class="btn bs" type="button">Clear</button>
+            </div>
           </div>
         </div>
       </section>

@@ -44,12 +44,14 @@
   var askVisibleEntries = [];
   var MAX_ASK_TURNS = 3;
   var openInNewTabPref = true;
+  var askScreenshotDefault = true; // Options → "@ask screenshot"; sets the home toggle on each open
   var askDebugMode = false;
 
   if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
     chrome.storage.local.get('sfnavOptions', function (data) {
       var opts = (data && data.sfnavOptions) || {};
       if (opts.openInNewTab === false) openInNewTabPref = false;
+      if (opts.askScreenshot === false) askScreenshotDefault = false;
       if (DEV_MODE && opts.debug) askDebugMode = true;
     });
     if (chrome.storage.onChanged && chrome.storage.onChanged.addListener) {
@@ -57,6 +59,7 @@
         if (area !== 'local' || !changes.sfnavOptions) return;
         var next = changes.sfnavOptions.newValue || {};
         openInNewTabPref = next.openInNewTab !== false;
+        askScreenshotDefault = next.askScreenshot !== false;
         if (DEV_MODE) askDebugMode = !!next.debug;
       });
     }
@@ -1361,7 +1364,7 @@
     autoGrowAskTextarea(qEl);
     document.getElementById('sfnav-ask-run').disabled = false;
 
-    askIncludeScreenshot = true;
+    askIncludeScreenshot = askScreenshotDefault;
     renderAskShotToggle();
     refreshAskKeyWarning();
 
