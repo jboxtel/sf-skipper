@@ -146,13 +146,17 @@
               <button id="replayWalkthrough" class="btn bs" type="button">Show walkthrough</button>
             </div>
           </div>
-        </div>
-      </section>
-
-      <section class="sec">
-        <h2 class="sh">Feedback</h2>
-        <p class="sd">Bug reports, feature requests, anything Skipper could do better. Goes straight to the maintainer.</p>
-        <div class="card pad">
+          <!-- Feedback: one row; the form opens inline below it -->
+          <div class="cr">
+            <div class="crt">
+              <div class="rl">Feedback</div>
+              <div class="rd">Bug reports, feature requests, anything Skipper could do better. Goes straight to the maintainer.</div>
+            </div>
+            <div class="crc">
+              <button id="fbToggle" class="btn bs" type="button" aria-expanded="false" aria-controls="fbForm">Write feedback</button>
+            </div>
+          </div>
+          <div class="fbform" id="fbForm" hidden>
           <div class="fg">
             <div>
               <label class="fl" for="fbMessage">Message</label>
@@ -166,6 +170,7 @@
               <button id="fbSend" class="btn bp" type="button">Send feedback</button>
               <span id="fbStatus"></span>
             </div>
+          </div>
           </div>
         </div>
       </section>

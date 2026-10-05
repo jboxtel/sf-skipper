@@ -1004,6 +1004,16 @@ var fbSendEl = document.getElementById('fbSend');
 var fbMessageEl = document.getElementById('fbMessage');
 var fbEmailEl = document.getElementById('fbEmail');
 var fbStatusEl = document.getElementById('fbStatus');
+var fbToggleEl = document.getElementById('fbToggle');
+var fbFormEl = document.getElementById('fbForm');
+
+fbToggleEl.addEventListener('click', function () {
+  var open = fbFormEl.hidden;
+  fbFormEl.hidden = !open;
+  fbToggleEl.setAttribute('aria-expanded', open ? 'true' : 'false');
+  fbToggleEl.textContent = open ? 'Close' : 'Write feedback';
+  if (open) fbMessageEl.focus();
+});
 
 chrome.storage.local.get('sfnavOptions', function (data) {
   var opts = (data && data.sfnavOptions) || {};
