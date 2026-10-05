@@ -1,7 +1,7 @@
 // LLM provider adapters. The rest of the extension speaks Anthropic Messages
 // shape — system / messages (text + image + tool_use + tool_result blocks) /
 // tools / tool_choice. This file translates that shape to/from OpenAI,
-// OpenRouter, and Gemini on the way out and back so the content scripts
+// OpenRouter, Gemini, and the ChatGPT plan (Responses API) on the way out and back so the content scripts
 // (ask.js, shared.js) don't need provider-specific code paths.
 //
 // Loaded by background.js via importScripts.
@@ -12,7 +12,8 @@ var DEFAULT_MODEL = {
   gemini: 'gemini-2.5-flash',
   anthropic: 'claude-haiku-4-5-20251001',
   openai: 'gpt-4.1-mini',
-  openrouter: 'anthropic/claude-haiku-4.5'
+  openrouter: 'anthropic/claude-haiku-4.5',
+  chatgpt: 'gpt-5.6-luna'
 };
 
 // Resolve the active provider + key + model from sfnavOptions, handling the
@@ -43,6 +44,7 @@ function resolveProvider(opts) {
 }
 
 function missingKeyError(providerName) {
+  if (providerName === 'chatgpt') return 'Not signed in to ChatGPT. Open the extension Options and sign in.';
   var label = providerName === 'gemini' ? 'Google'
     : providerName === 'openai' ? 'OpenAI'
     : providerName === 'openrouter' ? 'OpenRouter'
@@ -55,7 +57,8 @@ function missingKeyError(providerName) {
 // Returns Anthropic-shaped { content, stop_reason }.
 async function providerMessageStep(opts, body) {
   var resolved = resolveProvider(opts);
-  if (!resolved.apiKey) throw new Error(missingKeyError(resolved.provider));
+  // The ChatGPT plan has no key — chatgpt-auth.js supplies an OAuth token per call.
+  if (!resolved.apiKey && resolved.provider !== 'chatgpt') throw new Error(missingKeyError(resolved.provider));
   if (!body.model) body.model = resolved.model;
   if (!body.max_tokens) body.max_tokens = 2048;
 
@@ -72,6 +75,7 @@ async function providerMessageStep(opts, body) {
   if (resolved.provider === 'openai')     return callOpenAI(resolved, body);
   if (resolved.provider === 'gemini')     return callGemini(resolved, body);
   if (resolved.provider === 'openrouter') return callOpenRouter(resolved, body);
+  if (resolved.provider === 'chatgpt')    return callChatGPTPlan(resolved, body);
   throw new Error('Unknown provider: ' + resolved.provider);
 }
 
@@ -499,6 +503,185 @@ function geminiToAnthropicResponse(parsed) {
   return { content: content, stop_reason: stop };
 }
 
+// ─── ChatGPT plan (Responses API via Sign in with ChatGPT) ──────────────────
+// Plan-funded requests must stream and must not be stored; they reject
+// role:'system' items (system goes in `instructions`), max_output_tokens and
+// temperature. See developers.openai.com/siwc/token-sharing-open-source.
+
+function anthropicToResponsesInput(messages) {
+  var out = [];
+  (messages || []).forEach(function (m) {
+    var role = m.role === 'assistant' ? 'assistant' : 'user';
+    var textType = role === 'assistant' ? 'output_text' : 'input_text';
+    var blocks = typeof m.content === 'string' ? [{ type: 'text', text: m.content }] : (m.content || []);
+    var parts = [];
+    function flush() {
+      if (parts.length) out.push({ type: 'message', role: role, content: parts });
+      parts = [];
+    }
+    blocks.forEach(function (b) {
+      if (!b) return;
+      if (b.type === 'text') {
+        if (b.text) parts.push({ type: textType, text: b.text });
+      } else if (b.type === 'image') {
+        var src = b.source || {};
+        var url = src.type === 'base64'
+          ? 'data:' + (src.media_type || 'image/jpeg') + ';base64,' + (src.data || '')
+          : (src.url || '');
+        if (url) parts.push({ type: 'input_image', image_url: url });
+      } else if (b.type === 'tool_use') {
+        flush();
+        out.push({ type: 'function_call', call_id: b.id, name: b.name, arguments: JSON.stringify(b.input || {}) });
+      } else if (b.type === 'tool_result') {
+        flush();
+        var c = b.content;
+        if (typeof c !== 'string') {
+          try { c = JSON.stringify(c); } catch (_) { c = String(c); }
+        }
+        out.push({ type: 'function_call_output', call_id: b.tool_use_id, output: c });
+      }
+    });
+    flush();
+  });
+  return out;
+}
+
+function anthropicToolChoiceToResponses(toolChoice) {
+  var oa = anthropicToolChoiceToOpenAI(toolChoice);
+  if (oa && typeof oa === 'object') return { type: 'function', name: oa.function.name };
+  return oa;
+}
+
+var CHATGPT_ERRORS = {
+  subscription_sharing_usage_limit_exceeded: 'Your ChatGPT plan’s usage limit for Skipper is reached. Check ChatGPT Settings → Usage, or try again later.',
+  subscription_sharing_user_not_eligible: 'Using your ChatGPT plan in Skipper needs ChatGPT Plus or Pro.'
+};
+
+function chatgptError(status, err) {
+  var code = err && (err.code || err.type);
+  if (code && CHATGPT_ERRORS[code]) return new Error(CHATGPT_ERRORS[code]);
+  if (status === 403) return new Error(CHATGPT_ERRORS.subscription_sharing_user_not_eligible);
+  return new Error((err && err.message) || ('ChatGPT request failed (HTTP ' + status + ')'));
+}
+
+async function callChatGPTPlan(resolved, body, isRetry) {
+  var reqBody = {
+    model: body.model,
+    input: anthropicToResponsesInput(body.messages),
+    store: false,
+    stream: true,
+    reasoning: { effort: 'low' }
+  };
+  var sys = systemToText(body.system);
+  if (sys) reqBody.instructions = sys;
+  var tools = anthropicToolsToOpenAI(body.tools);
+  if (tools) {
+    reqBody.tools = tools.map(function (t) {
+      return { type: 'function', name: t.function.name, description: t.function.description, parameters: t.function.parameters };
+    });
+  }
+  var tc = anthropicToolChoiceToResponses(body.tool_choice);
+  if (tc != null) reqBody.tool_choice = tc;
+
+  var token = await chatgptAccessToken({ force: !!isRetry });
+  var res = await timedFetch('https://api.openai.com/v1/responses', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'text/event-stream',
+      'Authorization': 'Bearer ' + token
+    },
+    body: JSON.stringify(reqBody)
+  });
+  if (!res.ok) {
+    // An access token can be revoked or expire early — refresh once and retry.
+    if (res.status === 401 && !isRetry) return callChatGPTPlan(resolved, body, true);
+    var raw = await res.text();
+    var parsed;
+    try { parsed = JSON.parse(raw); } catch (_) { parsed = null; }
+    // Plan-usage errors come as { error: {code, message} } or, from the
+    // ChatGPT backend, as { detail: "..." }.
+    throw chatgptError(res.status, (parsed && parsed.error) || { message: (parsed && parsed.detail) || raw });
+  }
+  var final = await readResponsesStream(res);
+  return responsesToAnthropicResponse(final);
+}
+
+// We don't stream into the UI — read SSE to the end. Only a terminal
+// response.completed / .incomplete counts as success. With store:false the
+// terminal event's `output` comes back empty, so the output items are
+// collected from response.output_item.done as they stream past, with the
+// text deltas as a last resort.
+async function readResponsesStream(res) {
+  var reader = res.body.getReader();
+  var decoder = new TextDecoder();
+  var buf = '';
+  var final = null;
+  var items = [];
+  var deltas = '';
+  function handle(chunk) {
+    var data = chunk.split('\n')
+      .filter(function (l) { return l.indexOf('data:') === 0; })
+      .map(function (l) { return l.slice(5).trim(); })
+      .join('\n');
+    if (!data || data === '[DONE]') return;
+    var ev;
+    try { ev = JSON.parse(data); } catch (_) { return; }
+    if (ev.type === 'response.output_item.done' && ev.item) items.push(ev.item);
+    else if (ev.type === 'response.output_text.delta' && typeof ev.delta === 'string') deltas += ev.delta;
+    else if (ev.type === 'response.completed' || ev.type === 'response.incomplete') final = ev.response || {};
+    else if (ev.type === 'response.failed') throw chatgptError(0, ev.response && ev.response.error);
+    else if (ev.type === 'error') throw chatgptError(0, ev.error || ev);
+  }
+  for (;;) {
+    var step = await reader.read();
+    if (step.done) break;
+    buf += decoder.decode(step.value, { stream: true });
+    var idx;
+    while ((idx = buf.indexOf('\n\n')) > -1) {
+      handle(buf.slice(0, idx));
+      buf = buf.slice(idx + 2);
+    }
+  }
+  if (buf.trim()) handle(buf);
+  if (!final) throw new Error('ChatGPT response ended before it finished. Please try again.');
+  if (!(final.output && final.output.length)) {
+    final = Object.assign({}, final, {
+      output: items.length ? items
+        : deltas ? [{ type: 'message', content: [{ type: 'output_text', text: deltas }] }]
+        : []
+    });
+  }
+  return final;
+}
+
+function responsesToAnthropicResponse(resp) {
+  var content = [];
+  var sawToolCall = false;
+  (resp.output || []).forEach(function (item) {
+    if (!item) return;
+    if (item.type === 'message') {
+      (item.content || []).forEach(function (p) {
+        if (p && p.type === 'output_text' && p.text) content.push({ type: 'text', text: p.text });
+      });
+    } else if (item.type === 'function_call') {
+      sawToolCall = true;
+      var input = {};
+      try { input = JSON.parse(item.arguments || '{}'); } catch (_) { input = {}; }
+      content.push({
+        type: 'tool_use',
+        id: item.call_id || item.id || ('call_' + Math.random().toString(36).slice(2, 10)),
+        name: item.name,
+        input: input
+      });
+    }
+  });
+  var stop = sawToolCall ? 'tool_use'
+           : (resp.status === 'incomplete' && resp.incomplete_details && resp.incomplete_details.reason === 'max_output_tokens') ? 'max_tokens'
+           : 'end_turn';
+  return { content: content, stop_reason: stop };
+}
+
 // ─── Shared fetch with timeout ──────────────────────────────────────────────
 
 function timedFetch(url, init) {
@@ -514,7 +697,7 @@ function timedFetch(url, init) {
 // same on a fresh key with no extra perms.
 async function providerTestCall(opts) {
   var resolved = resolveProvider(opts);
-  if (!resolved.apiKey) throw new Error(missingKeyError(resolved.provider));
+  if (!resolved.apiKey && resolved.provider !== 'chatgpt') throw new Error(missingKeyError(resolved.provider));
   var body = {
     model: resolved.model,
     max_tokens: 16,

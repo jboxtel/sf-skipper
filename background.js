@@ -1,6 +1,6 @@
 // LLM provider adapters — translation between Anthropic-shaped requests and
 // OpenAI/Gemini. Loaded as a classic worker so importScripts is available.
-importScripts('providers.js');
+importScripts('providers.js', 'chatgpt-auth.js');
 
 // Look up the `sid` cookie for the requested Salesforce host. Cookie is
 // HttpOnly so the page can't read it directly. If the exact host has no
@@ -203,6 +203,24 @@ async function handleProviderTest(req, sendResponse) {
   }
 }
 
+// Sign in with ChatGPT: sign-in itself runs on the Options page (it waits on
+// the user for minutes); these cover what the page asks the worker for.
+async function handleChatGPT(req, sendResponse) {
+  try {
+    if (req.type === 'chatgpt.signOut') {
+      await chatgptSignOut();
+      sendResponse({ ok: true });
+    } else if (req.type === 'chatgpt.models') {
+      sendResponse({ ok: true, models: await chatgptListModels() });
+    } else {
+      var auth = await chatgptLoadAuth();
+      sendResponse({ ok: true, signedIn: chatgptIsSignedIn(auth), planScope: chatgptHasPlanScope(auth), email: auth.email || '' });
+    }
+  } catch (err) {
+    sendResponse({ ok: false, error: err.message });
+  }
+}
+
 chrome.runtime.onMessage.addListener(function (req, sender, sendResponse) {
   if (!req || !req.type) {
     sendResponse({ ok: false, error: 'Missing message type' });
@@ -226,6 +244,10 @@ chrome.runtime.onMessage.addListener(function (req, sender, sendResponse) {
   }
   if (req.type === 'provider.test') {
     handleProviderTest(req, sendResponse);
+    return true;
+  }
+  if (req.type === 'chatgpt.status' || req.type === 'chatgpt.signOut' || req.type === 'chatgpt.models') {
+    handleChatGPT(req, sendResponse);
     return true;
   }
   if (req.type === 'feedback.submit' && req.payload) {

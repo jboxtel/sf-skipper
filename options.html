@@ -18,19 +18,31 @@
            Screen 1 pick + paste → Screen 2 recognized → Screen 3 connected -->
       <section class="sec">
         <h2 class="sh">AI provider</h2>
-        <p class="sd">@soql, @debug and @ask need a key from an AI provider. Gemini is free to start. Everything else in Skipper works without a key.</p>
+        <p class="sd">@soql, @debug and @ask need an AI provider: sign in with ChatGPT or paste a key. Gemini is free to start. Everything else in Skipper works without one.</p>
         <div class="card pad">
           <!-- The pills always show. A pill with a saved key switches to it on
                click; one without a key opens the paste screen below. -->
           <div class="ppills" id="providerPills" role="radiogroup" aria-label="AI provider">
-            <button type="button" class="ppill" role="radio" aria-checked="false" data-provider="gemini">Gemini <span class="ppill-sub">Google</span></button>
+            <!-- One pill for OpenAI: an API key, or Sign in with ChatGPT -->
+            <button type="button" class="ppill" role="radio" aria-checked="false" data-provider="openai">ChatGPT <span class="ppill-sub">OpenAI</span></button>
             <button type="button" class="ppill" role="radio" aria-checked="false" data-provider="anthropic">Claude <span class="ppill-sub">Anthropic</span></button>
-            <button type="button" class="ppill" role="radio" aria-checked="false" data-provider="openai">GPT <span class="ppill-sub">OpenAI</span></button>
-            <button type="button" class="ppill" role="radio" aria-checked="false" data-provider="openrouter">OpenRouter <span class="ppill-sub">many models</span></button>
+            <button type="button" class="ppill" role="radio" aria-checked="false" data-provider="gemini">Gemini <span class="ppill-sub">Google</span></button>
+            <button type="button" class="ppill" role="radio" aria-checked="false" data-provider="openrouter">OpenRouter</button>
           </div>
 
           <!-- Paste a key for the selected provider -->
           <div class="fscr" id="scr-paste">
+            <!-- OpenAI pill only: use the ChatGPT plan, no key -->
+            <div class="signin" id="chatgptBlock" hidden>
+              <p class="signin-lede">Have ChatGPT Plus or Pro? Sign in and Skipper runs on your plan, with no API key and no separate bill.</p>
+              <div class="actions">
+                <button id="chatgptSignIn" class="btn bp" type="button">Sign in with ChatGPT</button>
+                <span id="signinStatus" class="st"></span>
+              </div>
+              <p class="signin-note">Chrome asks for one permission, then a ChatGPT tab opens; it closes by itself once you approve Skipper. You can cap Skipper’s weekly usage in ChatGPT under Settings → Usage. The free plan isn’t supported.</p>
+              <div class="signin-or"><span>or paste an OpenAI API key</span></div>
+            </div>
+
             <!-- Steps and billing note stay folded away; most people already have a key. -->
             <details class="howto" id="howTo">
               <summary id="howLbl">Don’t have a key yet? Here’s how to get one</summary>
@@ -157,10 +169,11 @@
       </section>
 
       <footer class="foot">
-        API keys and preferences stay in <code>chrome.storage.local</code> on this device and are never synced. Screenshots taken by @ask go to the AI provider you chose and are not stored by Skipper.
+        API keys, ChatGPT sign-ins and preferences stay in <code>chrome.storage.local</code> on this device and are never synced. Screenshots taken by @ask go to the AI provider you chose and are not stored by Skipper.
       </footer>
     </main>
     <script src="shared.js"></script>
+    <script src="chatgpt-auth.js"></script>
     <script src="options.js"></script>
   </body>
 </html>

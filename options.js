@@ -64,7 +64,7 @@ var PROVIDERS = {
   },
   openai: {
     label: 'OpenAI',
-    productName: 'GPT',
+    productName: 'OpenAI',
     badge: 'GPT',
     keyPrefix: 'sk-',
     keyLabel: 'OpenAI API key',
@@ -128,6 +128,25 @@ var PROVIDERS = {
       { id: 'openai/gpt-4.1-mini',                label: 'GPT-4.1 mini' },
       { id: 'google/gemini-2.5-flash',            label: 'Gemini 2.5 Flash' }
     ]
+  },
+  // Sign in with ChatGPT: no key — requests run on the
+  // user's Plus/Pro plan. The sign-in lives in chatgptAuth (chatgpt-auth.js),
+  // not in sfnavOptions; providers.chatgpt only holds the model. It has no
+  // pill of its own: it shares the OpenAI pill with the API key.
+  chatgpt: {
+    label: 'OpenAI',
+    productName: 'ChatGPT',
+    badge: 'CHATGPT',
+    signIn: true,
+    pill: 'openai',
+    defaultModel: 'gpt-5.6-luna',
+    // Seed list; the signed-in account's own list replaces it (loadChatGPTModels).
+    models: [
+      { id: 'gpt-5.6-luna',  label: 'GPT-5.6-Luna (fast, recommended)' },
+      { id: 'gpt-5.6-terra', label: 'GPT-5.6-Terra' },
+      { id: 'gpt-5.6-sol',   label: 'GPT-5.6-Sol' },
+      { id: 'gpt-6-astra',   label: 'GPT-6-Astra (most capable)' }
+    ]
   }
 };
 
@@ -138,6 +157,9 @@ var PROVIDERS = {
 var scrPasteEl    = document.getElementById('scr-paste');
 var scrRecogEl    = document.getElementById('scr-recognized');
 var scrConnEl     = document.getElementById('scr-connected');
+var chatgptBlockEl = document.getElementById('chatgptBlock');
+var signInBtnEl   = document.getElementById('chatgptSignIn');
+var signinStatusEl = document.getElementById('signinStatus');
 var apiKeyEl      = document.getElementById('apiKey');
 var revealEl      = document.getElementById('revealKey');
 var eyeShowEl     = document.getElementById('eyeShow');
@@ -175,8 +197,9 @@ var paletteShortcutChipEl = document.getElementById('paletteShortcutChip');
 
 var state = {
   provider: 'gemini',
-  providers: { gemini: {}, anthropic: {}, openai: {}, openrouter: {} },
-  openInNewTab: true
+  providers: { gemini: {}, anthropic: {}, openai: {}, openrouter: {}, chatgpt: {} },
+  openInNewTab: true,
+  chatgptAuth: {} // stored ChatGPT sign-in (tokens never leave chatgpt-auth.js / the worker)
 };
 
 // The provider pane is a three-screen flow (vsr/gen-4/candidates/w4-repaired.md):
@@ -199,9 +222,10 @@ try {
 
 // ─── Load + migrate stored options ──────────────────────────────────────────
 
-chrome.storage.local.get('sfnavOptions', function (data) {
+chrome.storage.local.get(['sfnavOptions', CHATGPT_AUTH_KEY], function (data) {
   var opts = data.sfnavOptions || {};
-  state.providers = Object.assign({ gemini: {}, anthropic: {}, openai: {}, openrouter: {} }, opts.providers || {});
+  state.providers = Object.assign({ gemini: {}, anthropic: {}, openai: {}, openrouter: {}, chatgpt: {} }, opts.providers || {});
+  state.chatgptAuth = data[CHATGPT_AUTH_KEY] || {};
 
   // Migrate the pre-multi-provider shape: a top-level anthropicApiKey + model
   // become providers.anthropic, and Anthropic becomes the active provider so
@@ -220,7 +244,7 @@ chrome.storage.local.get('sfnavOptions', function (data) {
 
   state.openInNewTab = opts.openInNewTab !== false;
   openInEl.value = state.openInNewTab ? 'new' : 'same';
-  flow.choice = PROVIDERS[state.provider] ? state.provider : 'gemini';
+  flow.choice = PROVIDERS[state.provider] ? pillOf(state.provider) : 'gemini';
   // A saved key for the active provider means we're already set up — open on
   // the Connected screen rather than asking for a key again.
   if (hasSavedKey(state.provider)) flow.mode = 'connected';
@@ -256,7 +280,7 @@ if (paletteShortcutChipEl && typeof sfnavPaletteShortcutParts === 'function') {
 var MATCH_LINES = {
   gemini: "That's a Gemini key (Google).",
   anthropic: "That's a Claude key (Anthropic).",
-  openai: "That's a GPT key (OpenAI).",
+  openai: "That's an OpenAI key.",
   openrouter: "That's an OpenRouter key."
 };
 
@@ -278,6 +302,11 @@ function renderFlow() {
   showScreen(flow.mode);
 }
 
+function setSigninStatus(text, kind) {
+  signinStatusEl.textContent = text || '';
+  signinStatusEl.className = 'st' + (kind ? ' ' + kind : '');
+}
+
 function resetDraft() {
   flow.draft = { key: '', provider: null, manual: false, model: '' };
 }
@@ -290,7 +319,29 @@ function renderPaste() {
   unrecEl.hidden = true;
   pasteStatusEl.textContent = flow.pasteNote ? flow.pasteNote.text : '';
   pasteStatusEl.className = flow.pasteNote ? (flow.pasteNote.kind || '') : '';
+  setSigninStatus('');
+  signInBtnEl.disabled = false;
   renderProviderChoice();
+}
+
+// ─── Pills ──────────────────────────────────────────────────────────────────
+// A pill can stand for more than one provider: the OpenAI pill covers both an
+// OpenAI API key and Sign in with ChatGPT. flow.choice is always a pill name.
+
+function pillOf(name) {
+  return (PROVIDERS[name] && PROVIDERS[name].pill) || name;
+}
+
+function providersOfPill(pill) {
+  return Object.keys(PROVIDERS).filter(function (n) { return pillOf(n) === pill; });
+}
+
+// The provider a pill switches to: the one in use if it's under this pill,
+// else the first one that's set up. Null when nothing under it is set up.
+function savedProviderOfPill(pill) {
+  var family = providersOfPill(pill);
+  if (family.indexOf(state.provider) > -1 && hasSavedKey(state.provider)) return state.provider;
+  return family.filter(hasSavedKey)[0] || null;
 }
 
 // The selected pill is what the screen below shows. The provider in use is
@@ -299,13 +350,13 @@ function renderPills() {
   Array.prototype.forEach.call(pillsEl.querySelectorAll('.ppill'), function (pill) {
     var n = pill.getAttribute('data-provider');
     var on = n === flow.choice;
-    var saved = hasSavedKey(n);
-    var active = saved && n === state.provider;
+    var savedAs = savedProviderOfPill(n);
+    var active = !!savedAs && savedAs === state.provider;
     pill.setAttribute('aria-checked', on ? 'true' : 'false');
     pill.tabIndex = on ? 0 : -1; // roving tabindex: arrows move within the group
     pill.classList.toggle('active', active);
-    pill.classList.toggle('has-key', saved && !active);
-    pill.title = active ? 'In use' : (saved ? 'Key saved — click to use it' : '');
+    pill.classList.toggle('has-key', !!savedAs && !active);
+    pill.title = active ? 'In use' : (savedAs ? (PROVIDERS[savedAs].signIn ? 'Signed in' : 'Key saved') + ' — click to use it' : '');
   });
 }
 
@@ -314,19 +365,28 @@ function renderPills() {
 function renderProviderChoice() {
   var name = flow.choice;
   var p = PROVIDERS[name];
-  keepKeyEl.hidden = !hasSavedKey(name);
-  howLblEl.textContent = 'Don’t have ' + (/^[AEIOU]/.test(p.productName) ? 'an ' : 'a ') +
-    p.productName + ' key yet? Here’s how to get one';
+  chatgptBlockEl.hidden = name !== 'openai';
+  keepKeyEl.hidden = !savedProviderOfPill(name);
+  howLblEl.textContent = 'Don’t have ' + aKey(p) + ' yet? Here’s how to get one';
   stepsEl.innerHTML = p.steps(function (text, href) {
     return '<a href="' + href + '" target="_blank" rel="noopener">' + esc(text) + '</a>';
   }).map(function (step) { return '<li><span>' + step + '</span></li>'; }).join('');
   noteEl.textContent = p.note;
   apiKeyLabelEl.textContent = 'Paste your ' + p.productName + ' key';
   apiKeyEl.placeholder = 'Starts with ' + p.keyPrefix + '…';
-  useAnywayEl.textContent = 'Use it as a ' + p.productName + ' key anyway';
+  useAnywayEl.textContent = 'Use it as ' + aKey(p) + ' anyway';
+}
+
+// For ChatGPT "saved key" means signed in with plan usage approved.
+// "a Gemini key", "an OpenAI key".
+function aKey(p) {
+  return (/^[AEIOU]/.test(p.productName) ? 'an ' : 'a ') + p.productName + ' key';
 }
 
 function hasSavedKey(name) {
+  if (PROVIDERS[name] && PROVIDERS[name].signIn) {
+    return chatgptIsSignedIn(state.chatgptAuth) && chatgptHasPlanScope(state.chatgptAuth);
+  }
   return !!(state.providers[name] && state.providers[name].apiKey);
 }
 
@@ -335,9 +395,10 @@ function hasSavedKey(name) {
 // the paste screen, keeping any half-typed key.
 function selectProvider(name, focus) {
   if (!PROVIDERS[name]) return;
-  if (hasSavedKey(name)) {
-    if (name === state.provider && flow.mode === 'connected') return;
-    activateProvider(name);
+  var saved = savedProviderOfPill(name);
+  if (saved) {
+    if (saved === state.provider && flow.mode === 'connected') return;
+    activateProvider(saved);
   } else {
     if (name === flow.choice && flow.mode === 'paste') return;
     flow.choice = name;
@@ -356,7 +417,7 @@ function selectProvider(name, focus) {
 }
 
 function activateProvider(name) {
-  flow.choice = name;
+  flow.choice = pillOf(name);
   if (name !== state.provider) {
     state.provider = name;
     mergeOptions({ provider: name });
@@ -385,7 +446,7 @@ function handleKeyInput() {
     return;
   }
   var p = PROVIDERS[flow.choice];
-  unrecMsgEl.textContent = 'This doesn’t look like a ' + p.productName + ' key — those start with ' +
+  unrecMsgEl.textContent = 'This doesn’t look like ' + aKey(p) + ' — those start with ' +
     p.keyPrefix + '. Check you copied the whole key.';
   unrecEl.hidden = v.length < 16;
 }
@@ -411,20 +472,22 @@ function renderRecognized() {
   var name = flow.draft.provider;
   var p = PROVIDERS[name];
   if (flow.draft.manual) {
-    matchLineEl.textContent = 'You named this a ' + p.productName + ' key (' + p.label + '). Skipper could not confirm it from the prefix.';
+    matchLineEl.textContent = 'You named this ' + aKey(p) + (p.label !== p.productName ? ' (' + p.label + ')' : '') + '. Skipper could not confirm it from the prefix.';
   } else {
     matchLineEl.textContent = MATCH_LINES[name];
   }
   keyPreviewEl.textContent = maskPreview(flow.draft.key);
 
-  // If another provider already has a working key, say so — replacing a key
-  // must never silently drop it.
-  var others = ['gemini', 'anthropic', 'openai', 'openrouter'].filter(function (n) {
-    return n !== name && state.providers[n] && state.providers[n].apiKey;
+  // If another provider is already set up, say so — replacing a key must
+  // never silently drop it.
+  var others = Object.keys(PROVIDERS).filter(function (n) {
+    return n !== name && hasSavedKey(n);
   });
   var prevActive = others.indexOf(state.provider) > -1 ? state.provider : others[0];
   if (prevActive) {
-    keptKeyEl.textContent = 'Your ' + PROVIDERS[prevActive].productName + ' key is kept.';
+    keptKeyEl.textContent = PROVIDERS[prevActive].signIn
+      ? 'You stay signed in to ' + PROVIDERS[prevActive].productName + '.'
+      : 'Your ' + PROVIDERS[prevActive].productName + ' key is kept.';
     keptKeyEl.hidden = false;
   } else {
     keptKeyEl.hidden = true;
@@ -437,7 +500,13 @@ function renderRecognized() {
 function renderConnected() {
   var name = state.provider;
   var stored = state.providers[name] || {};
-  connKeyEl.textContent = maskConnected(stored.apiKey || '');
+  var signIn = !!PROVIDERS[name].signIn;
+  connKeyEl.textContent = signIn
+    ? 'Signed in as ' + (state.chatgptAuth.email || 'your ChatGPT account')
+    : maskConnected(stored.apiKey || '');
+  connKeyEl.classList.toggle('conn-who', signIn);
+  replaceKeyEl.textContent = signIn ? 'Use an API key instead' : 'Use a different key';
+  removeKeyEl.textContent = signIn ? 'Sign out' : 'Remove key';
   setModelStatus('', '');
   renderConnectedModels(name);
 }
@@ -605,6 +674,13 @@ function renderConnectedModels(providerName) {
   var p = PROVIDERS[providerName];
   var selected = (state.providers[providerName] && state.providers[providerName].model) || p.defaultModel;
   var req = ++modelReq;
+  if (p.signIn) {
+    fillModelSelectInto(connModelEl, chatgptModels || p.models, selected);
+    loadChatGPTModels().then(function (list) {
+      if (req === modelReq && list) fillModelSelectInto(connModelEl, list, selected);
+    });
+    return;
+  }
   if (!p.dynamicModels) {
     fillModelSelectInto(connModelEl, p.models, selected);
     return;
@@ -614,6 +690,37 @@ function renderConnectedModels(providerName) {
     if (req !== modelReq) return;
     if (list) fillModelSelectInto(connModelEl, list, selected);
     // Catalogue unreachable: the short offline list stays selectable.
+  });
+}
+
+// The models a ChatGPT account may use come from /v1/models with the user's
+// token. Each entry carries a large Codex prompt, so only id + label are kept,
+// cached for a day. The worker fetches it so token refreshes stay in one place.
+var CHATGPT_MODELS_KEY = 'sfnavChatgptModels';
+var chatgptModels = null;
+
+function loadChatGPTModels() {
+  if (chatgptModels) return Promise.resolve(chatgptModels);
+  return new Promise(function (resolve) {
+    chrome.storage.local.get(CHATGPT_MODELS_KEY, function (data) {
+      var cached = (data && data[CHATGPT_MODELS_KEY]) || null;
+      if (cached && cached.models && cached.models.length && (Date.now() - cached.fetchedAt) < OR_MODELS_TTL) {
+        chatgptModels = cached.models;
+        resolve(chatgptModels);
+        return;
+      }
+      chrome.runtime.sendMessage({ type: 'chatgpt.models' }, function (resp) {
+        if (chrome.runtime.lastError || !resp || !resp.ok || !resp.models || !resp.models.length) {
+          resolve(cached && cached.models && cached.models.length ? cached.models : null);
+          return;
+        }
+        chatgptModels = resp.models;
+        var store = {};
+        store[CHATGPT_MODELS_KEY] = { fetchedAt: Date.now(), models: chatgptModels };
+        chrome.storage.local.set(store);
+        resolve(chatgptModels);
+      });
+    });
   });
 }
 
@@ -639,7 +746,8 @@ apiKeyEl.addEventListener('input', handleKeyInput);
 // Back out of pasting a replacement for a provider that already has a key.
 keepKeyLinkEl.addEventListener('click', function (e) {
   e.preventDefault();
-  activateProvider(flow.choice);
+  var saved = savedProviderOfPill(flow.choice);
+  if (saved) activateProvider(saved);
 });
 
 useAnywayEl.addEventListener('click', function () {
@@ -654,7 +762,9 @@ pillsEl.addEventListener('click', function (e) {
 });
 
 pillsEl.addEventListener('keydown', function (e) {
-  var order = Object.keys(PROVIDERS);
+  var order = Array.prototype.map.call(pillsEl.querySelectorAll('.ppill'), function (p) {
+    return p.getAttribute('data-provider');
+  });
   var i = order.indexOf(flow.choice);
   if (e.key === 'ArrowRight' || e.key === 'ArrowDown') i = (i + 1) % order.length;
   else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') i = (i + order.length - 1) % order.length;
@@ -747,12 +857,94 @@ replaceKeyEl.addEventListener('click', function (e) {
 
 removeKeyEl.addEventListener('click', function (e) {
   e.preventDefault();
+  if (PROVIDERS[state.provider].signIn) {
+    signOutChatGPT().then(function () {
+      flow.pasteNote = { text: 'Signed out. @soql, @debug and @ask won\'t respond until you sign in again or pick another provider.', kind: 'ok' };
+      flow.mode = 'paste';
+      renderFlow();
+    });
+    return;
+  }
   delete state.providers[state.provider].apiKey;
   mergeOptions({ providers: state.providers });
   resetDraft();
   flow.pasteNote = { text: 'Key removed. @soql, @debug and @ask won\'t respond until you add one.', kind: 'ok' };
   flow.mode = 'paste';
   renderFlow();
+});
+
+// ─── Sign in with ChatGPT ───────────────────────────────────────────────────
+// Sign in (opens a ChatGPT tab), then the same one-word test as Save and test.
+// Only a passing test makes ChatGPT the active provider; any failure after
+// sign-in signs out again, so a Free account or a denied plan permission
+// never leaves a half-connected provider behind.
+
+function signOutChatGPT() {
+  return new Promise(function (resolve) {
+    chrome.runtime.sendMessage({ type: 'chatgpt.signOut' }, function () {
+      void chrome.runtime.lastError;
+      chatgptLoadAuth().then(function (auth) { state.chatgptAuth = auth; resolve(); });
+    });
+  });
+}
+
+function testProvider(opts) {
+  return new Promise(function (resolve, reject) {
+    chrome.runtime.sendMessage({ type: 'provider.test', opts: opts }, function (resp) {
+      if (chrome.runtime.lastError) { reject(new Error(chrome.runtime.lastError.message)); return; }
+      if (!resp) { reject(new Error('No response from background')); return; }
+      if (!resp.ok) { reject(new Error(resp.error)); return; }
+      resolve(resp);
+    });
+  });
+}
+
+signInBtnEl.addEventListener('click', function () {
+  flow.pasteNote = null;
+  signInBtnEl.disabled = true;
+  setSigninStatus('Waiting for you to sign in to ChatGPT in the new tab…', 'loading');
+  var signedIn = false;
+  var patched = {};
+  Object.keys(state.providers).forEach(function (n) { patched[n] = Object.assign({}, state.providers[n]); });
+  patched.chatgpt.model = patched.chatgpt.model || PROVIDERS.chatgpt.defaultModel;
+
+  chatgptSignIn().then(function (auth) {
+    signedIn = true;
+    if (!chatgptHasPlanScope(auth)) {
+      throw new Error('You signed in, but Skipper wasn’t allowed to use your ChatGPT plan. Sign in again and approve it.');
+    }
+    state.chatgptAuth = auth;
+    setSigninStatus('Testing…', 'loading');
+    return testProvider({ provider: 'chatgpt', providers: patched, openInNewTab: state.openInNewTab });
+  }).then(function () {
+    state.providers = patched;
+    state.provider = 'chatgpt';
+    mergeOptions({ provider: 'chatgpt', providers: patched });
+    flow.choice = 'openai';
+    flow.mode = 'connected';
+    renderFlow();
+  }).catch(function (err) {
+    var msg = err && err.message || String(err);
+    if (NETWORK_ERR_RE.test(msg)) msg = 'Could not reach ChatGPT. Check your connection and try again.';
+    (signedIn ? signOutChatGPT() : Promise.resolve()).then(function () {
+      renderPills();
+      signInBtnEl.disabled = false;
+      setSigninStatus(msg, 'err');
+    });
+  });
+});
+
+// The worker clears the sign-in if ChatGPT revokes it — keep the page
+// honest while it's open.
+chrome.storage.onChanged.addListener(function (changes, area) {
+  if (area !== 'local' || !changes[CHATGPT_AUTH_KEY]) return;
+  state.chatgptAuth = changes[CHATGPT_AUTH_KEY].newValue || {};
+  if (state.provider === 'chatgpt' && flow.mode === 'connected' && !hasSavedKey('chatgpt')) {
+    flow.mode = 'paste';
+    renderFlow();
+  } else {
+    renderPills();
+  }
 });
 
 replayEl.addEventListener('click', async function () {

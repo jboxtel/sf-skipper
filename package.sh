@@ -22,6 +22,7 @@ FILES=(
   # Background + provider adapters
   background.js
   providers.js
+  chatgpt-auth.js
 
   # Action popup
   popup.html

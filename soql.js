@@ -2150,14 +2150,14 @@ function addToSoqlHistory(entry) {
 function hasSoqlApiKey() {
   return new Promise(function (resolve) {
     if (typeof chrome === 'undefined' || !chrome.storage) { resolve(false); return; }
-    chrome.storage.local.get('sfnavOptions', function (data) {
+    chrome.storage.local.get(['sfnavOptions', 'chatgptAuth'], function (data) {
       var opts = data.sfnavOptions || {};
       // Legacy single-provider shape (top-level anthropicApiKey) still counts —
       // those users haven't migrated until they next open the Options page.
       if (opts.anthropicApiKey) { resolve(true); return; }
       var active = opts.provider || 'gemini';
       var p = (opts.providers && opts.providers[active]) || {};
-      resolve(!!p.apiKey);
+      resolve(active === 'chatgpt' ? hasChatGPTSignIn(data) : !!p.apiKey);
     });
   });
 }
@@ -2165,12 +2165,18 @@ function hasSoqlApiKey() {
 // Which provider (and model, when one was picked) the AI features will use —
 // for the "Using OpenRouter · z-ai/glm-5.3" line in the palette. Resolves to
 // null when there's no key. Mirrors the shape hasSoqlApiKey reads.
-var SOQL_PROVIDER_LABELS = { gemini: 'Gemini', anthropic: 'Claude', openai: 'GPT', openrouter: 'OpenRouter' };
+var SOQL_PROVIDER_LABELS = { gemini: 'Gemini', anthropic: 'Claude', openai: 'OpenAI', openrouter: 'OpenRouter', chatgpt: 'ChatGPT' };
+
+// The ChatGPT plan has no key: being set up means a stored sign-in
+// (chatgpt-auth.js keeps it under chatgptAuth, separate from sfnavOptions).
+function hasChatGPTSignIn(data) {
+  return !!(data && data.chatgptAuth && data.chatgptAuth.refreshToken);
+}
 
 function getActiveProviderSummary() {
   return new Promise(function (resolve) {
     if (typeof chrome === 'undefined' || !chrome.storage) { resolve(null); return; }
-    chrome.storage.local.get('sfnavOptions', function (data) {
+    chrome.storage.local.get(['sfnavOptions', 'chatgptAuth'], function (data) {
       var opts = data.sfnavOptions || {};
       if (!opts.provider && opts.anthropicApiKey) {
         resolve({ label: 'Claude', model: opts.model || '' });
@@ -2178,7 +2184,8 @@ function getActiveProviderSummary() {
       }
       var active = opts.provider || 'gemini';
       var p = (opts.providers && opts.providers[active]) || {};
-      resolve(p.apiKey ? { label: SOQL_PROVIDER_LABELS[active] || active, model: p.model || '' } : null);
+      var ready = active === 'chatgpt' ? hasChatGPTSignIn(data) : !!p.apiKey;
+      resolve(ready ? { label: SOQL_PROVIDER_LABELS[active] || active, model: p.model || '' } : null);
     });
   });
 }

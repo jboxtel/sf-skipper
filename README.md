@@ -17,7 +17,7 @@ Salesforce developers, consultants, and admins, especially anyone who hops betwe
 ## Install browser extension
 
 1. Install from the [Chrome Web Store](https://chromewebstore.google.com/detail/skipper-for-salesforce/gjgleklcolffnmdaededpmcolieodmpc)
-2. (For the AI assistants) Right-click the extension icon → **Options** → pick a provider (Gemini, Claude, GPT, or OpenRouter) and paste your API key. Gemini has a free tier; the others are pay-as-you-go directly by the provider.
+2. (For the AI assistants) Right-click the extension icon → **Options** → pick a provider (ChatGPT/OpenAI, Claude, Gemini, or OpenRouter) and paste your API key. Gemini has a free tier; the others are pay-as-you-go directly by the provider. With ChatGPT Plus or Pro you can instead sign in with ChatGPT and skip the key.
 
 ## Local development
 
@@ -46,7 +46,7 @@ Three AI features. Each one grounds the model in your org before answering:
 
 All three are strictly read-only, and **you own the outcome**: Skipper hands you a query, an analysis, or a suggested fix — you decide whether to act on it. 
 
-Bring your own provider key — **Gemini**, **Claude**, **GPT**, or **OpenRouter**, chosen in Options. Your key is stored locally in this browser; prompts go directly to the provider you picked.
+Bring your own provider key — **ChatGPT/OpenAI**, **Claude**, **Gemini**, or **OpenRouter**, chosen in Options — or sign in with ChatGPT and use your Plus or Pro plan. Your key is stored locally in this browser; prompts go directly to the provider you picked.
 
 ### `@ask` — Page Assistant
 
@@ -121,11 +121,11 @@ Full policy in [PRIVACY.md](PRIVACY.md). Short version:
 **There is no backend.** No server, no analytics, no telemetry. Your data stays in your browser. The only outbound traffic this extension produces is:
 
 - Calls to your own Salesforce org — the same REST and Tooling APIs the UI you're using already calls.
-- Calls to your chosen AI provider (`generativelanguage.googleapis.com` for Gemini, `api.anthropic.com` for Claude, `api.openai.com` for GPT, or `openrouter.ai` for OpenRouter), but **only** when you actively use an AI feature and **only** if you've configured a key for that provider. If you never set a key, no data ever leaves your browser to any AI provider.
+- Calls to your chosen AI provider (`generativelanguage.googleapis.com` for Gemini, `api.anthropic.com` for Claude, `api.openai.com` for OpenAI, or `openrouter.ai` for OpenRouter; plus `auth.openai.com` if you sign in with ChatGPT), but **only** when you actively use an AI feature and **only** if you've configured a key or sign-in for that provider. If you never set a key, no data ever leaves your browser to any AI provider.
 
-When you do use an AI feature, the prompt — and for `@debug` the flow metadata, for `@ask` the page screenshot plus any tool-call results — is sent to the provider you selected under your own API key, subject to that provider's terms. None of it passes through infrastructure I control.
+When you do use an AI feature, the prompt — and for `@debug` the flow metadata, for `@ask` the page screenshot plus any tool-call results — is sent to the provider you selected under your own API key or ChatGPT sign-in, subject to that provider's terms. None of it passes through infrastructure I control.
 
-Your API key is stored in `chrome.storage.local` (local to this browser profile, not synced) and is read by the extension's service worker, not by page scripts — so it never lands in a context where a third-party script on the Salesforce page could see it.
+Your API key or ChatGPT sign-in is stored in `chrome.storage.local` (local to this browser profile, not synced) and is read by the extension's service worker, not by page scripts — so it never lands in a context where a third-party script on the Salesforce page could see it.
 
 ## Permissions
 
@@ -136,13 +136,15 @@ Your API key is stored in `chrome.storage.local` (local to this browser profile,
 | `scripting` + `activeTab` | Inject the palette UI into the active Salesforce tab when you press the shortcut. |
 | `host_permissions` (Salesforce hosts) | Call the Salesforce REST and Tooling APIs against the org you're already logged into. |
 | `host_permissions` (AI providers) | Call the provider you selected when you use `@soql`, `@debug`, or `@ask`. Traffic only goes to the provider you have a key for. |
+| Optional `http://127.0.0.1/*` | Asked for only when you sign in with ChatGPT: OpenAI returns the sign-in to a local address, and Skipper reads it from the sign-in tab. |
 
 ## Architecture
 
 ```
 manifest.json          Manifest v3 declaration (see content_scripts.js for the canonical load order)
 background.js          Service worker: session cookie lookup, screenshot capture, AI provider proxy
-providers.js           Anthropic <-> Gemini/OpenAI/OpenRouter adapter so content scripts stay provider-agnostic
+providers.js           Anthropic <-> Gemini/OpenAI/OpenRouter/ChatGPT-plan adapter so content scripts stay provider-agnostic
+chatgpt-auth.js        Sign in with ChatGPT: OAuth sign-in, token refresh, sign-out
 content scripts        Palette UI, command resolution, per-org caches (objects, flows, apps, labels,
                        permission sets, custom metadata types) and the three AI features
                        (@soql, @debug, @ask), the @export query runner, and the read-only
@@ -162,7 +164,7 @@ Skipper acts as your logged-in user, so it can only see what your profile alread
 
 ### Why bring-your-own-key?
 
-Two reasons. Your prompts, screenshots, and tool-call results never pass through infrastructure I control — they go straight from your browser to the provider under your own account, subject to whatever DPA you already have with them. And it lets you pick the provider (Gemini, Claude, GPT, or OpenRouter) that your team's policy or budget already approves; you're not locked into mine.
+Two reasons. Your prompts, screenshots, and tool-call results never pass through infrastructure I control — they go straight from your browser to the provider under your own account, subject to whatever DPA you already have with them. And it lets you pick the provider (ChatGPT/OpenAI, Claude, Gemini, or OpenRouter) that your team's policy or budget already approves; you're not locked into mine.
 
 ### Why strictly read-only?
 

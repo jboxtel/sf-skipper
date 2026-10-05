@@ -1,6 +1,6 @@
 # Privacy Policy — Skipper for Salesforce
 
-_Last updated: 2026-10-01_
+_Last updated: 2026-10-05_
 
 Skipper for Salesforce ("the extension") is a Chrome extension that adds a keyboard command palette to Salesforce, plus three optional AI assistants. This document describes what data the extension touches, where it goes, and what we (don't) do with it.
 
@@ -8,7 +8,7 @@ Skipper for Salesforce ("the extension") is a Chrome extension that adds a keybo
 
 - **No backend for the palette or AI features.** Those have no server of ours in the path — no analytics, no telemetry, no usage tracking. The one exception is the optional feedback form: if you choose to submit feedback, your message is sent to a backend we control (see "Feedback you submit" below).
 - **Destinations.** Network traffic only ever goes to (a) the Salesforce org you are already signed into, (b) the AI provider you yourself configure, and (c) — only when you submit the feedback form — our feedback backend. Nothing else.
-- **Local storage only.** Your API key, settings, and the small per-org caches stay in `chrome.storage.local` on your machine. Not synced, not uploaded.
+- **Local storage only.** Your API key or ChatGPT sign-in, settings, and the small per-org caches stay in `chrome.storage.local` on your machine. Not synced, not uploaded.
 - **Read-only on Salesforce.** Hard-enforced in code: only `GET` requests against a small allowlist of read endpoints. No DML, no anonymous Apex, no metadata writes.
 
 ## Data the extension reads
@@ -30,16 +30,19 @@ When you run a query in `@export`, the rows Salesforce returns are shown in the 
 ### Your AI provider API key
 When you configure an AI provider in the Options page, the API key you paste is stored in `chrome.storage.local`. It is read by the extension's service worker (not by content scripts on the Salesforce page), and sent only as an authentication header to the provider you selected. It is never synced across browsers, never uploaded to any third party, never logged.
 
+### Your ChatGPT sign-in (optional)
+Instead of an OpenAI API key, you can choose **Sign in with ChatGPT** in Options. Skipper then runs on your ChatGPT Plus or Pro plan. Signing in happens on OpenAI's own page in a normal browser tab; Skipper never sees your ChatGPT password. What Skipper keeps, in `chrome.storage.local`, is the sign-in OpenAI hands back: an access token, a refresh token, the account email and ID, and the client ID OpenAI registers for this browser. These are sent only to OpenAI (`auth.openai.com` to sign in, renew and sign out; `api.openai.com` for your AI requests). They are never synced and never sent anywhere else. **Sign out** in Options revokes the sign-in at OpenAI and deletes the tokens. You can also disconnect Skipper in ChatGPT under Settings → Security and login → Login connections, and cap its usage under Settings → Usage.
+
 ### Your AI prompts and (for @ask) screenshots
 When you use an AI feature, the following is sent to the AI provider you selected:
 - **`@soql`** — your natural-language request, the target object's describe (field names, types, picklist values), and a small set of recent SOQL prompts kept for history.
 - **`@debug`** — the debug output you pasted, your optional "what I expected" note, and the flow's metadata fetched from the Tooling API.
 - **`@ask`** — a screenshot of your current Salesforce browser tab, the URL context, and any tool-call results the model fetches from your org (read-only SOQL rows, sObject describes, Apex/Flow bodies, field-history rows).
 
-This data is transmitted directly from your browser to your chosen provider's API under your own API key, subject to that provider's privacy policy and terms:
+This data is transmitted directly from your browser to your chosen provider's API under your own API key or ChatGPT sign-in, subject to that provider's privacy policy and terms:
 - Gemini (Google): https://ai.google.dev/terms
 - Claude (Anthropic): https://www.anthropic.com/legal/privacy
-- GPT (OpenAI): https://openai.com/policies/privacy-policy
+- ChatGPT / OpenAI API: https://openai.com/policies/privacy-policy
 - OpenRouter: https://openrouter.ai/privacy — OpenRouter itself routes the request to the underlying model vendor you pick in Options, subject to that vendor's own terms in addition to OpenRouter's.
 
 The extension's developer has no access to this traffic, no copy of your prompts, and no relationship with the provider on your behalf.
@@ -61,7 +64,7 @@ This is the only data the extension ever sends to a server we control, and only 
 - Does **not** track which features you use, which orgs you connect to, or what queries you run.
 - Does **not** read or transmit any content from non-Salesforce tabs. Content scripts only load on Salesforce hosts (declared in `manifest.json` `content_scripts.matches`).
 - Does **not** make writes to your Salesforce org. The extension's transport layer (`sfFetch` / `askFetch`) hard-rejects any non-`GET` request and any request body before the call leaves the browser.
-- Does **not** sync your API key or settings across browsers. `chrome.storage.local` is local to this browser profile only.
+- Does **not** sync your API key, ChatGPT sign-in or settings across browsers. `chrome.storage.local` is local to this browser profile only.
 
 ## Permissions and why
 
@@ -72,6 +75,7 @@ This is the only data the extension ever sends to a server we control, and only 
 | `scripting` + `activeTab` | Inject the palette UI into the active Salesforce tab when you press the keyboard shortcut. |
 | `host_permissions` for Salesforce hosts (`*.lightning.force.com`, `*.my.salesforce.com`, etc.) | Make read-only REST and Tooling API requests against the org you're using. |
 | `host_permissions` for `generativelanguage.googleapis.com`, `api.anthropic.com`, `api.openai.com` | Send your AI prompt (and, for `@ask`, a screenshot of your current Salesforce tab) to whichever provider you selected and configured a key for. Traffic only goes to providers you have explicitly configured. OpenRouter (`openrouter.ai`) needs no extra permission: its API accepts requests from browser extensions directly, and the same rule applies — Skipper only contacts it if you configured an OpenRouter key. |
+| Optional: `http://127.0.0.1/*` | Only requested when you click **Sign in with ChatGPT**. OpenAI returns the sign-in to a local `127.0.0.1` address; this permission lets Skipper read that one address from the sign-in tab, then close it. Nothing listens on that address and no data is sent to it. `auth.openai.com` needs no extra permission, for the same reason as OpenRouter. |
 | `host_permissions` for `bdfndqbnuganvfdgtvcg.supabase.co` | Deliver the optional feedback form to our backend, only when you submit it. No other traffic goes to this host. |
 
 ## Data retention
