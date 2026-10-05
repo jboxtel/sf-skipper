@@ -71,7 +71,7 @@ This is the only data the extension ever sends to a server we control, and only 
 | `storage` | Cache object/flow/app/label metadata, SOQL history, and store your AI provider choice + API key locally. |
 | `scripting` + `activeTab` | Inject the palette UI into the active Salesforce tab when you press the keyboard shortcut. |
 | `host_permissions` for Salesforce hosts (`*.lightning.force.com`, `*.my.salesforce.com`, etc.) | Make read-only REST and Tooling API requests against the org you're using. |
-| `host_permissions` for `generativelanguage.googleapis.com`, `api.anthropic.com`, `api.openai.com`, `openrouter.ai` | Send your AI prompt (and, for `@ask`, a screenshot of your current Salesforce tab) to whichever provider you selected and configured a key for. Traffic only goes to providers you have explicitly configured. |
+| `host_permissions` for `generativelanguage.googleapis.com`, `api.anthropic.com`, `api.openai.com` | Send your AI prompt (and, for `@ask`, a screenshot of your current Salesforce tab) to whichever provider you selected and configured a key for. Traffic only goes to providers you have explicitly configured. OpenRouter (`openrouter.ai`) needs no extra permission: its API accepts requests from browser extensions directly, and the same rule applies — Skipper only contacts it if you configured an OpenRouter key. |
 | `host_permissions` for `bdfndqbnuganvfdgtvcg.supabase.co` | Deliver the optional feedback form to our backend, only when you submit it. No other traffic goes to this host. |
 
 ## Data retention

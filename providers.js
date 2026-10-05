@@ -274,6 +274,13 @@ async function callOpenAI(resolved, body) {
 // OpenRouter's app-attribution headers are optional (used for their public
 // model-usage rankings, not for auth) but cost nothing to send.
 //
+// Deliberately NOT in manifest host_permissions: OpenRouter's API answers
+// CORS for any origin (Access-Control-Allow-Origin: *, and it allows the
+// Authorization / HTTP-Referer / X-Title headers), so the service worker and
+// Options page can call it without one. Adding a new host permission makes
+// Chrome disable the extension on update until every user re-approves it —
+// that's why 1.1.2 was rolled back. Keep it out.
+//
 // Reasoning: OpenRouter fronts models that always think (GLM, DeepSeek R1,
 // o-series…). Ask for low effort and leave the reasoning text out of the
 // response — we never read it — and give a little more room, since thinking
