@@ -168,6 +168,7 @@ var unrecEl       = document.getElementById('unrecognized');
 var unrecMsgEl    = document.getElementById('unrecMsg');
 var useAnywayEl   = document.getElementById('useAnyway');
 var pillsEl       = document.getElementById('providerPills');
+var usingNoteEl   = document.getElementById('usingNote');
 var howLblEl      = document.getElementById('howLbl');
 var stepsEl       = document.getElementById('providerSteps');
 var noteEl        = document.getElementById('providerNote');
@@ -358,6 +359,35 @@ function renderPills() {
     pill.classList.toggle('has-key', !!savedAs && !active);
     pill.title = active ? 'In use' : (savedAs ? (PROVIDERS[savedAs].signIn ? 'Signed in' : 'Key saved') + ' — click to use it' : '');
   });
+  renderUsingNote();
+}
+
+// While setting up another provider, say which one Skipper still uses and
+// when that changes — otherwise the selected pill and the green dot look
+// like two selections.
+function renderUsingNote() {
+  var inUse = hasSavedKey(state.provider) ? state.provider : null;
+  var next, how;
+  if (!inUse || flow.mode === 'connected') {
+    next = null;
+  } else if (flow.mode === 'recognized') {
+    // A pasted key names its provider exactly — compare providers, not pills.
+    if (flow.draft.provider !== inUse) {
+      next = PROVIDERS[flow.draft.provider].productName;
+      how = 'once this key passes the test';
+    }
+  } else if (pillOf(inUse) !== flow.choice) {
+    next = flow.choice === 'openai' ? 'ChatGPT or OpenAI' : PROVIDERS[flow.choice].productName;
+    how = flow.choice === 'openai' ? 'once you sign in or save a working key' : 'once you save a working key';
+  } else if (PROVIDERS[inUse].signIn) {
+    // "Use an API key instead": same pill, signed in, about to paste a key.
+    next = 'an OpenAI key';
+    how = 'once you save one that works';
+  }
+  usingNoteEl.hidden = !next;
+  if (!next) return;
+  usingNoteEl.innerHTML = '<span>Skipper is using <strong>' + esc(PROVIDERS[inUse].productName) + '</strong>. ' +
+    'It switches to ' + esc(next) + ' ' + how + '.</span>';
 }
 
 // Everything on the paste screen that depends on the selected pill. Kept

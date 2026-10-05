@@ -302,6 +302,11 @@ select:disabled { cursor: default; opacity: .6; }
 }
 .ppill.active[aria-checked="true"] .ppill-sub { color: var(--sf-success); }
 
+/* "Skipper is using X" under the pills, dot matches the in-use pill */
+.using { display: flex; align-items: baseline; gap: 7px; margin-top: 10px; font-size: 12px; color: var(--sf-ink-soft); }
+.using::before { content: ''; width: 6px; height: 6px; flex-shrink: 0; align-self: center; border-radius: 50%; background: var(--sf-success); }
+.using strong { font-weight: 600; color: var(--sf-ink); }
+
 /* Folded "how to get a key" steps */
 .howto summary {
   display: inline-flex;
