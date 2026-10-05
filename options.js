@@ -135,7 +135,6 @@ var PROVIDERS = {
 
 // ─── DOM refs (provider flow: paste → recognized → connected) ───────────────
 
-var navEl         = document.getElementById('nav');
 var scrPasteEl    = document.getElementById('scr-paste');
 var scrRecogEl    = document.getElementById('scr-recognized');
 var scrConnEl     = document.getElementById('scr-connected');
@@ -151,9 +150,8 @@ var howLblEl      = document.getElementById('howLbl');
 var stepsEl       = document.getElementById('providerSteps');
 var noteEl        = document.getElementById('providerNote');
 var apiKeyLabelEl = document.getElementById('apiKeyLabel');
-var savedKeyEl    = document.getElementById('savedKey');
-var savedKeyTextEl = document.getElementById('savedKeyText');
-var useSavedKeyEl = document.getElementById('useSavedKey');
+var keepKeyEl     = document.getElementById('keepKey');
+var keepKeyLinkEl = document.getElementById('keepKeyLink');
 var pasteStatusEl = document.getElementById('pasteStatus');
 var matchLineEl   = document.getElementById('matchLine');
 var keyPreviewEl  = document.getElementById('keyPreview');
@@ -164,9 +162,7 @@ var modelFilterEl = document.getElementById('modelFilter');
 var modelHintEl   = document.getElementById('modelHint');
 var saveEl        = document.getElementById('save');
 var statusEl      = document.getElementById('status');
-var connBadgeEl   = document.getElementById('connBadge');
 var connKeyEl     = document.getElementById('connKey');
-var connModelNameEl = document.getElementById('connModelName');
 var connModelEl   = document.getElementById('connModel');
 var modelStatusEl = document.getElementById('modelStatus');
 var replaceKeyEl  = document.getElementById('replaceKey');
@@ -175,7 +171,6 @@ var openInEl      = document.getElementById('openIn');
 var replayEl      = document.getElementById('replayWalkthrough');
 var walkStatusEl  = document.getElementById('walkthroughStatus');
 var versionEl     = document.getElementById('version');
-var aboutVerEl    = document.getElementById('aboutVersion');
 var paletteShortcutChipEl = document.getElementById('paletteShortcutChip');
 
 var state = {
@@ -200,7 +195,6 @@ var flow = {
 try {
   var version = chrome.runtime.getManifest().version;
   if (versionEl)  versionEl.textContent = 'v' + version;
-  if (aboutVerEl) aboutVerEl.textContent = version;
 } catch (e) { /* non-extension preview */ }
 
 // ─── Load + migrate stored options ──────────────────────────────────────────
@@ -232,21 +226,6 @@ chrome.storage.local.get('sfnavOptions', function (data) {
   if (hasSavedKey(state.provider)) flow.mode = 'connected';
 
   renderFlow();
-});
-
-// ─── Pane switching ─────────────────────────────────────────────────────────
-
-navEl.addEventListener('click', function (e) {
-  var item = e.target.closest('.ni');
-  if (!item) return;
-  var pane = item.getAttribute('data-pane');
-  if (!pane) return;
-  Array.prototype.forEach.call(navEl.querySelectorAll('.ni'), function (n) {
-    n.classList.toggle('on', n === item);
-  });
-  Array.prototype.forEach.call(document.querySelectorAll('.pane'), function (p) {
-    p.classList.toggle('on', p.id === 'pane-' + pane);
-  });
 });
 
 // ─── Rendering ──────────────────────────────────────────────────────────────
@@ -292,6 +271,7 @@ function showScreen(mode) {
 }
 
 function renderFlow() {
+  renderPills();
   if (flow.mode === 'connected') renderConnected();
   else if (flow.mode === 'recognized') renderRecognized();
   else renderPaste();
@@ -313,29 +293,30 @@ function renderPaste() {
   renderProviderChoice();
 }
 
+// The selected pill is what the screen below shows. The provider in use is
+// marked green; other providers with a saved key get a grey dot.
+function renderPills() {
+  Array.prototype.forEach.call(pillsEl.querySelectorAll('.ppill'), function (pill) {
+    var n = pill.getAttribute('data-provider');
+    var on = n === flow.choice;
+    var saved = hasSavedKey(n);
+    var active = saved && n === state.provider;
+    pill.setAttribute('aria-checked', on ? 'true' : 'false');
+    pill.tabIndex = on ? 0 : -1; // roving tabindex: arrows move within the group
+    pill.classList.toggle('active', active);
+    pill.classList.toggle('has-key', saved && !active);
+    pill.title = active ? 'In use' : (saved ? 'Key saved — click to use it' : '');
+  });
+}
+
 // Everything on the paste screen that depends on the selected pill. Kept
 // apart from renderPaste so switching pills never clears a half-typed key.
 function renderProviderChoice() {
   var name = flow.choice;
   var p = PROVIDERS[name];
-  Array.prototype.forEach.call(pillsEl.querySelectorAll('.ppill'), function (pill) {
-    var on = pill.getAttribute('data-provider') === name;
-    pill.setAttribute('aria-checked', on ? 'true' : 'false');
-    pill.tabIndex = on ? 0 : -1; // roving tabindex: arrows move within the group
-    var saved = hasSavedKey(pill.getAttribute('data-provider'));
-    pill.classList.toggle('has-key', saved);
-    pill.title = saved ? 'Key saved' : '';
-  });
-  if (hasSavedKey(name)) {
-    var current = name === state.provider;
-    savedKeyTextEl.textContent = (current ? 'You’re using your ' : 'You have a saved ') + p.productName +
-      ' key (' + maskConnected(state.providers[name].apiKey) + ').';
-    useSavedKeyEl.textContent = current ? 'Keep using it' : 'Use this key';
-    savedKeyEl.hidden = false;
-  } else {
-    savedKeyEl.hidden = true;
-  }
-  howLblEl.textContent = 'Don’t have a ' + p.productName + ' key yet? Here’s how to get one';
+  keepKeyEl.hidden = !hasSavedKey(name);
+  howLblEl.textContent = 'Don’t have ' + (/^[AEIOU]/.test(p.productName) ? 'an ' : 'a ') +
+    p.productName + ' key yet? Here’s how to get one';
   stepsEl.innerHTML = p.steps(function (text, href) {
     return '<a href="' + href + '" target="_blank" rel="noopener">' + esc(text) + '</a>';
   }).map(function (step) { return '<li><span>' + step + '</span></li>'; }).join('');
@@ -349,12 +330,41 @@ function hasSavedKey(name) {
   return !!(state.providers[name] && state.providers[name].apiKey);
 }
 
+// A pill with a saved key switches to it straight away — no re-paste, no
+// re-test (it passed its test when it was saved). A pill without a key opens
+// the paste screen, keeping any half-typed key.
 function selectProvider(name, focus) {
-  if (!PROVIDERS[name] || name === flow.choice) return;
-  flow.choice = name;
-  renderProviderChoice();
-  handleKeyInput(); // re-word the not-recognized message for the new pill
+  if (!PROVIDERS[name]) return;
+  if (hasSavedKey(name)) {
+    if (name === state.provider && flow.mode === 'connected') return;
+    activateProvider(name);
+  } else {
+    if (name === flow.choice && flow.mode === 'paste') return;
+    flow.choice = name;
+    if (flow.mode !== 'paste') {
+      resetDraft();
+      flow.pasteNote = null;
+      flow.mode = 'paste';
+      renderFlow();
+    } else {
+      renderPills();
+      renderProviderChoice();
+      handleKeyInput(); // re-word the not-recognized message for the new pill
+    }
+  }
   if (focus) pillsEl.querySelector('[data-provider="' + name + '"]').focus();
+}
+
+function activateProvider(name) {
+  flow.choice = name;
+  if (name !== state.provider) {
+    state.provider = name;
+    mergeOptions({ provider: name });
+  }
+  resetDraft();
+  flow.pasteNote = null;
+  flow.mode = 'connected';
+  renderFlow();
 }
 
 // Called on input/paste into the key field: a recognized prefix jumps straight
@@ -426,11 +436,8 @@ function renderRecognized() {
 
 function renderConnected() {
   var name = state.provider;
-  var p = PROVIDERS[name];
   var stored = state.providers[name] || {};
-  connBadgeEl.textContent = 'Connected to ' + p.productName + (p.label !== p.productName ? ' (' + p.label + ')' : '');
   connKeyEl.textContent = maskConnected(stored.apiKey || '');
-  connModelNameEl.textContent = stored.model || p.defaultModel;
   setModelStatus('', '');
   renderConnectedModels(name);
 }
@@ -622,24 +629,17 @@ function setStatus(text, kind) {
 
 function setWalkStatus(text, kind) {
   walkStatusEl.textContent = text;
-  walkStatusEl.className = 'walk-status' + (kind ? ' ' + kind : '');
+  walkStatusEl.className = 'st' + (kind ? ' ' + kind : '');
 }
 
 // ─── Event handlers ─────────────────────────────────────────────────────────
 
 apiKeyEl.addEventListener('input', handleKeyInput);
 
-// Switch to a provider whose key is already saved — no re-paste, no re-test
-// (it passed its test when it was saved).
-useSavedKeyEl.addEventListener('click', function () {
-  var name = flow.choice;
-  if (!hasSavedKey(name)) return;
-  state.provider = name;
-  mergeOptions({ provider: name });
-  resetDraft();
-  flow.pasteNote = null;
-  flow.mode = 'connected';
-  renderFlow();
+// Back out of pasting a replacement for a provider that already has a key.
+keepKeyLinkEl.addEventListener('click', function (e) {
+  e.preventDefault();
+  activateProvider(flow.choice);
 });
 
 useAnywayEl.addEventListener('click', function () {
@@ -733,7 +733,6 @@ connModelEl.addEventListener('change', function () {
   state.providers[state.provider] = state.providers[state.provider] || {};
   state.providers[state.provider].model = connModelEl.value;
   mergeOptions({ providers: state.providers });
-  connModelNameEl.textContent = connModelEl.value;
   setModelStatus('Model updated.', 'ok');
 });
 
@@ -793,7 +792,7 @@ chrome.storage.local.get('sfnavOptions', function (data) {
 function setFbStatus(text, kind) {
   if (!fbStatusEl) return;
   fbStatusEl.textContent = text || '';
-  fbStatusEl.className = kind ? ('walk-status ' + kind) : '';
+  fbStatusEl.className = 'st' + (kind ? ' ' + kind : '');
 }
 
 if (fbSendEl) {

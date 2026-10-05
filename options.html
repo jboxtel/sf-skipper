@@ -4,71 +4,33 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Skipper for Salesforce — Options</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet" />
+    <link rel="icon" href="icons/icon32.png" />
     <link rel="stylesheet" href="options.css" />
   </head>
   <body>
-    <div class="shell">
-      <aside class="sb">
-        <div class="sb-brand">
-          <div class="wm">Skipper</div>
-          <div class="ws">for Salesforce</div>
-        </div>
-        <nav class="nav" id="nav">
-          <div class="ni on" data-pane="provider">
-            <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="4" width="4" height="4" rx="1"/><rect x="9" y="4" width="4" height="4" rx="1"/><line x1="5" y1="6" x2="9" y2="6"/></svg>
-            Provider
-          </div>
-          <div class="ni" data-pane="navigation">
-            <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><path d="M2 3.5h10M2 7h10M2 10.5h6"/></svg>
-            Navigation
-          </div>
-          <div class="ni" data-pane="walkthrough">
-            <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><circle cx="7" cy="7" r="2"/><path d="M7 1v2M7 11v2M1 7h2M11 7h2"/></svg>
-            Walkthrough
-          </div>
-          <div class="ni" data-pane="feedback">
-            <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><path d="M2 3h10v7H6l-3 2.5V10H2z"/></svg>
-            Feedback
-          </div>
-          <div class="ndiv"></div>
-          <div class="ni" data-pane="about">
-            <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2"><circle cx="7" cy="7" r="5.5"/><line x1="7" y1="6" x2="7" y2="10" stroke-linecap="round" stroke-width="1.3"/><circle cx="7" cy="4.2" r=".7" fill="currentColor" stroke="none"/></svg>
-            About
-          </div>
-        </nav>
-        <div class="sb-foot"><div class="ver" id="version">v1.1.4</div></div>
-      </aside>
+    <main class="page">
+      <header class="top">
+        <div class="brand"><img class="logo" src="icons/icon128.png" alt="" width="28" height="28" />Skipper <span class="brand-sub">for Salesforce</span></div>
+        <span class="ver" id="version">v1.1.4</span>
+      </header>
 
-      <main class="main">
-        <!-- PROVIDER — three-screen flow:
-             Screen 1 pick + paste → Screen 2 recognized → Screen 3 connected -->
-        <div class="pane on" id="pane-provider">
-          <div class="ph">
-            <h1>Provider</h1>
-            <p>The AI features @soql, @debug and @ask need a key from an AI provider. Pick a provider below and paste your key. Gemini is free to start. <strong>Everything else in Skipper works without a key.</strong></p>
+      <!-- AI PROVIDER — three-screen flow:
+           Screen 1 pick + paste → Screen 2 recognized → Screen 3 connected -->
+      <section class="sec">
+        <h2 class="sh">AI provider</h2>
+        <p class="sd">@soql, @debug and @ask need a key from an AI provider. Gemini is free to start. Everything else in Skipper works without a key.</p>
+        <div class="card pad">
+          <!-- The pills always show. A pill with a saved key switches to it on
+               click; one without a key opens the paste screen below. -->
+          <div class="ppills" id="providerPills" role="radiogroup" aria-label="AI provider">
+            <button type="button" class="ppill" role="radio" aria-checked="false" data-provider="gemini">Gemini <span class="ppill-sub">Google</span></button>
+            <button type="button" class="ppill" role="radio" aria-checked="false" data-provider="anthropic">Claude <span class="ppill-sub">Anthropic</span></button>
+            <button type="button" class="ppill" role="radio" aria-checked="false" data-provider="openai">GPT <span class="ppill-sub">OpenAI</span></button>
+            <button type="button" class="ppill" role="radio" aria-checked="false" data-provider="openrouter">OpenRouter <span class="ppill-sub">many models</span></button>
           </div>
 
-          <!-- Screen 1 — Pick a provider, then paste a key. The pills drive
-               the steps, billing note and key field below them. -->
+          <!-- Paste a key for the selected provider -->
           <div class="fscr" id="scr-paste">
-            <div>
-              <div class="fl" id="providerPillsLbl">Choose your AI provider</div>
-              <div class="ppills" id="providerPills" role="radiogroup" aria-labelledby="providerPillsLbl">
-                <button type="button" class="ppill" role="radio" aria-checked="false" data-provider="gemini">Gemini <span class="ppill-sub">Google</span></button>
-                <button type="button" class="ppill" role="radio" aria-checked="false" data-provider="anthropic">Claude <span class="ppill-sub">Anthropic</span></button>
-                <button type="button" class="ppill" role="radio" aria-checked="false" data-provider="openai">GPT <span class="ppill-sub">OpenAI</span></button>
-                <button type="button" class="ppill" role="radio" aria-checked="false" data-provider="openrouter">OpenRouter <span class="ppill-sub">many models</span></button>
-              </div>
-            </div>
-
-            <!-- Shown when the selected pill already has a saved key: switch to it without re-pasting. -->
-            <div class="savedkey" id="savedKey" hidden>
-              <span id="savedKeyText"></span>
-              <button type="button" class="btn bs bsm" id="useSavedKey">Use this key</button>
-            </div>
-
             <!-- Steps and billing note stay folded away; most people already have a key. -->
             <details class="howto" id="howTo">
               <summary id="howLbl">Don’t have a key yet? Here’s how to get one</summary>
@@ -78,27 +40,26 @@
               </div>
             </details>
 
-            <div class="fg">
-              <div>
-                <label class="fl" id="apiKeyLabel" for="apiKey">Paste your key</label>
-                <div class="iw">
-                  <input id="apiKey" type="password" placeholder="Paste your key here" autocomplete="off" spellcheck="false" />
-                  <button class="ir" id="revealKey" type="button" aria-label="Show key">
-                    <svg id="eyeShow" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M1 7s2.2-4.5 6-4.5S13 7 13 7s-2.2 4.5-6 4.5S1 7 1 7z"/><circle cx="7" cy="7" r="1.7"/></svg>
-                    <svg id="eyeHide" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2" hidden><path d="M2 2l10 10M5.5 5.8A1.8 1.8 0 0 0 8.2 8.5M3.5 4C2.2 5 1 7 1 7s2.2 4.5 6 4.5c1.3 0 2.5-.4 3.4-1M5.5 2.8C6 2.6 6.5 2.5 7 2.5c3.8 0 6 4.5 6 4.5s-.6 1.2-1.7 2.3" stroke-linecap="round"/></svg>
-                  </button>
-                </div>
-                <div class="unrec" id="unrecognized" hidden>
-                  <p class="unrec-msg" id="unrecMsg"></p>
-                  <div class="nb"><button type="button" id="useAnyway">Use it anyway</button></div>
-                </div>
+            <div>
+              <label class="fl" id="apiKeyLabel" for="apiKey">Paste your key</label>
+              <div class="iw">
+                <input id="apiKey" type="password" placeholder="Paste your key here" autocomplete="off" spellcheck="false" />
+                <button class="ir" id="revealKey" type="button" aria-label="Show key">
+                  <svg id="eyeShow" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M1 7s2.2-4.5 6-4.5S13 7 13 7s-2.2 4.5-6 4.5S1 7 1 7z"/><circle cx="7" cy="7" r="1.7"/></svg>
+                  <svg id="eyeHide" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2" hidden><path d="M2 2l10 10M5.5 5.8A1.8 1.8 0 0 0 8.2 8.5M3.5 4C2.2 5 1 7 1 7s2.2 4.5 6 4.5c1.3 0 2.5-.4 3.4-1M5.5 2.8C6 2.6 6.5 2.5 7 2.5c3.8 0 6 4.5 6 4.5s-.6 1.2-1.7 2.3" stroke-linecap="round"/></svg>
+                </button>
+              </div>
+              <div class="unrec" id="unrecognized" hidden>
+                <p class="unrec-msg" id="unrecMsg"></p>
+                <div class="nb"><button type="button" id="useAnyway">Use it anyway</button></div>
               </div>
             </div>
 
+            <p class="notthis" id="keepKey" hidden><a href="#" id="keepKeyLink">Keep the current key</a></p>
             <div class="actions"><span id="pasteStatus"></span></div>
           </div>
 
-          <!-- Screen 2 — Key recognized -->
+          <!-- Key recognized: pick a model, then save and test -->
           <div class="fscr" id="scr-recognized" hidden>
             <div class="matchline" id="matchLine"></div>
             <div class="keypreview" id="keyPreview"></div>
@@ -119,144 +80,86 @@
             </div>
           </div>
 
-          <!-- Screen 3 — Connected -->
+          <!-- Connected: the active provider's key and model -->
           <div class="fscr" id="scr-connected" hidden>
-            <div class="conn-badge" id="connBadge">Connected to Claude (Anthropic)</div>
-            <div class="conn-key" id="connKey">—</div>
-            <div class="conn-model">
-              <span class="conn-model-lbl">Model: <span id="connModelName">—</span></span>
-              <span class="conn-model-ctl">
-                <label class="fl" for="connModel" hidden>Change model</label>
-                <select id="connModel" aria-label="Change model"></select>
+            <div>
+              <label class="fl" for="connModel">Model</label>
+              <div class="conn-model">
+                <select id="connModel"></select>
+                <span id="modelStatus"></span>
+              </div>
+            </div>
+            <div class="conn-foot">
+              <span class="conn-key" id="connKey">—</span>
+              <span class="connopts">
+                <a href="#" id="replaceKey">Use a different key</a>
+                <a href="#" id="removeKey">Remove key</a>
               </span>
-              <span id="modelStatus"></span>
-            </div>
-            <div class="connopts">
-              <a href="#" id="replaceKey">Change provider or key</a>
-              <a href="#" id="removeKey">Remove key</a>
             </div>
           </div>
         </div>
+      </section>
 
-        <!-- NAVIGATION -->
-        <div class="pane" id="pane-navigation">
-          <div class="ph">
-            <h1>Navigation</h1>
-            <p>How Skipper opens destinations when you pick a result from the palette.</p>
-          </div>
-          <div class="sec">
-            <div class="card">
-              <div class="cr">
-                <div class="crt">
-                  <div class="rl">Open links in</div>
-                  <div class="rd">New tab keeps Setup on screen. Same tab is faster if you live in the palette.</div>
-
-                </div>
-                <div class="crc">
-                  <select id="openIn">
-                    <option value="new">New tab</option>
-                    <option value="same">Same tab</option>
-                  </select>
-                </div>
-              </div>
+      <section class="sec">
+        <h2 class="sh">General</h2>
+        <div class="card">
+          <div class="cr">
+            <div class="crt">
+              <div class="rl">Open links in</div>
+              <div class="rd">New tab keeps Setup on screen. Same tab is faster if you live in the palette.</div>
+            </div>
+            <div class="crc">
+              <select id="openIn">
+                <option value="new">New tab</option>
+                <option value="same">Same tab</option>
+              </select>
             </div>
           </div>
-          <div class="sec">
-            <div class="sl">Keyboard shortcut</div>
-            <div class="card">
-              <div class="cr">
-                <div class="crt">
-                  <div class="rl">Open palette</div>
-                  <div class="rd">Chrome controls shortcut bindings. To change it, visit <code>chrome://extensions/shortcuts</code>.</div>
-                </div>
-                <div class="crc shortcut-col">
-                  <div id="paletteShortcutChip"><kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>K</kbd></div>
-                </div>
-              </div>
+          <div class="cr">
+            <div class="crt">
+              <div class="rl">Keyboard shortcut</div>
+              <div class="rd">Chrome controls shortcut bindings. To change it, visit <code>chrome://extensions/shortcuts</code>.</div>
             </div>
+            <div class="crc" id="paletteShortcutChip"><kbd>⌘</kbd><kbd>⇧</kbd><kbd>K</kbd></div>
           </div>
-
-        </div>
-
-        <!-- WALKTHROUGH -->
-        <div class="pane" id="pane-walkthrough">
-          <div class="ph">
-            <h1>Walkthrough</h1>
-            <p>Replay the first-run coachmarks. Open a Salesforce tab, then click below — the palette opens with the walkthrough card visible.</p>
-          </div>
-          <div class="sec">
-            <div class="card">
-              <div class="cr">
-                <div class="crt">
-                  <div class="rl">Replay first-run tour</div>
-                  <div class="rd">Resets the seen-flags and reopens the palette on your active Salesforce tab.</div>
-                </div>
-                <div class="crc">
-                  <button id="replayWalkthrough" class="btn bs bsm" type="button">Show walkthrough</button>
-                </div>
-              </div>
+          <div class="cr">
+            <div class="crt">
+              <div class="rl">First-run walkthrough</div>
+              <div class="rd">Replays the tour in the palette on your active Salesforce tab.</div>
+              <div id="walkthroughStatus" class="st"></div>
             </div>
-            <div id="walkthroughStatus" class="walk-status"></div>
-          </div>
-        </div>
-
-        <!-- FEEDBACK -->
-        <div class="pane" id="pane-feedback">
-          <div class="ph">
-            <h1>Send feedback</h1>
-            <p>Bug reports, feature requests, anything Skipper could do better. Goes straight to the maintainer.</p>
-          </div>
-          <div class="sec">
-            <div class="fg">
-              <div>
-                <label class="fl" for="fbMessage">Message</label>
-                <textarea id="fbMessage" rows="6" placeholder="What's broken, missing, or confusing?" spellcheck="false"></textarea>
-              </div>
-              <div>
-                <label class="fl" for="fbEmail">Email (optional)</label>
-                <input id="fbEmail" type="email" placeholder="Only if you’d like a reply" autocomplete="email" />
-              </div>
-              <div class="actions">
-                <button id="fbSend" class="btn bp" type="button">Send feedback</button>
-                <span id="fbStatus"></span>
-              </div>
+            <div class="crc">
+              <button id="replayWalkthrough" class="btn bs" type="button">Show walkthrough</button>
             </div>
           </div>
         </div>
+      </section>
 
-        <!-- ABOUT -->
-        <div class="pane" id="pane-about">
-          <div class="ph">
-            <h1>About</h1>
-            <p>Skipper for Salesforce is a command palette and AI helper for Salesforce admins.</p>
-          </div>
-          <div class="sec">
-            <div class="ag">
-              <div class="ab">
-                <div class="abl">Version</div>
-                <div class="abv" id="aboutVersion">1.1.4</div>
-              </div>
-              <div class="ab">
-                <div class="abl">Manifest</div>
-                <div class="abv">MV3</div>
-                <div class="abs">Chrome 109+</div>
-              </div>
+      <section class="sec">
+        <h2 class="sh">Feedback</h2>
+        <p class="sd">Bug reports, feature requests, anything Skipper could do better. Goes straight to the maintainer.</p>
+        <div class="card pad">
+          <div class="fg">
+            <div>
+              <label class="fl" for="fbMessage">Message</label>
+              <textarea id="fbMessage" rows="5" placeholder="What's broken, missing, or confusing?" spellcheck="false"></textarea>
             </div>
-          </div>
-          <div class="sec">
-            <div class="sl">Privacy</div>
-            <div class="card">
-              <div class="cr">
-                <div class="crt">
-                  <div class="rl">Where your data lives</div>
-                  <div class="rd">API keys and preferences are stored in <code>chrome.storage.local</code> on this device only — never synced. Page screenshots taken by @ask are sent to the AI provider you chose and are not stored by Skipper.</div>
-                </div>
-              </div>
+            <div>
+              <label class="fl" for="fbEmail">Email (optional)</label>
+              <input id="fbEmail" type="email" placeholder="Only if you’d like a reply" autocomplete="email" />
+            </div>
+            <div class="actions">
+              <button id="fbSend" class="btn bp" type="button">Send feedback</button>
+              <span id="fbStatus"></span>
             </div>
           </div>
         </div>
-      </main>
-    </div>
+      </section>
+
+      <footer class="foot">
+        API keys and preferences stay in <code>chrome.storage.local</code> on this device and are never synced. Screenshots taken by @ask go to the AI provider you chose and are not stored by Skipper.
+      </footer>
+    </main>
     <script src="shared.js"></script>
     <script src="options.js"></script>
   </body>
