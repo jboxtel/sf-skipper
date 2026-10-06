@@ -1,23 +1,23 @@
-// End-to-end tests against a real Salesforce org.
+// End-to-end tests against a real Salesforce org, driven by agent-browser.
+// See AGENTS.md for setup and for driving the extension by hand.
 //
-// Setup (one-time):
-//   1. Create .sf-credentials with SF_USERNAME, SF_PASSWORD, SF_TEST_URL.
-//      SF_TEST_URL must point at the org's Setup home, e.g.
-//      SF_TEST_URL=https://yourorg.lightning.force.com/lightning/setup/SetupOneHome/home
-//   2. Run: npm run e2e
+//   npm run e2e                  run the tests (signs in if needed)
+//   npm run e2e -- open [url]    fresh browser with the extension, left open
+//   npm run e2e -- login         sign in to the org in the open browser
+//   npm run e2e -- otp <code>    submit Salesforce's emailed verification code
+//   npm run e2e -- close         close the browser
 //
-// Override URL: node test/e2e.js <url>
+// Everything runs in the agent-browser session "skipper-e2e". Headless by
+// default; HEADED=1 shows the window.
 
-const {
-  loadCreds,
-  launchContext,
-  attachLogging,
-  gotoApp,
-  openPalette,
-  closePalette,
-  readPalette,
-  typeAndEnter,
-} = require('./e2e-helpers');
+const { spawnSync } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+
+const EXT = path.resolve(__dirname, '..');
+const PROFILE = path.join(EXT, '.e2e-browser-profile');
+const ENV_FILE = path.join(EXT, '.env.local');
+const SESSION = 'skipper-e2e';
 
 const GREEN = '\x1b[32m';
 const RED   = '\x1b[31m';
@@ -25,243 +25,389 @@ const DIM   = '\x1b[2m';
 const BOLD  = '\x1b[1m';
 const RESET = '\x1b[0m';
 
+// Run one agent-browser command in our session and return its data payload.
+// Throws on a failed command so callers don't have to check every step.
+function ab(...args) {
+  const res = spawnSync('agent-browser', ['--session', SESSION, '--json', ...args], { encoding: 'utf8' });
+  if (res.error) throw new Error(`agent-browser not runnable: ${res.error.message}`);
+  let out;
+  try { out = JSON.parse(res.stdout.trim().split('\n').pop()); }
+  catch { throw new Error(`agent-browser ${args[0]}: ${(res.stderr || res.stdout).trim()}`); }
+  if (!out.success) throw new Error(`agent-browser ${args[0]}: ${out.error}`);
+  return out.data;
+}
+
+function evaluate(js) {
+  return ab('eval', js).result;
+}
+
+function launchArgs() {
+  const args = ['--extension', EXT, '--profile', PROFILE];
+  if (!process.env.HEADED) args.push('--args', '--headless=new');
+  return args;
+}
+
+function launch(url) {
+  // Launch without --json: agent-browser 0.38 fails to start the browser with it.
+  const res = spawnSync('agent-browser', ['--session', SESSION, ...launchArgs(), 'open', url], { encoding: 'utf8' });
+  if (res.status !== 0) throw new Error(`agent-browser open: ${(res.stderr || res.stdout).trim()}`);
+  ab('wait', '--load', 'domcontentloaded');
+}
+
+// The daemon takes a moment to exit after close. Launching before it's gone
+// fails with "Failed to connect", so wait until the session is no longer listed.
+function closeBrowser() {
+  spawnSync('agent-browser', ['--session', SESSION, 'close'], { encoding: 'utf8' });
+  for (let i = 0; i < 20; i++) {
+    const list = spawnSync('agent-browser', ['session', 'list'], { encoding: 'utf8' }).stdout || '';
+    if (!list.split('\n').some(line => line.trim().replace(/^→\s*/, '') === SESSION)) return;
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250);
+  }
+}
+
+function onVerificationPage() {
+  return ab('get', 'url').url.includes('/identity/verification/');
+}
+
+// Log in if Salesforce shows the login form. Returns 'ok' or 'verify'.
+function login() {
+  if (!evaluate("!!document.querySelector('#username')")) return 'ok';
+  // Salesforce asks for the username first and shows #password on a second step.
+  ab('fill', '#username', process.env.SF_USERNAME);
+  ab('click', '#Login');
+  ab('wait', '#password');
+  ab('fill', '#password', process.env.SF_PASSWORD);
+  ab('click', '#Login');
+  ab('wait', '--fn', "!document.querySelector('#password')");
+  ab('wait', '--load', 'domcontentloaded');
+  if (onVerificationPage()) return 'verify';
+  ab('wait', '--url', '**/lightning/**');
+  return 'ok';
+}
+
+function requireCreds() {
+  const missing = ['SF_URL', 'SF_USERNAME', 'SF_PASSWORD'].filter(k => !process.env[k]);
+  if (missing.length) throw new Error(`Missing ${missing.join(', ')}. Put them in .env.local.`);
+}
+
+// Sign in within the open browser, launching one if there isn't any.
+function signIn() {
+  requireCreds();
+  const open = spawnSync('agent-browser', ['--session', SESSION, 'get', 'url'], { encoding: 'utf8' }).status === 0;
+  if (!open) launch(process.env.SF_URL);
+  else if (!evaluate("!!document.querySelector('#username')")) ab('open', process.env.SF_URL);
+  return login();
+}
+
+// ── Palette helpers ─────────────────────────────────────────────────────────
+// The content script runs in an isolated world, so everything is read from the DOM.
+
+const PALETTE_STATE = `(() => {
+  const get = id => document.getElementById(id);
+  const overlay = get('sfnav-overlay');
+  return {
+    visible: !!overlay && overlay.style.display !== 'none',
+    focused: document.activeElement?.id === 'sfnav-input',
+    breadcrumb: get('sfnav-breadcrumb')?.textContent || '',
+    hint: get('sfnav-hint')?.textContent || '',
+    placeholder: get('sfnav-input')?.placeholder || '',
+    items: [...document.querySelectorAll('.sfnav-item')].map(el => ({
+      label: el.querySelector('.sfnav-label')?.textContent || '',
+      sublabel: el.querySelector('.sfnav-sublabel')?.textContent || '',
+      url: el.dataset.url || '',
+      selected: el.classList.contains('selected'),
+    })),
+  };
+})()`;
+
+function palette() {
+  return evaluate(PALETTE_STATE);
+}
+
+// Wait for a JS expression to turn truthy. Returns false on timeout instead of throwing.
+function waitFor(js) {
+  try { ab('wait', '--fn', js); return true; } catch { return false; }
+}
+
+const PALETTE_VISIBLE = "(o => !!o && o.style.display !== 'none')(document.getElementById('sfnav-overlay'))";
+
+// Open the palette with the shortcut, skipping the first-run walkthrough if it shows.
+function openPalette() {
+  if (evaluate(PALETTE_VISIBLE)) return true;
+  ab('press', 'Control+Shift+K');
+  if (!waitFor(PALETTE_VISIBLE)) return false;
+  if (evaluate("!!document.querySelector('.sfnav-cm-skip')?.offsetParent")) ab('click', '.sfnav-cm-skip');
+  return true;
+}
+
+function closePalette() {
+  for (let i = 0; i < 6 && evaluate(PALETTE_VISIBLE); i++) ab('press', 'Escape');
+}
+
+// Type into the palette input and wait for the results to re-render.
+function type(text) {
+  ab('fill', '#sfnav-input', text);
+}
+
+// Type an @keyword and press Enter to step into its picker.
+function enter(keyword) {
+  type(keyword);
+  ab('press', 'Enter');
+}
+
+// Click the result row with this exact label.
+function clickItem(label) {
+  const clicked = evaluate(`(() => {
+    const row = [...document.querySelectorAll('.sfnav-item')]
+      .find(el => el.querySelector('.sfnav-label')?.textContent === ${JSON.stringify(label)});
+    row?.click();
+    return !!row;
+  })()`);
+  if (!clicked) throw new Error(`no row labelled "${label}"`);
+}
+
 let passed = 0;
 let failed = 0;
-const failures = [];
-
-function ok(label) { console.log(`  ${GREEN}✓${RESET} ${label}`); passed++; }
-function fail(label, detail) {
-  console.log(`  ${RED}✗${RESET} ${label}`);
-  if (detail) console.log(`    ${DIM}${detail}${RESET}`);
-  failed++;
-  failures.push({ label, detail });
+function step(label, fn) {
+  let ok = false;
+  let detail;
+  try { ok = fn() !== false; } catch (err) { detail = err.message; }
+  console.log(`  ${ok ? GREEN + '✓' : RED + '✗'}${RESET} ${label}`);
+  if (!ok && detail) console.log(`    ${DIM}${detail}${RESET}`);
+  ok ? passed++ : failed++;
+  return ok;
 }
-async function step(label, fn) {
-  try {
-    const result = await fn();
-    if (result === false) { fail(label); return; }
-    ok(label);
-  } catch (err) {
-    fail(label, err.message);
-  }
+
+function section(title) {
+  console.log(`\n${BOLD}${title}${RESET}`);
 }
-function section(title) { console.log(`\n${BOLD}${title}${RESET}`); }
 
-(async () => {
-  const creds = loadCreds();
-  const url = process.argv[2] || creds.SF_TEST_URL;
-  if (!url) {
-    console.error('No URL provided. Set SF_TEST_URL in .sf-credentials, or pass as the first arg.');
-    process.exit(1);
-  }
+// ── Signed out: runs on the Salesforce login page ───────────────────────────
 
-  console.log(`${BOLD}Skipper for Salesforce — end-to-end tests${RESET}\n${DIM}Org: ${url}${RESET}`);
+function signedOutTests() {
+  section('Palette (signed out)');
 
-  const ctx = await launchContext();
-  const page = ctx.pages()[0] || await ctx.newPage();
-  attachLogging(page, { filter: /sfnav.*(error|fail|failed|warn)/i });
+  step('Ctrl+Shift+K opens the palette', () => openPalette());
+  step('input is focused', () => palette().focused);
 
-  await gotoApp(page, url);
-
-  // ── Palette open ─────────────────────────────────────────────────────────
-  section('Palette');
-  await step('Cmd+Shift+K opens the palette', async () => {
-    return openPalette(page);
-  });
-  await step('input is focused after open', async () => {
-    return page.evaluate(() => document.activeElement?.id === 'sfnav-input');
-  });
-  await step('placeholder is the root prompt', async () => {
-    const s = await readPalette(page);
-    return s.placeholder.includes('Search') || s.placeholder.includes('pick');
-  });
-
-  // ── Root menu ────────────────────────────────────────────────────────────
-  section('Root menu');
-  await step('shows expected shortcuts', async () => {
-    const s = await readPalette(page);
-    const labels = s.items.map(i => i.label);
-    const need = ['@object', '@flow', '@app', '@cmd', '@label', '@setup'];
+  step('root menu lists every @ keyword', () => {
+    const labels = palette().items.map(i => i.label);
+    const need = ['@object', '@flow', '@app', '@cmd', '@label', '@permset', '@user', '@setup', '@ask', '@soql'];
     const missing = need.filter(n => !labels.includes(n));
-    if (missing.length) throw new Error(`missing shortcuts: ${missing.join(', ')}`);
-    return true;
-  });
-  await step('shows section headers', async () => {
-    const s = await readPalette(page);
-    return s.sectionHeaders.includes('Browse') && s.sectionHeaders.includes('Setup');
+    if (missing.length) throw new Error(`missing: ${missing.join(', ')}`);
   });
 
-  // ── @object picker ───────────────────────────────────────────────────────
-  section('@object picker');
-  await step('@object opens the picker', async () => {
-    await typeAndEnter(page, '@object');
-    const s = await readPalette(page);
-    return s.breadcrumb.includes('@object') && s.placeholder.includes('object');
+  step('ArrowDown and ArrowUp move the selection', () => {
+    const selected = () => palette().items.findIndex(i => i.selected);
+    const start = selected();
+    ab('press', 'ArrowDown');
+    if (selected() !== start + 1) throw new Error('ArrowDown did not move');
+    ab('press', 'ArrowUp');
+    return selected() === start;
   });
-  await step('lists at least 20 objects', async () => {
-    const s = await readPalette(page);
-    return s.items.length >= 20;
+
+  step('a pasted record ID offers "Go to record"', () => {
+    const id = '001000000000001AAA';
+    type(id);
+    const item = palette().items[0];
+    return item?.sublabel === 'Go to record' && item.url.endsWith(`/lightning/r/${id}/view`);
   });
-  await step('filtering "account" surfaces an Account result', async () => {
-    await page.fill('#sfnav-input', 'account');
-    await page.waitForTimeout(150);
-    const s = await readPalette(page);
-    return s.items.some(i => /account/i.test(i.label));
+
+  step('@setup lists setup links', () => {
+    enter('@setup');
+    return palette().items.length >= 5;
   });
-  await step('Enter on Account → object-scoped breadcrumb', async () => {
-    // Click the first matching Account row to step into scoped mode
-    await page.evaluate(() => {
-      const items = Array.from(document.querySelectorAll('.sfnav-item'));
-      const match = items.find(el => /^Account$/i.test(el.querySelector('.sfnav-label')?.textContent || ''));
-      (match || items[0])?.click();
+
+  step('filtering @setup by "user" narrows it', () => {
+    const before = palette().items.length;
+    type('user');
+    const items = palette().items;
+    return items.length > 0 && items.length < before && items.some(i => /user/i.test(i.label));
+  });
+
+  step('Backspace on an empty input steps back to the root', () => {
+    type('');
+    ab('press', 'Backspace');
+    return palette().items.some(i => i.label === '@object');
+  });
+
+  step('@ask without a key warns and links to Options', () => {
+    enter('@ask');
+    return waitFor("/No API key/.test(document.getElementById('sfnav-ask-keywarn')?.textContent)");
+  });
+  closePalette();
+
+  step('@soql without a key warns on submit', () => {
+    openPalette();
+    enter('@soql');
+    type('all accounts');
+    ab('press', 'Enter');
+    return waitFor("/No API key/.test(document.getElementById('sfnav-soql-status')?.textContent)");
+  });
+
+  step('Escape closes the palette', () => {
+    closePalette();
+    return !evaluate(PALETTE_VISIBLE);
+  });
+}
+
+// ── Signed in: runs in Lightning ────────────────────────────────────────────
+
+// Pickers whose hint reports a count once the org data has loaded.
+const PICKERS = [
+  { keyword: '@flow', noun: /flow/i },
+  { keyword: '@app', noun: /app/i },
+  { keyword: '@cmd', noun: /metadata|cmd/i },
+  { keyword: '@label', noun: /label/i },
+  { keyword: '@permset', noun: /permission/i },
+  { keyword: '@user', noun: /user/i },
+];
+
+function signedInTests() {
+  section('Palette (signed in)');
+
+  step('palette opens in Lightning', () => openPalette());
+
+  step('plain search finds the Account object', () => {
+    type('account');
+    return waitFor("[...document.querySelectorAll('.sfnav-item .sfnav-label')].some(e => e.textContent === 'Account')");
+  });
+
+  section('@object');
+
+  step('@object lists at least 20 objects', () => {
+    enter('@object');
+    return waitFor("document.querySelectorAll('.sfnav-item').length >= 20");
+  });
+
+  step('picking Account scopes the breadcrumb to it', () => {
+    type('account');
+    clickItem('Account');
+    return /account/i.test(palette().breadcrumb);
+  });
+
+  step('Account offers Fields & Relationships', () =>
+    palette().items.some(i => i.label === 'Fields & Relationships'));
+
+  step('filtering "val" puts Validation Rules first', () => {
+    type('val');
+    return palette().items[0]?.label === 'Validation Rules';
+  });
+
+  step('Escape steps back to the object picker, then the root', () => {
+    ab('press', 'Escape');
+    const picker = palette();
+    if (!picker.breadcrumb.includes('@object') || /account/i.test(picker.breadcrumb)) throw new Error(`breadcrumb: ${picker.breadcrumb}`);
+    ab('press', 'Escape');
+    return palette().breadcrumb === '';
+  });
+
+  section('Pickers');
+
+  for (const { keyword, noun } of PICKERS) {
+    step(`${keyword} opens and loads`, () => {
+      enter(keyword);
+      if (!palette().breadcrumb.includes(keyword)) throw new Error(`breadcrumb: ${palette().breadcrumb}`);
+      return waitFor(`!/loading/i.test(document.getElementById('sfnav-hint')?.textContent)`)
+        && noun.test(palette().hint);
     });
-    await page.waitForTimeout(200);
-    const s = await readPalette(page);
-    return /account/i.test(s.breadcrumb);
-  });
-  await step('object-scoped mode shows Fields & Relationships', async () => {
-    const s = await readPalette(page);
-    return s.items.some(i => /Fields & Relationships/i.test(i.label));
-  });
-  await step('filtering "val" narrows to Validation Rules', async () => {
-    await page.fill('#sfnav-input', 'val');
-    await page.waitForTimeout(150);
-    const s = await readPalette(page);
-    return /Validation Rules/i.test(s.items[0]?.label || '');
-  });
-  await step('Escape → back to object picker', async () => {
-    await page.keyboard.press('Escape');
-    await page.waitForTimeout(150);
-    const s = await readPalette(page);
-    return s.breadcrumb.includes('@object') && !s.breadcrumb.toLowerCase().includes('account ›');
-  });
-  await step('Escape from picker → back to root', async () => {
-    await page.keyboard.press('Escape');
-    await page.waitForTimeout(150);
-    const s = await readPalette(page);
-    return !s.breadcrumb;
-  });
-
-  // ── @flow picker ─────────────────────────────────────────────────────────
-  section('@flow picker');
-  await step('@flow opens the picker', async () => {
-    await typeAndEnter(page, '@flow');
-    const s = await readPalette(page);
-    return /flow/i.test(s.breadcrumb) && /flow/i.test(s.placeholder);
-  });
-  await step('hint reports a count or loading state', async () => {
-    const s = await readPalette(page);
-    return /flow/i.test(s.hint) || /loading/i.test(s.hint);
-  });
-
-  await page.keyboard.press('Escape');
-  await page.waitForTimeout(150);
-
-  // ── @app picker ──────────────────────────────────────────────────────────
-  section('@app picker');
-  await step('@app opens the picker', async () => {
-    await typeAndEnter(page, '@app');
-    const s = await readPalette(page);
-    return /app/i.test(s.placeholder);
-  });
-  await step('hint reports a count or loading state', async () => {
-    const s = await readPalette(page);
-    return /app/i.test(s.hint) || /loading/i.test(s.hint);
-  });
-
-  await page.keyboard.press('Escape');
-  await page.waitForTimeout(150);
-
-  // ── @label picker ────────────────────────────────────────────────────────
-  section('@label picker');
-  await step('@label opens the picker', async () => {
-    await typeAndEnter(page, '@label');
-    const s = await readPalette(page);
-    return /label/i.test(s.breadcrumb) && /custom label/i.test(s.placeholder);
-  });
-  await step('hint reports a count, loading, or error', async () => {
-    const s = await readPalette(page);
-    return /custom label/i.test(s.hint) || /loading/i.test(s.hint);
-  });
-  await step('label items have ExternalStrings setup URLs (when present)', async () => {
-    const s = await readPalette(page);
-    if (!s.items.length) return true; // empty org is acceptable
-    return s.items.every(i => i.url.includes('/lightning/setup/ExternalStrings/page'));
-  });
-
-  await page.keyboard.press('Escape');
-  await page.waitForTimeout(150);
-
-  // ── @cmd picker ──────────────────────────────────────────────────────────
-  section('@cmd picker');
-  await step('@cmd opens the picker', async () => {
-    await typeAndEnter(page, '@cmd');
-    const s = await readPalette(page);
-    return /cmd/i.test(s.breadcrumb) && /metadata/i.test(s.placeholder);
-  });
-
-  await page.keyboard.press('Escape');
-  await page.waitForTimeout(150);
-
-  // ── @setup picker ────────────────────────────────────────────────────────
-  section('@setup picker');
-  await step('@setup opens the picker', async () => {
-    await typeAndEnter(page, '@setup');
-    const s = await readPalette(page);
-    return /setup/i.test(s.placeholder);
-  });
-  await step('lists multiple setup quick links', async () => {
-    const s = await readPalette(page);
-    return s.items.length >= 5;
-  });
-  await step('filtering "user" narrows the list', async () => {
-    await page.fill('#sfnav-input', 'user');
-    await page.waitForTimeout(150);
-    const s = await readPalette(page);
-    return s.items.length > 0 && s.items.some(i => /user/i.test(i.label));
-  });
-
-  await page.keyboard.press('Escape');
-  await page.waitForTimeout(150);
-
-  // ── Keyboard navigation ──────────────────────────────────────────────────
-  section('Keyboard navigation');
-  await step('@object then ArrowDown moves selection', async () => {
-    await typeAndEnter(page, '@object');
-    const before = (await readPalette(page)).items.findIndex(i => i.selected);
-    await page.keyboard.press('ArrowDown');
-    await page.waitForTimeout(80);
-    const after = (await readPalette(page)).items.findIndex(i => i.selected);
-    return after > before && after >= 0;
-  });
-  await step('ArrowUp reverses selection', async () => {
-    const before = (await readPalette(page)).items.findIndex(i => i.selected);
-    await page.keyboard.press('ArrowUp');
-    await page.waitForTimeout(80);
-    const after = (await readPalette(page)).items.findIndex(i => i.selected);
-    return after === before - 1;
-  });
-
-  // ── Dismiss ──────────────────────────────────────────────────────────────
-  section('Dismiss');
-  await closePalette(page);
-  await step('Escape eventually closes the palette', async () => {
-    return page.evaluate(() => {
-      const o = document.getElementById('sfnav-overlay');
-      return !o || o.style.display === 'none';
-    });
-  });
-
-  // ── Summary ──────────────────────────────────────────────────────────────
-  await ctx.close();
-  const total = passed + failed;
-  console.log(`\n${BOLD}Results:${RESET} ${GREEN}${passed} passed${RESET}, ${failed > 0 ? RED : ''}${failed} failed${RESET}  ${DIM}(${total} total)${RESET}`);
-  if (failures.length) {
-    console.log(`\n${BOLD}Failures:${RESET}`);
-    failures.forEach(f => console.log(`  ${RED}•${RESET} ${f.label}${f.detail ? ` — ${f.detail}` : ''}`));
+    ab('press', 'Escape');
   }
-  process.exit(failed > 0 ? 1 : 0);
-})().catch(err => {
-  console.error('\nFatal:', err.stack || err.message);
+
+  section('@export');
+
+  step('@labs turns on export', () => {
+    type('@labs');
+    if (palette().items.some(i => i.label === 'Turn on export')) {
+      clickItem('Turn on export');
+    }
+    type('@export');
+    return palette().items.some(i => i.label === '@export');
+  });
+
+  step('@export runs a query and shows rows', () => {
+    ab('press', 'Enter');
+    ab('wait', '#sfnav-export-query');
+    ab('fill', '#sfnav-export-query', 'SELECT Id, Name FROM Account LIMIT 5');
+    ab('click', '#sfnav-export-run');
+    return waitFor("(document.getElementById('sfnav-export-summary')?.textContent || '').length > 0")
+      && evaluate("document.querySelectorAll('#sfnav-export-grid tr').length > 1");
+  });
+
+  closePalette();
+}
+
+function runTests() {
+  requireCreds();
+  console.log(`${BOLD}Skipper for Salesforce — end-to-end tests${RESET}\n${DIM}Org: ${process.env.SF_URL}${RESET}`);
+  closeBrowser(); // launch flags only apply to a fresh browser
+  launch(process.env.SF_URL);
+
+  // The content script also matches Salesforce login pages, so these run signed out.
+  signedOutTests();
+
+  section('Sign in');
+  if (login() === 'verify') {
+    step('signs in', () => {
+      throw new Error('Salesforce emailed a verification code. The browser is still open on that page; '
+        + 'run: npm run e2e -- otp <code>');
+    });
+  } else {
+    step('signs in', () => true);
+    ab('wait', '--load', 'networkidle');
+    signedInTests();
+    closeBrowser();
+  }
+
+  console.log(`\n${BOLD}Results:${RESET} ${GREEN}${passed} passed${RESET}, ${failed ? RED : ''}${failed} failed${RESET}`);
+  process.exit(failed ? 1 : 0);
+}
+
+// Submit the emailed code into the browser left open on the verification page.
+function submitOtp(code) {
+  if (!code) throw new Error('Usage: npm run e2e -- otp <code>');
+  if (!onVerificationPage()) throw new Error('No verification page open. Run npm run e2e -- login first.');
+  ab('fill', '#emc', code);
+  ab('check', '#RememberDeviceCheckbox');
+  ab('click', '#save');
+  ab('wait', '--fn', "!location.pathname.includes('/identity/verification/')");
+  console.log(`${GREEN}Verified.${RESET} Now on ${ab('get', 'url').url}`);
+}
+
+function main() {
+  if (fs.existsSync(ENV_FILE)) process.loadEnvFile(ENV_FILE);
+  const [cmd, arg] = process.argv.slice(2);
+
+  switch (cmd) {
+    case undefined:
+      return runTests();
+    case 'open': {
+      const url = arg || process.env.SF_URL;
+      if (!url) throw new Error('Usage: npm run e2e -- open <url>  (or set SF_URL in .env.local)');
+      closeBrowser();
+      launch(url);
+      console.log(`Browser open with the extension on ${ab('get', 'url').url} (session ${SESSION}).`);
+      return;
+    }
+    case 'login': {
+      const result = signIn();
+      console.log(result === 'verify'
+        ? 'Salesforce emailed a verification code. Run: npm run e2e -- otp <code>'
+        : `${GREEN}Signed in.${RESET} Now on ${ab('get', 'url').url}`);
+      return;
+    }
+    case 'otp':
+      return submitOtp(arg);
+    case 'close':
+      return closeBrowser();
+    default:
+      throw new Error(`Unknown command "${cmd}". See the top of test/e2e.js.`);
+  }
+}
+
+try {
+  main();
+} catch (err) {
+  console.error(`\n${RED}Fatal:${RESET} ${err.message}`);
   process.exit(2);
-});
+}
