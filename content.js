@@ -143,8 +143,7 @@
     'cmd-picker':     '@cmd',
     'label-picker':   '@label',
     'permset-picker': '@permset',
-    'user-picker':    '@user',
-    'id-entry':       '@id'
+    'user-picker':    '@user'
   };
 
   function renderBreadcrumbHtml(segments) {
@@ -415,8 +414,6 @@
         renderResults(resolveUserPicker(val));
       } else if (searchMode === 'setup-picker') {
         renderResults(resolveSetupPicker(val));
-      } else if (searchMode === 'id-entry') {
-        renderResults(resolveIdEntry(val));
       } else if (searchMode === 'cmd-scoped') {
         renderResults(resolveCmdtScoped(val, scopedCmdt));
       } else if (searchMode === 'soql') {
@@ -508,7 +505,6 @@
       case 'permset': enterPermsetPickerMode(filterText || ''); return;
       case 'user':    enterUserPickerMode(filterText || '');    return;
       case 'setup':   enterSetupPickerMode(filterText || '');   return;
-      case 'id':      enterIdEntryMode(filterText || '');      return;
       case 'ask':     enterAskMode(filterText || '');           return;
       case 'soql':       enterSoqlMode();        return;
       case 'export':     enterExportMode(filterText || ''); return;
@@ -1092,15 +1088,6 @@
     input.value = filterText || '';
     input.placeholder = 'Filter users…';
     renderResults(resolveUserPicker(filterText || ''));
-    input.focus();
-  }
-
-  function enterIdEntryMode(filterText) {
-    searchMode = 'id-entry';
-    var input = document.getElementById('sfnav-input');
-    input.value = filterText || '';
-    input.placeholder = 'Paste a record ID (15 or 18 characters)…';
-    renderResults(resolveIdEntry(filterText || ''));
     input.focus();
   }
 
@@ -2437,6 +2424,12 @@
 
   // Expose for background.js (called via executeScript in isolated world)
   window.__sfnavToggle = togglePalette;
+  // Already open: restart onboarding so Options' "Show walkthrough" still starts the tour.
+  window.__sfnavShow = function () {
+    if (!paletteVisible) { showPalette(); return; }
+    if (typeof sfnavHideOnboarding === 'function') sfnavHideOnboarding();
+    if (typeof sfnavInitOnboarding === 'function') sfnavInitOnboarding();
+  };
   window.togglePalette = togglePalette; // keep for console debugging
 
   function renderResults(resolution) {

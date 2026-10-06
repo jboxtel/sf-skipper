@@ -5,13 +5,12 @@ Chrome MV3 extension: a command palette for Salesforce. No build step. The repo 
 ## Tests
 
 - `test:*` and `eval:*` load the extension's scripts into a `node:vm` context with stubbed Chrome and Salesforce APIs. Plain Node: no browser, no org, no npm install. `eval:*` needs `ANTHROPIC_API_KEY` and fixtures under `evals/`.
-- `npm test` drives the palette in a real browser: agent-browser opens `test/test.html`, which loads the palette scripts plus stubs, in its own session `skipper-test`. No org needed, but agent-browser must be installed (step 1 below).
-- `npm run e2e` runs against a real Salesforce dev org through [agent-browser](https://github.com/vercel-labs/agent-browser). Setup and use are below. The tests in `test/e2e.js` come in two groups: palette basics that run signed out on the login page, then the org pickers and `@export`, which run after signing in.
+- `npm test` loads the real extension into a browser through [agent-browser](https://github.com/vercel-labs/agent-browser) and runs on the Salesforce login page: palette, `@object`, `@setup`, the AI no-key warnings, `@export`'s Labs flag and editor, the footer, and the Options and popup pages. No org needed. `npm test -- signed-in` also signs in to the dev org from `.env.local` and runs the org pickers and an `@export` query. Setup and use are below.
 
 ## End-to-end: setup
 
 1. Install agent-browser: `npm i -g agent-browser && agent-browser install`
-2. Create `.env.local` in the repo root. It is gitignored.
+2. For `signed-in`, create `.env.local` in the repo root. It is gitignored.
 
    ```
    SF_URL=https://login.salesforce.com
@@ -26,7 +25,7 @@ Everything runs in the agent-browser session `skipper-e2e`. The browser profile 
 ### 1. Open a browser with the extension
 
 ```
-npm run e2e -- open [url]
+npm test -- open [url]
 ```
 
 This always starts a fresh browser, because Chrome only reads the extension's files at launch. Run it again after every code change. Reloading the page is not enough.
@@ -36,8 +35,8 @@ This always starts a fresh browser, because Chrome only reads the extension's fi
 ### 2. Sign in (optional)
 
 ```
-npm run e2e -- login
-npm run e2e -- otp <code>      # only if login says a code was emailed
+npm test -- login
+npm test -- otp <code>      # only if login says a code was emailed
 ```
 
 The Salesforce login asks for the username first, then the password on a second screen. The script handles both. A new browser profile triggers an email verification code. The browser waits on that page until you submit the code with `otp`, which ticks "don't ask again". After that, `.e2e-browser-profile/` stays trusted. Deleting `.e2e-browser-profile/` means a new code.
@@ -83,5 +82,5 @@ The content script runs in an isolated world. `agent-browser eval` sees the DOM 
 agent-browser --session skipper-e2e eval "[...document.querySelectorAll('.sfnav-item')].map(e => e.querySelector('.sfnav-label').textContent)"
 ```
 
-`npm run e2e -- close` closes the browser.
+`npm test -- close` closes the browser.
 
