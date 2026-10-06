@@ -1,16 +1,16 @@
 // End-to-end tests of the unpacked extension in Chrome, driven by agent-browser.
 // AGENTS.md covers setup and driving the extension by hand.
 //
-//   npm test                   run the signed-out tests on the login page
-//   npm test -- signed-in      also sign in and run the org tests
-//   npm test -- open [url]     fresh browser with the extension, left open
-//   npm test -- login          sign in to the org in the open browser
-//   npm test -- otp <code>     submit Salesforce's emailed verification code
-//   npm test -- close          close the browser
-//   npm test -- id             print the extension ID
-//   npm test -- palette-state  print the palette's state as JSON, tour included
-//   npm test -- type <text>    open the palette (skipping the tour), type, print the state
-//   npm test -- storage [key]  print chrome.storage.local, API keys masked
+//   npm run e2e                   run the signed-out tests on the login page
+//   npm run e2e -- signed-in      also sign in and run the org tests
+//   npm run e2e -- open [url]     fresh browser with the extension, left open
+//   npm run e2e -- login          sign in to the org in the open browser
+//   npm run e2e -- otp <code>     submit Salesforce's emailed verification code
+//   npm run e2e -- close          close the browser
+//   npm run e2e -- id             print the extension ID
+//   npm run e2e -- palette-state  print the palette's state as JSON, tour included
+//   npm run e2e -- type <text>    open the palette (skipping the tour), type, print the state
+//   npm run e2e -- storage [key]  print chrome.storage.local, API keys masked
 //
 // Signing in needs SF_URL, SF_USERNAME and SF_PASSWORD in .env.local. The
 // login asks for the username, then the password on a second screen; login()
@@ -722,7 +722,7 @@ function runTests({ signedIn }) {
     if (login() === 'verify') {
       step('signs in', () => {
         throw new Error('Salesforce emailed a verification code. The browser is still open on that page; '
-          + 'run: npm test -- otp <code>');
+          + 'run: npm run e2e -- otp <code>');
       });
     } else {
       step('signs in', () => true);
@@ -738,8 +738,8 @@ function runTests({ signedIn }) {
 
 // Submit the emailed code into the browser left open on the verification page.
 function submitOtp(code) {
-  if (!code) throw new Error('Usage: npm test -- otp <code>');
-  if (!onVerificationPage()) throw new Error('No verification page open. Run npm test -- login first.');
+  if (!code) throw new Error('Usage: npm run e2e -- otp <code>');
+  if (!onVerificationPage()) throw new Error('No verification page open. Run npm run e2e -- login first.');
   ab('fill', '#emc', code);
   ab('check', '#RememberDeviceCheckbox');
   ab('click', '#save');
@@ -775,7 +775,7 @@ function main() {
       return runTests({ signedIn: true });
     case 'open': {
       const url = arg || process.env.SF_URL;
-      if (!url) throw new Error('Usage: npm test -- open <url>  (or set SF_URL in .env.local)');
+      if (!url) throw new Error('Usage: npm run e2e -- open <url>  (or set SF_URL in .env.local)');
       closeBrowser();
       launch(url);
       console.log(`Browser open with the extension on ${ab('get', 'url').url} (session ${SESSION}).`);
@@ -796,7 +796,7 @@ function main() {
     case 'login': {
       const result = signIn();
       console.log(result === 'verify'
-        ? 'Salesforce emailed a verification code. Run: npm test -- otp <code>'
+        ? 'Salesforce emailed a verification code. Run: npm run e2e -- otp <code>'
         : `${GREEN}Signed in.${RESET} Now on ${ab('get', 'url').url}`);
       return;
     }
