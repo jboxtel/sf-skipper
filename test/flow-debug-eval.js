@@ -307,7 +307,6 @@ async function runOne(page, caseObj) {
     }
   }
 
-
   console.log(`\n${BOLD}${passed} passed, ${failed} failed${RESET} (out of ${cases.length})\n`);
   process.exit(failed > 0 ? 1 : 0);
 })();

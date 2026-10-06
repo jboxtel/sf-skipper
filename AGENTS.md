@@ -4,83 +4,44 @@ Chrome MV3 extension: a command palette for Salesforce. No build step. The repo 
 
 ## Tests
 
-- `test:*` and `eval:*` load the extension's scripts into a `node:vm` context with stubbed Chrome and Salesforce APIs. Plain Node: no browser, no org, no npm install. `eval:*` needs `ANTHROPIC_API_KEY` and fixtures under `evals/`.
-- `npm test` loads the real extension into a browser through [agent-browser](https://github.com/vercel-labs/agent-browser) and runs on the Salesforce login page: palette, `@object`, `@setup`, the AI no-key warnings, `@export`'s Labs flag and editor, the footer, and the Options and popup pages. No org needed. `npm test -- signed-in` also signs in to the dev org from `.env.local` and runs the org pickers and an `@export` query. Setup and use are below.
+`test:*` and `eval:*` load the extension's scripts into a `node:vm` context with stubbed Chrome and Salesforce APIs. Plain Node: no browser, no org, no npm install. `eval:*` also calls Claude; `test/README.md` covers the evals and their fixtures, which aren't in the repo.
 
-## End-to-end: setup
+`npm test` loads the real extension into a browser through [agent-browser](https://github.com/vercel-labs/agent-browser) and runs on the Salesforce login page, signed out. For what it covers, read the `section('…')` calls in `test/e2e.js`. Its header comment lists every subcommand.
 
-1. Install agent-browser: `npm i -g agent-browser && agent-browser install`
-2. For `signed-in`, create `.env.local` in the repo root. It is gitignored.
+Setup: `npm i -g agent-browser && agent-browser install`. Signing in is optional: `npm test -- signed-in` reads `SF_URL`, `SF_USERNAME` and `SF_PASSWORD` from a gitignored `.env.local`; the e2e.js header explains the emailed verification code.
 
-   ```
-   SF_URL=https://login.salesforce.com
-   SF_USERNAME=...
-   SF_PASSWORD=...
-   ```
+Everything runs in the agent-browser session `skipper-e2e`, with its profile in `.e2e-browser-profile/`. Headless by default; `HEADED=1` shows the window on a machine with a display.
 
-Everything runs in the agent-browser session `skipper-e2e`. The browser profile lives in `.e2e-browser-profile/`, so cookies and the "trusted device" flag survive between runs. Headless by default. `HEADED=1` shows the window, but only on a machine with a display.
+## Driving the extension by hand
 
-## End-to-end: the three steps
+`npm test -- open [url]` starts a fresh browser with the extension. Chrome reads the extension's files only at launch, so run it again after every code change; reloading the page is not enough. The content script also runs on the login page, so the palette works signed out. Only the data pickers need an org.
 
-### 1. Open a browser with the extension
+Then pass `--session skipper-e2e` to every agent-browser command, or `export AGENT_BROWSER_SESSION=skipper-e2e`:
 
 ```
-npm test -- open [url]
+agent-browser press Control+Shift+K          # toggle the palette
+agent-browser fill '#sfnav-input' '@object'
+agent-browser press Enter                    # enter the picker
+agent-browser press Escape                   # step back one level; repeat to close
 ```
 
-This always starts a fresh browser, because Chrome only reads the extension's files at launch. Run it again after every code change. Reloading the page is not enough.
-
-`url` defaults to `SF_URL`. The content script runs on every Salesforce host, including the login page, so you can poke the palette without signing in. Only the data pickers (objects, flows, labels…) need a signed-in org.
-
-### 2. Sign in (optional)
-
-```
-npm test -- login
-npm test -- otp <code>      # only if login says a code was emailed
-```
-
-The Salesforce login asks for the username first, then the password on a second screen. The script handles both. A new browser profile triggers an email verification code. The browser waits on that page until you submit the code with `otp`, which ticks "don't ask again". After that, `.e2e-browser-profile/` stays trusted. Deleting `.e2e-browser-profile/` means a new code.
-
-Every login attempt from an untrusted profile emails a fresh code to the org owner. Don't loop on it.
-
-agent-browser's `auth save` / `auth login` vault doesn't fit here: it expects the username and password fields on one screen.
-
-### 3. Drive the extension
-
-Use agent-browser against the open session. Add `--session skipper-e2e` to every command, or `export AGENT_BROWSER_SESSION=skipper-e2e`.
-
-```
-agent-browser --session skipper-e2e press Control+Shift+K    # open the palette
-agent-browser --session skipper-e2e wait '#sfnav-overlay'
-agent-browser --session skipper-e2e snapshot -i -s '#sfnav-overlay'
-agent-browser --session skipper-e2e fill '#sfnav-input' '@object'
-agent-browser --session skipper-e2e press Enter              # enter the @object picker
-agent-browser --session skipper-e2e press Escape             # step back; repeat to close
-```
-
-How the palette works:
-
-- **Open:** Ctrl+Shift+K (Cmd+Shift+K on a Mac) toggles it. The content script listens on `document`, so a key press through agent-browser works. The extension's own `commands` shortcut does not fire in automation.
-- **Root menu:** it lists the `@` keywords: `@object`, `@flow`, `@app`, `@cmd`, `@label`, `@permset`, `@user`, `@setup`, `@ask`, `@soql`, followed by setup links. Type a keyword and press Enter to enter that picker. Typing other text filters the list.
-- **Inside a picker:** typing filters the list. Enter or a click opens the selected item. Arrow keys move the selection. Escape steps back one level: object-scoped, then the picker, then the root, then closed.
-
-DOM to read, all ids prefixed `sfnav-`:
+The extension's own `commands` shortcut never fires in automation, but the content script listens for Ctrl+Shift+K on `document`, so a key press works. The content script runs in an isolated world: `agent-browser eval` sees the DOM, not its variables. `npm test -- palette-state` prints the whole palette, from the DOM, as JSON.
 
 | Selector | What |
 |---|---|
-| `#sfnav-overlay` | palette root; absent until first opened, hidden with `display:none` when closed |
+| `#sfnav-overlay` | palette root; absent until first opened, `display:none` when closed |
 | `#sfnav-input` | search input; `placeholder` changes per mode |
 | `#sfnav-breadcrumb` | current mode, e.g. `@object › Account` |
 | `#sfnav-hint` | status line: counts, "loading", errors |
-| `.sfnav-item` | a result row; `data-url` is where it navigates; `.selected` marks the highlighted one |
-| `.sfnav-item .sfnav-label` / `.sfnav-sublabel` | row text |
-| `.sfnav-section-header` | group headings in the root menu |
+| `.sfnav-item` | a result row; `data-url` is where it goes, `.selected` is the highlight |
+| `.sfnav-label` / `.sfnav-sublabel` | row text |
 
-The content script runs in an isolated world. `agent-browser eval` sees the DOM but not the content script's variables. Read state from the DOM:
+## Gotchas
 
-```
-agent-browser --session skipper-e2e eval "[...document.querySelectorAll('.sfnav-item')].map(e => e.querySelector('.sfnav-label').textContent)"
-```
+Click palette controls through the DOM, with `clickEl` or `clickItem` from e2e.js. agent-browser's `click` aims at coordinates, and the palette sits at the bottom of the viewport under the page's own layout.
 
-`npm test -- close` closes the browser.
+The first-run walkthrough covers the palette whenever the `walkthroughSeen` flag is unset. Options' "Show walkthrough" resets it, so a section that leaves it reset puts the tour in front of later ones. `openPalette` calls `skipTour`; call it yourself after anything else that opens the palette.
 
+Tabs opened by `chrome.runtime.openOptionsPage` don't appear in `agent-browser tab list`. Tabs opened by `window.open` do. The test watches for Options with `chrome.extension.getViews` instead.
+
+For a tab that predates the extension, the on-demand injection path in `background.js`, open `chrome://extensions`, call `chrome.management.setEnabled(id, false)` there, load the page, then enable it again. The extension id derives from the repo's absolute path; e2e.js computes it as `EXT_ID`.

@@ -301,8 +301,8 @@ const CASES = [
         { fields: [{ name: 'StageName', label: 'Stage' }] },
         []
       );
-      // "stage" matches the field surface (StageName/Stage); we now record it
-      // as a weak observation rather than dropping. "opportunity" is a
+      // "stage" matches the field surface (StageName/Stage), so it's recorded
+      // as a weak observation rather than dropped. "opportunity" is a
       // generic noun and stays filtered. So exactly one weak candidate.
       const stage = candidates.find(c => c.term === 'stage');
       return {

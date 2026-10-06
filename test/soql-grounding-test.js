@@ -1,7 +1,5 @@
-// Unit tests for the two grounding helpers added in this branch:
-//   - validateSoqlObjectExists: reject queries whose FROM target isn't in the org
-//   - buildPicklistValueIndex / findPicklistMatchesInPrompt: surface picklist
-//     value hits from the prompt so the model picks the right field
+// Unit tests for soql.js's grounding helpers: object and field existence
+// checks, literal preservation, field-name scoring and the picklist value index.
 //
 // Run:
 //   npm run test:soql-grounding

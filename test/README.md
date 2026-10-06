@@ -1,4 +1,4 @@
-# SOQL Grounding Eval Harness
+# SOQL grounding eval
 
 Measures whether `@soql` picks the right object and produces a sensible query against
 different org metadata shapes. The variable is the **org shape**, not the prompt —
@@ -22,8 +22,8 @@ intent, not parser conformance (that's the planner's job in real runs).
 
 ## Fixtures
 
-All eval fixtures live under `evals/<name>/`. Each fixture is a snapshot of an
-org's metadata — either captured from a real customer org (the preferred case)
+All eval fixtures live under `evals/<name>/`, which is gitignored. Each fixture
+is a snapshot of an org's metadata — either captured from a real customer org (the preferred case)
 or synthesized to exercise a specific grounding pattern.
 
 ```
@@ -42,7 +42,7 @@ Describe field entries follow the real Salesforce shape:
 
 ## Capturing a fixture from a real org
 
-`docs/grounding.html` includes a prompt template you can feed to an LLM with
+`docs/grounding.html` (also gitignored) includes a prompt template you can feed to an LLM with
 read-only Salesforce access (e.g. Claude Code with the Salesfive AI MCP, or
 ChatGPT with a Salesforce-connected GPT). It introspects the org, redacts PII,
 and prints the fixture files in this exact format plus a starter `prompts.json`.
@@ -92,16 +92,9 @@ concrete realization of the abstract concept the fixture is testing.
 Real-org snapshots are the primary source of eval coverage as the matrix grows;
 synthetic fixtures isolate single concepts for diagnostic purposes.
 
-## What's not tested
-
-- Parser conformance (stubbed to always succeed).
-- Custom field labels / picklist values as a primary grounding signal — current
-  `soql.js` scores object api names, labels, and record-type names. Fixtures
-  include the field metadata so future grounding strategies can be measured.
-
 ---
 
-# Flow Debug Grounding Eval Harness
+# Flow debug grounding eval
 
 Measures whether `@debug` correctly identifies the failing element in a flow
 and produces a Flow-Builder-actionable fix, given the flow's metadata, the
@@ -175,7 +168,7 @@ the UI can surface.
 ## validateFlowFix unit tests
 
 ```
-node test/flow-debug-validator-test.js
+npm run test:flow-debug-validator
 ```
 
 Pure unit tests for the validator — no model calls, no API key, runs in a

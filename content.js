@@ -2424,7 +2424,8 @@
 
   // Expose for background.js (called via executeScript in isolated world)
   window.__sfnavToggle = togglePalette;
-  // Already open: restart onboarding so Options' "Show walkthrough" still starts the tour.
+  // Open without toggling. If already open, restart onboarding so Options'
+  // "Show walkthrough" still starts the tour.
   window.__sfnavShow = function () {
     if (!paletteVisible) { showPalette(); return; }
     if (typeof sfnavHideOnboarding === 'function') sfnavHideOnboarding();

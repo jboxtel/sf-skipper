@@ -1,15 +1,25 @@
-// End-to-end tests against a real Salesforce org, driven by agent-browser.
-// See AGENTS.md for setup and for driving the extension by hand.
+// End-to-end tests of the unpacked extension in Chrome, driven by agent-browser.
+// AGENTS.md covers setup and driving the extension by hand.
 //
-//   npm test                run the signed-out tests on the login page
-//   npm test -- signed-in   also sign in and run the org tests
-//   npm test -- open [url]  fresh browser with the extension, left open
-//   npm test -- login       sign in to the org in the open browser
-//   npm test -- otp <code>  submit Salesforce's emailed verification code
-//   npm test -- close       close the browser
+//   npm test                   run the signed-out tests on the login page
+//   npm test -- signed-in      also sign in and run the org tests
+//   npm test -- open [url]     fresh browser with the extension, left open
+//   npm test -- login          sign in to the org in the open browser
+//   npm test -- otp <code>     submit Salesforce's emailed verification code
+//   npm test -- close          close the browser
+//   npm test -- id             print the extension ID
+//   npm test -- palette-state  print the palette's state as JSON, tour included
+//   npm test -- type <text>    open the palette (skipping the tour), type, print the state
+//   npm test -- storage [key]  print chrome.storage.local, API keys masked
 //
-// Everything runs in the agent-browser session "skipper-e2e". Headless by
-// default; HEADED=1 shows the window.
+// Signing in needs SF_URL, SF_USERNAME and SF_PASSWORD in .env.local. The
+// login asks for the username, then the password on a second screen; login()
+// handles both. A new browser profile makes Salesforce email a verification
+// code to the org owner and the browser waits on that page. Submit it with
+// `otp`, which ticks "don't ask again", so .e2e-browser-profile/ stays trusted
+// until you delete it. Every attempt from an untrusted profile emails a fresh
+// code: don't loop on it. agent-browser's auth vault doesn't fit, since it
+// expects both fields on one screen.
 
 const { spawnSync } = require('child_process');
 const fs = require('fs');
@@ -60,15 +70,38 @@ function launch(url) {
   ab('wait', '--load', 'domcontentloaded');
 }
 
+function openUrl(url) {
+  ab('open', url);
+  ab('wait', '--load', 'domcontentloaded');
+}
+
+function sleep(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+// Poll a Node-side check for up to 10 s. Returns its first truthy result.
+function until(fn) {
+  for (let i = 0; i < 40; i++) {
+    const v = fn();
+    if (v) return v;
+    sleep(250);
+  }
+  return null;
+}
+
+// Wait for a JS expression in the page to turn truthy. Returns false on timeout instead of throwing.
+function waitFor(js) {
+  try { ab('wait', '--fn', js); return true; } catch { return false; }
+}
+
 // The daemon takes a moment to exit after close. Launching before it's gone
 // fails with "Failed to connect", so wait until the session is no longer listed.
 function closeBrowser() {
   spawnSync('agent-browser', ['--session', SESSION, 'close'], { encoding: 'utf8' });
-  for (let i = 0; i < 20; i++) {
+  until(() => {
     const list = spawnSync('agent-browser', ['session', 'list'], { encoding: 'utf8' }).stdout || '';
-    if (!list.split('\n').some(line => line.trim().replace(/^→\s*/, '') === SESSION)) return;
-    sleep(250);
-  }
+    return !list.split('\n').some(line => line.trim().replace(/^→\s*/, '') === SESSION);
+  });
 }
 
 function onVerificationPage() {
@@ -101,22 +134,30 @@ function signIn() {
   requireCreds();
   const open = spawnSync('agent-browser', ['--session', SESSION, 'get', 'url'], { encoding: 'utf8' }).status === 0;
   if (!open) launch(process.env.SF_URL);
-  else if (!evaluate("!!document.querySelector('#username')")) ab('open', process.env.SF_URL);
+  else if (!evaluate("!!document.querySelector('#username')")) openUrl(process.env.SF_URL);
   return login();
 }
 
 // ── Palette helpers ─────────────────────────────────────────────────────────
 // The content script runs in an isolated world, so everything is read from the DOM.
 
+const shown = id => `(e => !!e && e.style.display !== 'none')(document.getElementById('${id}'))`;
+const PALETTE_VISIBLE = shown('sfnav-overlay');
+const TOUR_VISIBLE = shown('sfnav-coachmark');
+
 const PALETTE_STATE = `(() => {
   const get = id => document.getElementById(id);
-  const overlay = get('sfnav-overlay');
   return {
-    visible: !!overlay && overlay.style.display !== 'none',
+    visible: ${PALETTE_VISIBLE},
     focused: document.activeElement?.id === 'sfnav-input',
     breadcrumb: get('sfnav-breadcrumb')?.textContent || '',
     hint: get('sfnav-hint')?.textContent || '',
     placeholder: get('sfnav-input')?.placeholder || '',
+    // null unless the walkthrough is showing
+    tour: !${TOUR_VISIBLE} ? null : {
+      step: [...document.querySelectorAll('.sfnav-cm-dot')].findIndex(d => d.classList.contains('sfnav-cm-dot-on')) + 1,
+      title: get('sfnav-cm-title')?.textContent || '',
+    },
     items: [...document.querySelectorAll('.sfnav-item')].map(el => ({
       label: el.querySelector('.sfnav-label')?.textContent || '',
       sublabel: el.querySelector('.sfnav-sublabel')?.textContent || '',
@@ -129,15 +170,6 @@ const PALETTE_STATE = `(() => {
 function palette() {
   return evaluate(PALETTE_STATE);
 }
-
-// Wait for a JS expression to turn truthy. Returns false on timeout instead of throwing.
-function waitFor(js) {
-  try { ab('wait', '--fn', js); return true; } catch { return false; }
-}
-
-const shown = id => `(e => !!e && e.style.display !== 'none')(document.getElementById('${id}'))`;
-const PALETTE_VISIBLE = shown('sfnav-overlay');
-const TOUR_VISIBLE = shown('sfnav-coachmark');
 
 // Skip the first-run walkthrough if it shows. Onboarding reads storage after
 // the palette opens, then starts the tour or marks the brand clickable.
@@ -159,7 +191,7 @@ function closePalette() {
   for (let i = 0; i < 6 && evaluate(PALETTE_VISIBLE); i++) ab('press', 'Escape');
 }
 
-// Type into the palette input and wait for the results to re-render.
+// Replace the palette input's text. The results re-render on the input event.
 function type(text) {
   ab('fill', '#sfnav-input', text);
 }
@@ -188,6 +220,14 @@ function clickItem(label) {
   if (!clicked) throw new Error(`no row labelled "${label}"`);
 }
 
+// Turn the @export Labs flag on or off through @labs, whatever its current state.
+function setExport(on) {
+  enter('@labs');
+  const want = on ? 'Turn on export' : 'Turn off export';
+  if (palette().items.some(i => i.label === want)) clickItem(want);
+  type('');
+}
+
 // ── Tab helpers ─────────────────────────────────────────────────────────────
 
 const extPage = page => `chrome-extension://${EXT_ID}/${page}`;
@@ -208,19 +248,7 @@ function backToLoginTab() {
   ab('tab', loginTab);
 }
 
-function sleep(ms) {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
-
-// Poll a Node-side check for up to 10 s. Returns its first truthy result.
-function until(fn) {
-  for (let i = 0; i < 40; i++) {
-    const v = fn();
-    if (v) return v;
-    sleep(250);
-  }
-  return null;
-}
+// ── Steps ───────────────────────────────────────────────────────────────────
 
 let passed = 0;
 let failed = 0;
@@ -239,14 +267,6 @@ function section(title) {
 }
 
 // ── Signed out: runs on the Salesforce login page ───────────────────────────
-
-// Turn the @export Labs flag on or off through @labs, whatever its current state.
-function setExport(on) {
-  enter('@labs');
-  const want = on ? 'Turn on export' : 'Turn off export';
-  if (palette().items.some(i => i.label === want)) clickItem(want);
-  type('');
-}
 
 function signedOutTests() {
   section('Palette');
@@ -352,14 +372,15 @@ function signedOutTests() {
 
   section('AI without a key');
 
-  step('@ask warns and links to Options', () => {
+  step('@ask warns there is no key and links to Options', () => {
     openPalette();
     enter('@ask');
-    return waitFor("/No API key/.test(document.getElementById('sfnav-ask-keywarn')?.textContent)");
+    return waitFor(`(el => /No API key/.test(el?.textContent) && !!el.querySelector('.sfnav-options-link'))
+      (document.getElementById('sfnav-ask-keywarn'))`);
   });
   closePalette();
 
-  step('@soql warns on submit', () => {
+  step('@soql warns there is no key on submit', () => {
     openPalette();
     enter('@soql');
     type('all accounts');
@@ -412,9 +433,10 @@ function signedOutTests() {
   step('"help" opens the help panel', () => {
     openPalette();
     clickEl('#sfnav-brand');
-    return waitFor("!!document.getElementById('sfnav-help-panel')?.offsetParent");
+    const open = waitFor("!!document.getElementById('sfnav-help-panel')?.offsetParent");
+    clickEl('.sfnav-hp-close');
+    return open;
   });
-  clickEl('.sfnav-hp-close');
 
   step('"feedback" opens the feedback form', () => {
     clickEl('#sfnav-feedback-link');
@@ -476,8 +498,18 @@ function signedOutTests() {
     ab('select', '#openIn', value);
     backToLoginTab();
   };
+  // The profile outlives a run, so drop the stored setting to get the default.
+  const resetOpenIn = () => {
+    newTab('ext', extPage('options.html'));
+    evaluate(`new Promise(r => chrome.storage.local.get('sfnavOptions', ({ sfnavOptions: opts = {} }) => {
+      delete opts.openInNewTab;
+      chrome.storage.local.set({ sfnavOptions: opts }, () => r(true));
+    }))`);
+    backToLoginTab();
+  };
 
   step('by default a pick opens in a new tab', () => {
+    resetOpenIn();
     const before = tabs().length;
     pickManageUsers();
     const opened = until(() => tabs().find(t => t.url.includes('ManageUsers')));
@@ -494,9 +526,8 @@ function signedOutTests() {
     ab('wait', '--url', '**ManageUsers**');
     return tabs().length === before;
   });
-  setOpenIn('new');
-  ab('open', process.env.SF_URL);
-  ab('wait', '--load', 'domcontentloaded');
+  resetOpenIn();
+  openUrl(process.env.SF_URL);
 
   section('Extension pages');
 
@@ -510,17 +541,17 @@ function signedOutTests() {
     evaluate("['new', 'same'].every(v => [...document.querySelectorAll('#openIn option')].some(o => o.value === v))"));
 
   // The key form, without "Save and test": that would call the provider.
-  const isShown = id => `!document.getElementById('${id}').hidden`;
+  const notHidden = id => `!document.getElementById('${id}').hidden`;
 
   step('pasting a Claude key recognizes it', () => {
     ab('fill', '#apiKey', 'sk-ant-api03-not-a-real-key-0000');
-    return evaluate(isShown('scr-recognized'))
+    return evaluate(notHidden('scr-recognized'))
       && /That's a Claude key/.test(evaluate("document.getElementById('matchLine').textContent"));
   });
 
   step('"Clear and paste a different key" returns to the paste screen', () => {
     clickEl('#clearDraft');
-    return evaluate(`${isShown('scr-paste')} && !${isShown('scr-recognized')}`)
+    return evaluate(`${notHidden('scr-paste')} && !${notHidden('scr-recognized')}`)
       && evaluate("document.getElementById('apiKey').value") === '';
   });
 
@@ -531,7 +562,7 @@ function signedOutTests() {
 
   step('an unrecognized key offers "Use it anyway"', () => {
     ab('fill', '#apiKey', 'not-a-known-prefix-1234');
-    return evaluate(isShown('unrecognized'))
+    return evaluate(notHidden('unrecognized'))
       && /Use it .*anyway/.test(evaluate("document.getElementById('unrecognized').innerText"));
   });
   ab('fill', '#apiKey', '');
@@ -567,19 +598,17 @@ function signedOutTests() {
   }
 
   step('starts the tour on a tab that never opened the palette', () => {
-    ab('open', process.env.SF_URL); // fresh page: onboarding has only seen storage at load
-    ab('wait', '--load', 'domcontentloaded');
+    openUrl(process.env.SF_URL);
     return showWalkthroughFromOptions();
   });
 
   step('starts the tour with the palette already open, without closing it', () => {
-    ab('press', 'Escape'); // skip the tour, palette stays open
+    ab('press', 'Escape'); // skips the tour; the palette stays open
     if (!evaluate(PALETTE_VISIBLE)) throw new Error('palette closed');
     backToLoginTab();
     return showWalkthroughFromOptions();
   });
-  ab('press', 'Escape');
-  closePalette();
+  closePalette(); // the first Escape skips the tour
   backToLoginTab();
 
   // A tab that loaded while the extension was off has no content scripts. The
@@ -625,8 +654,7 @@ function signedOutTests() {
 
   // The login tab's content scripts died with the disable; reload for fresh ones.
   backToLoginTab();
-  ab('open', process.env.SF_URL);
-  ab('wait', '--load', 'domcontentloaded');
+  openUrl(process.env.SF_URL);
 }
 
 // ── Signed in: runs in Lightning ────────────────────────────────────────────
@@ -661,10 +689,7 @@ function signedInTests() {
   section('@export');
 
   step('@labs turns on export', () => {
-    type('@labs');
-    if (palette().items.some(i => i.label === 'Turn on export')) {
-      clickItem('Turn on export');
-    }
+    setExport(true);
     type('@export');
     return palette().items.some(i => i.label === '@export');
   });
@@ -673,7 +698,7 @@ function signedInTests() {
     ab('press', 'Enter');
     ab('wait', '#sfnav-export-query');
     ab('fill', '#sfnav-export-query', 'SELECT Id, Name FROM Account LIMIT 5');
-    ab('click', '#sfnav-export-run');
+    clickEl('#sfnav-export-run');
     return waitFor("(document.getElementById('sfnav-export-summary')?.textContent || '').length > 0")
       && evaluate("document.querySelectorAll('#sfnav-export-grid tr').length > 1");
   });
@@ -722,6 +747,23 @@ function submitOtp(code) {
   console.log(`${GREEN}Verified.${RESET} Now on ${ab('get', 'url').url}`);
 }
 
+function printJson(value) {
+  console.log(JSON.stringify(value, null, 2));
+}
+
+// Read chrome.storage.local from a throwaway extension tab, masking API keys.
+function readStorage(key) {
+  const before = tabs().find(t => t.active).tabId;
+  newTab('storage', extPage('popup.html'));
+  try {
+    return evaluate(`new Promise(r => chrome.storage.local.get(${key ? JSON.stringify(key) : 'null'}, data =>
+      r(JSON.parse(JSON.stringify(data, (k, v) => /apikey/i.test(k) && v ? v.slice(0, 7) + '…' : v)))))`);
+  } finally {
+    ab('tab', 'close', 'storage');
+    ab('tab', before);
+  }
+}
+
 function main() {
   if (fs.existsSync(ENV_FILE)) process.loadEnvFile(ENV_FILE);
   const [cmd, arg] = process.argv.slice(2);
@@ -737,8 +779,20 @@ function main() {
       closeBrowser();
       launch(url);
       console.log(`Browser open with the extension on ${ab('get', 'url').url} (session ${SESSION}).`);
+      console.log(`Extension ID: ${EXT_ID}`);
       return;
     }
+    case 'id':
+      return console.log(EXT_ID);
+    case 'palette-state':
+      return printJson(palette());
+    case 'type': {
+      if (!openPalette()) throw new Error('palette did not open');
+      type(process.argv.slice(3).join(' '));
+      return printJson(palette());
+    }
+    case 'storage':
+      return printJson(readStorage(arg));
     case 'login': {
       const result = signIn();
       console.log(result === 'verify'

@@ -2,8 +2,7 @@
 //
 // Loads the extension's scripts into one node:vm context. Each script runs
 // like a <script> tag: top-level const/let/function declarations land in one
-// shared global scope. The methods mirror the bits of Playwright's Page the
-// harnesses used, so the harness code reads the same as before.
+// shared global scope. The methods are named after Playwright's Page API.
 
 const fs = require('fs');
 const vm = require('vm');
