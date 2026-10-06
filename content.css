@@ -74,6 +74,7 @@
   display: none;
   align-items: center;
   gap: 6px;
+  flex-shrink: 0;
 }
 
 .sfnav-bc-seg {
@@ -104,6 +105,7 @@
   background: transparent;
   width: 100%;
   box-sizing: border-box;
+  flex-shrink: 0;
 }
 
 #sfnav-input::placeholder {
@@ -122,6 +124,7 @@
   color: var(--sf-ink-soft);
   min-height: 18px;
   line-height: 1.4;
+  flex-shrink: 0;
 }
 
 /* ─── Results ──────────────────────────────────────── */
