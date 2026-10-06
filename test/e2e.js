@@ -144,6 +144,9 @@ function signIn() {
 const shown = id => `(e => !!e && e.style.display !== 'none')(document.getElementById('${id}'))`;
 const PALETTE_VISIBLE = shown('sfnav-overlay');
 const TOUR_VISIBLE = shown('sfnav-coachmark');
+// Onboarding reads storage after the palette opens, then starts the tour or
+// makes the brand clickable. Until then a click on "help" does nothing.
+const ONBOARDING_SETTLED = `${TOUR_VISIBLE} || !!document.getElementById('sfnav-brand')?.classList.contains('sfnav-brand-clickable')`;
 
 const PALETTE_STATE = `(() => {
   const get = id => document.getElementById(id);
@@ -171,20 +174,17 @@ function palette() {
   return evaluate(PALETTE_STATE);
 }
 
-// Skip the first-run walkthrough if it shows. Onboarding reads storage after
-// the palette opens, then starts the tour or marks the brand clickable.
-function skipTour() {
-  waitFor(`${TOUR_VISIBLE} || document.getElementById('sfnav-brand')?.classList.contains('sfnav-brand-clickable')`);
-  if (evaluate(TOUR_VISIBLE)) clickEl('.sfnav-cm-skip');
-}
-
-// Open the palette with the shortcut, skipping the walkthrough.
+// Open the palette with the shortcut. Each test section starts with the
+// walkthrough marked seen, so no tour gets in the way.
 function openPalette() {
   if (evaluate(PALETTE_VISIBLE)) return true;
   ab('press', 'Control+Shift+K');
-  if (!waitFor(PALETTE_VISIBLE)) return false;
-  skipTour();
-  return true;
+  return waitFor(PALETTE_VISIBLE) && waitFor(ONBOARDING_SETTLED);
+}
+
+// Skip the first-run walkthrough if it shows, for a profile used by hand.
+function skipTour() {
+  if (evaluate(TOUR_VISIBLE)) ab('click', '.sfnav-cm-skip');
 }
 
 function closePalette() {
@@ -202,22 +202,15 @@ function enter(keyword) {
   ab('press', 'Enter');
 }
 
-// Click an element through the DOM. agent-browser's click aims at coordinates,
-// and the palette's footer can sit under the page's own layout.
-function clickEl(sel) {
-  const found = evaluate(`(el => (el?.click(), !!el))(document.querySelector(${JSON.stringify(sel)}))`);
-  if (!found) throw new Error(`no element matches ${sel}`);
-}
-
 // Click the result row with this exact label.
 function clickItem(label) {
-  const clicked = evaluate(`(() => {
+  const n = evaluate(`(() => {
     const row = [...document.querySelectorAll('.sfnav-item')]
       .find(el => el.querySelector('.sfnav-label')?.textContent === ${JSON.stringify(label)});
-    row?.click();
-    return !!row;
+    return row ? [...row.parentElement.children].indexOf(row) + 1 : 0;
   })()`);
-  if (!clicked) throw new Error(`no row labelled "${label}"`);
+  if (!n) throw new Error(`no row labelled "${label}"`);
+  ab('click', `#sfnav-results > :nth-child(${n})`);
 }
 
 // Turn the @export Labs flag on or off through @labs, whatever its current state.
@@ -242,6 +235,23 @@ function newTab(label, url) {
   ab('wait', '--load', 'domcontentloaded');
 }
 
+// Run JS in a throwaway extension tab, for chrome.* APIs, then return to the tab we were on.
+function inExtTab(js) {
+  const before = tabs().find(t => t.active).tabId;
+  newTab('scratch', extPage('popup.html'));
+  try { return evaluate(js); }
+  finally {
+    ab('tab', 'close', 'scratch');
+    ab('tab', before);
+  }
+}
+
+// The stored state every test section starts from: the walkthrough seen, nothing else.
+function resetStorage() {
+  inExtTab(`new Promise(r => chrome.storage.local.clear(() =>
+    chrome.storage.local.set({ sfnavOptions: { walkthroughSeen: true } }, () => r(true))))`);
+}
+
 // Close every tab but the login tab and switch back to it.
 function backToLoginTab() {
   for (const t of tabs()) if (t.tabId !== loginTab) ab('tab', 'close', t.tabId);
@@ -263,6 +273,7 @@ function step(label, fn) {
 }
 
 function section(title) {
+  resetStorage();
   console.log(`\n${BOLD}${title}${RESET}`);
 }
 
@@ -432,14 +443,14 @@ function signedOutTests() {
 
   step('"help" opens the help panel', () => {
     openPalette();
-    clickEl('#sfnav-brand');
+    ab('click', '#sfnav-brand');
     const open = waitFor("!!document.getElementById('sfnav-help-panel')?.offsetParent");
-    clickEl('.sfnav-hp-close');
+    ab('click', '.sfnav-hp-close');
     return open;
   });
 
   step('"feedback" opens the feedback form', () => {
-    clickEl('#sfnav-feedback-link');
+    ab('click', '#sfnav-feedback-link');
     return waitFor("document.activeElement?.id === 'sfnav-feedback-message'");
   });
   closePalette();
@@ -450,9 +461,9 @@ function signedOutTests() {
 
   // The help panel opens from the brand, which only works once the tour has been seen.
   function replayFromHelp() {
-    clickEl('#sfnav-brand');
+    ab('click', '#sfnav-brand');
     if (!waitFor("!!document.getElementById('sfnav-help-panel')?.offsetParent")) throw new Error('help panel did not open');
-    clickEl('.sfnav-hp-replay');
+    ab('click', '.sfnav-hp-replay');
     return waitFor(TOUR_VISIBLE);
   }
 
@@ -463,20 +474,20 @@ function signedOutTests() {
 
   step('Next and Back move between steps', () => {
     const first = tourTitle();
-    clickEl('.sfnav-cm-next');
+    ab('click', '.sfnav-cm-next');
     const second = tourTitle();
     if (second === first) throw new Error('Next did not change the title');
-    clickEl('.sfnav-cm-prev');
+    ab('click', '.sfnav-cm-prev');
     return tourTitle() === first;
   });
 
   step('finishing shows the completion card', () => {
-    for (let i = 0; i < 20 && evaluate(TOUR_VISIBLE); i++) clickEl('.sfnav-cm-next');
+    for (let i = 0; i < 20 && evaluate(TOUR_VISIBLE); i++) ab('click', '.sfnav-cm-next');
     return !evaluate(TOUR_VISIBLE) && waitFor(shown('sfnav-completion-card'));
   });
 
   step('Escape skips it and leaves the palette open', () => {
-    clickEl('.sfnav-cc-dismiss');
+    ab('click', '.sfnav-cc-dismiss');
     replayFromHelp();
     ab('press', 'Escape');
     return waitFor(`!${TOUR_VISIBLE}`) && evaluate(PALETTE_VISIBLE);
@@ -498,18 +509,8 @@ function signedOutTests() {
     ab('select', '#openIn', value);
     backToLoginTab();
   };
-  // The profile outlives a run, so drop the stored setting to get the default.
-  const resetOpenIn = () => {
-    newTab('ext', extPage('options.html'));
-    evaluate(`new Promise(r => chrome.storage.local.get('sfnavOptions', ({ sfnavOptions: opts = {} }) => {
-      delete opts.openInNewTab;
-      chrome.storage.local.set({ sfnavOptions: opts }, () => r(true));
-    }))`);
-    backToLoginTab();
-  };
 
   step('by default a pick opens in a new tab', () => {
-    resetOpenIn();
     const before = tabs().length;
     pickManageUsers();
     const opened = until(() => tabs().find(t => t.url.includes('ManageUsers')));
@@ -526,7 +527,6 @@ function signedOutTests() {
     ab('wait', '--url', '**ManageUsers**');
     return tabs().length === before;
   });
-  resetOpenIn();
   openUrl(process.env.SF_URL);
 
   section('Extension pages');
@@ -550,13 +550,13 @@ function signedOutTests() {
   });
 
   step('"Clear and paste a different key" returns to the paste screen', () => {
-    clickEl('#clearDraft');
+    ab('click', '#clearDraft');
     return evaluate(`${notHidden('scr-paste')} && !${notHidden('scr-recognized')}`)
       && evaluate("document.getElementById('apiKey').value") === '';
   });
 
   step('the eye button reveals the key', () => {
-    clickEl('#revealKey');
+    ab('click', '#revealKey');
     return evaluate("document.getElementById('apiKey').type") === 'text';
   });
 
@@ -572,15 +572,16 @@ function signedOutTests() {
     return waitFor("document.getElementById('openPalette')?.disabled === true");
   });
 
-  // agent-browser doesn't list tabs that chrome.runtime.openOptionsPage opens, so
-  // a second extension page watches for it through chrome.extension.getViews.
+  // agent-browser's tab list misses tabs that chrome.runtime.openOptionsPage
+  // opens (window.open tabs do show up), so a second extension page watches
+  // for Options through chrome.extension.getViews.
   const optionsViews = "chrome.extension.getViews({ type: 'tab' }).filter(w => w.location.pathname === '/options.html')";
   step("popup's Options button opens Options", () => {
     ab('tab', 'close', 'ext');
     newTab('watch', extPage('popup.html'));
     if (evaluate(`${optionsViews}.length`)) throw new Error('Options already open');
     newTab('ext', extPage('popup.html'));
-    clickEl('#openOptions');
+    ab('click', '#openOptions');
     ab('tab', 'watch');
     return !!until(() => evaluate(`${optionsViews}.length`));
   });
@@ -592,7 +593,8 @@ function signedOutTests() {
 
   function showWalkthroughFromOptions() {
     newTab('ext', extPage('options.html'));
-    clickEl('#replayWalkthrough');
+    ab('click', '.ni[data-pane="walkthrough"]');
+    ab('click', '#replayWalkthrough');
     ab('tab', loginTab);
     return waitFor(`${PALETTE_VISIBLE} && ${TOUR_VISIBLE}`);
   }
@@ -613,6 +615,9 @@ function signedOutTests() {
 
   // A tab that loaded while the extension was off has no content scripts. The
   // popup and Options inject them on demand, reading the file list from the manifest.
+  // To get such a tab, chrome://extensions turns the extension off through
+  // chrome.management (it can't from its own pages, which close with it), the
+  // tab loads, and the extension comes back on.
   section('On-demand injection');
 
   const setEnabled = on => evaluate(
@@ -635,7 +640,6 @@ function signedOutTests() {
   });
 
   step('@export opens its editor there, focused', () => {
-    skipTour();
     setExport(true);
     type('@export');
     ab('press', 'Enter');
@@ -678,6 +682,7 @@ function signedInTests() {
 
   for (const { keyword, noun } of PICKERS) {
     step(`${keyword} opens and loads`, () => {
+      openPalette();
       enter(keyword);
       if (!palette().breadcrumb.includes(keyword)) throw new Error(`breadcrumb: ${palette().breadcrumb}`);
       return waitFor(`!/loading/i.test(document.getElementById('sfnav-hint')?.textContent)`)
@@ -689,6 +694,7 @@ function signedInTests() {
   section('@export');
 
   step('@labs turns on export', () => {
+    openPalette();
     setExport(true);
     type('@export');
     return palette().items.some(i => i.label === '@export');
@@ -698,7 +704,7 @@ function signedInTests() {
     ab('press', 'Enter');
     ab('wait', '#sfnav-export-query');
     ab('fill', '#sfnav-export-query', 'SELECT Id, Name FROM Account LIMIT 5');
-    clickEl('#sfnav-export-run');
+    ab('click', '#sfnav-export-run');
     return waitFor("(document.getElementById('sfnav-export-summary')?.textContent || '').length > 0")
       && evaluate("document.querySelectorAll('#sfnav-export-grid tr').length > 1");
   });
@@ -753,15 +759,8 @@ function printJson(value) {
 
 // Read chrome.storage.local from a throwaway extension tab, masking API keys.
 function readStorage(key) {
-  const before = tabs().find(t => t.active).tabId;
-  newTab('storage', extPage('popup.html'));
-  try {
-    return evaluate(`new Promise(r => chrome.storage.local.get(${key ? JSON.stringify(key) : 'null'}, data =>
-      r(JSON.parse(JSON.stringify(data, (k, v) => /apikey/i.test(k) && v ? v.slice(0, 7) + '…' : v)))))`);
-  } finally {
-    ab('tab', 'close', 'storage');
-    ab('tab', before);
-  }
+  return inExtTab(`new Promise(r => chrome.storage.local.get(${key ? JSON.stringify(key) : 'null'}, data =>
+    r(JSON.parse(JSON.stringify(data, (k, v) => /apikey/i.test(k) && v ? v.slice(0, 7) + '…' : v)))))`);
 }
 
 function main() {
@@ -788,6 +787,7 @@ function main() {
       return printJson(palette());
     case 'type': {
       if (!openPalette()) throw new Error('palette did not open');
+      skipTour();
       type(process.argv.slice(3).join(' '));
       return printJson(palette());
     }

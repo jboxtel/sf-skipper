@@ -25,7 +25,7 @@ agent-browser press Enter                    # enter the picker
 agent-browser press Escape                   # step back one level; repeat to close
 ```
 
-The extension's own `commands` shortcut never fires in automation, but the content script listens for Ctrl+Shift+K on `document`, so a key press works. The content script runs in an isolated world: `agent-browser eval` sees the DOM, not its variables. `npm run e2e -- palette-state` prints the whole palette, from the DOM, as JSON.
+The extension's own `commands` shortcut never fires in automation, but the content script listens for Ctrl+Shift+K on `document`, so a key press works. The content script runs in an isolated world: `agent-browser eval` sees the DOM, not its variables. `npm run e2e -- palette-state` prints the whole palette, from the DOM, as JSON. Until the walkthrough has been seen, it covers the palette on open; `agent-browser click .sfnav-cm-skip` dismisses it.
 
 | Selector | What |
 |---|---|
@@ -35,13 +35,3 @@ The extension's own `commands` shortcut never fires in automation, but the conte
 | `#sfnav-hint` | status line: counts, "loading", errors |
 | `.sfnav-item` | a result row; `data-url` is where it goes, `.selected` is the highlight |
 | `.sfnav-label` / `.sfnav-sublabel` | row text |
-
-## Gotchas
-
-Click palette controls through the DOM, with `clickEl` or `clickItem` from e2e.js. agent-browser's `click` aims at coordinates, and the palette sits at the bottom of the viewport under the page's own layout.
-
-The first-run walkthrough covers the palette whenever the `walkthroughSeen` flag is unset. Options' "Show walkthrough" resets it, so a section that leaves it reset puts the tour in front of later ones. `openPalette` calls `skipTour`; call it yourself after anything else that opens the palette.
-
-Tabs opened by `chrome.runtime.openOptionsPage` don't appear in `agent-browser tab list`. Tabs opened by `window.open` do. The test watches for Options with `chrome.extension.getViews` instead.
-
-For a tab that predates the extension, the on-demand injection path in `background.js`, open `chrome://extensions`, call `chrome.management.setEnabled(id, false)` there, load the page, then enable it again. The extension id derives from the repo's absolute path; e2e.js computes it as `EXT_ID`.
