@@ -346,12 +346,7 @@
 
   // ─── Step render ───────────────────────────────────────────────────────────
 
-  function renderStep(stepNum) {
-    var step = STEPS[stepNum - 1];
-
-    var fill = document.getElementById('sfnav-cm-fill');
-    if (fill) fill.style.width = ((stepNum / STEPS.length) * 100) + '%';
-
+  function renderText(step) {
     var eyebrow = document.getElementById('sfnav-cm-eyebrow');
     var title   = document.getElementById('sfnav-cm-title');
     var desc    = document.getElementById('sfnav-cm-desc');
@@ -360,6 +355,29 @@
     if (title)   title.textContent   = step.title;
     if (desc)    desc.textContent    = step.desc;
     if (note)  { note.textContent = step.note || ''; note.style.display = step.note ? '' : 'none'; }
+  }
+
+  // Size the coachmark to its tallest step so it doesn't jump between steps.
+  function lockHeight() {
+    var wrap = document.querySelector('.sfnav-cm-wrap');
+    if (!wrap) return;
+    wrap.style.minHeight = '';
+    var max = 0;
+    STEPS.forEach(function (step) {
+      renderText(step);
+      renderRight(step);
+      max = Math.max(max, wrap.offsetHeight);
+    });
+    wrap.style.minHeight = max + 'px';
+  }
+
+  function renderStep(stepNum) {
+    var step = STEPS[stepNum - 1];
+
+    var fill = document.getElementById('sfnav-cm-fill');
+    if (fill) fill.style.width = ((stepNum / STEPS.length) * 100) + '%';
+
+    renderText(step);
 
     var dots = document.querySelectorAll('.sfnav-cm-dot');
     dots.forEach(function (d, i) { d.classList.toggle('sfnav-cm-dot-on', i === stepNum - 1); });
@@ -405,6 +423,7 @@
 
     _tourActive = true;
     _tourStep   = 1;
+    lockHeight();
     goToStep(1);
 
     _resizeListener = function () { positionRing(STEPS[_tourStep - 1].rows); };
