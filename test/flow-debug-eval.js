@@ -1,6 +1,6 @@
 // Flow Debug grounding eval harness.
 //
-// Boots Playwright, injects flow-debug.js + its dependencies into a blank page,
+// Loads flow-debug.js + its dependencies into a node:vm context,
 // stubs the Salesforce REST + Tooling API + the chrome.runtime Claude bridge
 // with fixture data, then runs analyzeFlowDebug(flowId, debug, expectation)
 // against every case and asserts on the parsed { summary, rootCause, fix }.
@@ -13,7 +13,7 @@
 //   ANTHROPIC_API_KEY=sk-ant-... npm run eval:flow-debug
 //   ANTHROPIC_API_KEY=sk-ant-... node test/flow-debug-eval.js <caseName>
 
-const { chromium } = require('playwright');
+const { newPage } = require('./vm-page');
 const fs = require('fs');
 const path = require('path');
 
@@ -242,9 +242,7 @@ async function runOne(page, caseObj) {
     process.exit(2);
   }
 
-  const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage();
-  await page.goto('data:text/html,<html><body></body></html>');
+  const page = newPage();
 
   await page.exposeFunction('__callClaude', async (system, user) => {
     return callAnthropic(apiKey, model, system, user);
@@ -309,7 +307,6 @@ async function runOne(page, caseObj) {
     }
   }
 
-  await browser.close();
 
   console.log(`\n${BOLD}${passed} passed, ${failed} failed${RESET} (out of ${cases.length})\n`);
   process.exit(failed > 0 ? 1 : 0);

@@ -4,7 +4,8 @@ Chrome MV3 extension: a command palette for Salesforce. No build step. The repo 
 
 ## Tests
 
-- `npm test` and the `test:*` / `eval:*` scripts load the extension's scripts into a blank Playwright page with stubbed Chrome and Salesforce APIs. No org needed. `eval:*` needs `ANTHROPIC_API_KEY`.
+- `test:*` and `eval:*` load the extension's scripts into a `node:vm` context with stubbed Chrome and Salesforce APIs. Plain Node: no browser, no org, no npm install. `eval:*` needs `ANTHROPIC_API_KEY` and fixtures under `evals/`.
+- `npm test` drives the palette in a real browser: agent-browser opens `test/test.html`, which loads the palette scripts plus stubs, in its own session `skipper-test`. No org needed, but agent-browser must be installed (step 1 below).
 - `npm run e2e` runs against a real Salesforce dev org through [agent-browser](https://github.com/vercel-labs/agent-browser). Setup and use are below. The tests in `test/e2e.js` come in two groups: palette basics that run signed out on the login page, then the org pickers and `@export`, which run after signing in.
 
 ## End-to-end: setup

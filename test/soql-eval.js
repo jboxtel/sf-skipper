@@ -1,6 +1,6 @@
 // SOQL grounding eval harness.
 //
-// Boots Playwright, injects soql.js + its dependencies into a blank page,
+// Loads soql.js + its dependencies into a node:vm context,
 // stubs Salesforce REST + the chrome.runtime Claude bridge with fixture data,
 // then runs generateSoql(prompt) against every (prompt × org) pair in the
 // matrix and asserts on the parsed result.
@@ -13,7 +13,7 @@
 //   ANTHROPIC_API_KEY=sk-ant-... npm run eval:soql
 //   ANTHROPIC_API_KEY=sk-ant-... node test/soql-eval.js <orgName> <promptId>
 
-const { chromium } = require('playwright');
+const { newPage } = require('./vm-page');
 const fs = require('fs');
 const path = require('path');
 
@@ -273,9 +273,7 @@ async function runOne(page, org, promptText) {
     process.exit(2);
   }
 
-  const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage();
-  await page.goto('data:text/html,<html><body></body></html>');
+  const page = newPage();
 
   await page.exposeFunction('__callClaude', async (system, user) => {
     return callAnthropic(apiKey, model, system, user);
@@ -341,7 +339,6 @@ async function runOne(page, org, promptText) {
     }
   }
 
-  await browser.close();
 
   console.log(`\n${BOLD}${passed} passed, ${failed} failed${RESET} (out of ${cells.length})\n`);
   process.exit(failed > 0 ? 1 : 0);

@@ -7,7 +7,7 @@
 //   npm run test:soql-grounding
 //   node test/soql-grounding-test.js
 
-const { chromium } = require('playwright');
+const { newPage } = require('./vm-page');
 const path = require('path');
 
 const ROOT = path.resolve(__dirname, '..');
@@ -351,9 +351,7 @@ const PICKLIST_INDEX_CASES = [
 ];
 
 (async () => {
-  const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage();
-  await page.goto('data:text/html,<html><body></body></html>');
+  const page = newPage();
 
   await page.evaluate(() => {
     window.getOrgBase = () => 'https://myorg.lightning.force.com';
@@ -563,7 +561,6 @@ const PICKLIST_INDEX_CASES = [
     }
   }
 
-  await browser.close();
   const total = OBJECT_EXISTS_CASES.length + FIELDS_EXIST_CASES.length + LITERAL_PRESERVATION_CASES.length + FIELD_NAME_SCORING_CASES.length + PICKLIST_INDEX_CASES.length;
   console.log(`\n${BOLD}${passed} passed, ${failed} failed${RESET} (out of ${total})\n`);
   process.exit(failed > 0 ? 1 : 0);

@@ -1,8 +1,12 @@
-const { chromium } = require('playwright');
-const fs = require('fs');
+// Palette tests in a real browser, driven by agent-browser (see AGENTS.md).
+// test/test.html loads the palette scripts with chrome.* and Salesforce
+// API stubs; no extension, no org.
+
+const { spawnSync } = require('child_process');
 const path = require('path');
 
-const EXT = path.resolve(__dirname, '..');
+const PAGE_URL = 'file://' + path.join(__dirname, 'test.html');
+const SESSION = 'skipper-test';
 const GREEN = '\x1b[32m';
 const RED = '\x1b[31m';
 const RESET = '\x1b[0m';
@@ -30,107 +34,75 @@ async function assert(label, condition, detail) {
   }
 }
 
-async function injectExtension(page) {
-  // Inject CSS
-  await page.addStyleTag({ path: path.join(EXT, 'content.css') });
-
-  // Inject scripts as script tags so const/let declarations are shared across all of them.
-  // Order matters: salesforce-urls (getApiBase) → shared (sfRestPreamble) → objects/commands.
-  // markdown.js holds esc + renderAskMarkdown, used by content.js.
-  for (const file of ['salesforce-urls.js', 'shared.js', 'markdown.js', 'objects.js', 'commands.js', 'export.js']) {
-    await page.addScriptTag({ path: path.join(EXT, file) });
-  }
-
-  // Stubs: chrome API + fetch (mocking Salesforce REST API response)
-  const contentSrc = fs.readFileSync(path.join(EXT, 'content.js'), 'utf8');
-  await page.addScriptTag({
-    content: `
-      window.chrome = window.chrome || {
-        runtime: {},
-        storage: { local: { get: (_k, cb) => cb({}), set: () => {} } }
-      };
-      // flows.js / apps.js / labels.js / permsets.js / users.js / soql.js / ask.js
-      // aren't injected — stub every symbol content.js / commands.js reaches for.
-      window.initFlows = () => {};
-      window.getAllFlows = () => [];
-      window.getFlowsState = () => 'idle';
-      window.getFlowsError = () => '';
-      window.resolveFlowPicker = () => ({ mode: 'flow-picker', results: [], hint: '' });
-      window.initApps = () => {};
-      window.getAllApps = () => [];
-      window.getAppsState = () => 'idle';
-      window.getAppsError = () => '';
-      window.resolveAppPicker = () => ({ mode: 'app-picker', results: [], hint: '' });
-      window.initLabels = () => {};
-      window.getAllLabels = () => [];
-      window.getLabelsState = () => 'idle';
-      window.getLabelsError = () => '';
-      window.resolveLabelPicker = () => ({ mode: 'label-picker', results: [], hint: '' });
-      window.initPermsets = () => {};
-      window.getAllPermsets = () => [];
-      window.getPermsetsState = () => 'idle';
-      window.getPermsetsError = () => '';
-      window.resolvePermsetPicker = () => ({ mode: 'permset-picker', results: [], hint: '' });
-      window.initUsers = () => {};
-      window.getAllUsers = () => [];
-      window.getUsersState = () => 'idle';
-      window.getUsersError = () => '';
-      window.resolveUserPicker = () => ({ mode: 'user-picker', results: [], hint: '' });
-      window.hasSoqlApiKey = () => Promise.resolve(false);
-      window.getActiveProviderSummary = () => Promise.resolve(null);
-      window.generateSoql = () => Promise.reject(new Error('not stubbed'));
-      window.getSoqlHistory = () => Promise.resolve([]);
-      window.addToSoqlHistory = () => Promise.resolve();
-      // soql.js isn't injected — @export autocomplete reads its describe cache
-      window.fetchDescribe = (apiName) => Promise.resolve(apiName === 'Account' ? [
-        { name: 'Id', label: 'Account ID', type: 'id' },
-        { name: 'Name', label: 'Account Name', type: 'string' },
-        { name: 'OwnerId', label: 'Owner', type: 'reference', referenceTo: ['User'], relationshipName: 'Owner' }
-      ] : []);
-      // flow-debug.js isn't injected — stub the symbols content.js / commands.js touch
-      window.isFlowBuilderPage = () => false;
-      window.getFlowIdFromUrl = () => null;
-      window.analyzeFlowDebug = () => Promise.reject(new Error('not stubbed'));
-      // ask.js isn't injected — stub the symbols content.js touches
-      window.runAsk = () => Promise.reject(new Error('not stubbed'));
-      window.getAskOrgContext = () => ({ url: '', host: '' });
-      // CMDT helpers live in cmdt.js (not injected) — stub the lookups
-      window.getKeyPrefixForCmdt = () => Promise.reject(new Error('not stubbed'));
-      window.getEntityIdForCmdt = () => Promise.reject(new Error('not stubbed'));
-      window.getAllCustomMetadataTypes = () => [];
-      // Mock fetch so @load returns 2 test custom objects
-      window.fetch = (url) => {
-        if (url === '/services/data/') {
-          return Promise.resolve({ ok: true, json: () => Promise.resolve([{ url: '/services/data/v61.0/', version: 'v61.0' }]) });
-        }
-        return Promise.resolve({ ok: true, json: () => Promise.resolve({
-          sobjects: [
-            { name: 'Claim__c',         label: 'Claim',          custom: true  },
-            { name: 'ClaimLineItem__c', label: 'Claim Line Item', custom: true  },
-            { name: 'Account',          label: 'Account',         custom: false },
-          ]
-        })});
-      };
-      ${contentSrc}
-    `,
-  });
+// Run one agent-browser command in our session and return its data payload.
+function ab(...args) {
+  const res = spawnSync('agent-browser', ['--session', SESSION, '--json', ...args], { encoding: 'utf8' });
+  if (res.error) throw new Error(`agent-browser not runnable: ${res.error.message}`);
+  let out;
+  try { out = JSON.parse(res.stdout.trim().split('\n').pop()); }
+  catch { throw new Error(`agent-browser ${args[0]}: ${(res.stderr || res.stdout).trim()}`); }
+  if (!out.success) throw new Error(`agent-browser ${args[0]}: ${out.error}`);
+  return out.data;
 }
 
+function evaluate(js) {
+  return ab('eval', '-b', Buffer.from(js).toString('base64')).result;
+}
+
+// The daemon takes a moment to exit after close; opening before it's gone
+// fails with "Failed to connect", so wait until the session is unlisted.
+function closeBrowser() {
+  spawnSync('agent-browser', ['--session', SESSION, 'close'], { encoding: 'utf8' });
+  for (let i = 0; i < 20; i++) {
+    const list = spawnSync('agent-browser', ['session', 'list'], { encoding: 'utf8' }).stdout || '';
+    if (!list.split('\n').some(line => line.trim().replace(/^→\s*/, '') === SESSION)) return;
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250);
+  }
+}
+
+// The slice of Playwright's Page these tests use. Functions run from their
+// source text in the page, so they can't close over test variables.
+const page = {
+  async $(sel) {
+    return evaluate(`!!document.querySelector(${JSON.stringify(sel)})`) ? {} : null;
+  },
+  async $eval(sel, fn) {
+    return evaluate(`(() => {
+      const el = document.querySelector(${JSON.stringify(sel)});
+      if (!el) throw new Error('no element matches ' + ${JSON.stringify(sel)});
+      return (${fn})(el);
+    })()`);
+  },
+  async $$eval(sel, fn) {
+    return evaluate(`(${fn})([...document.querySelectorAll(${JSON.stringify(sel)})])`);
+  },
+  async evaluate(fn, arg) {
+    return evaluate(`(${fn})(${arg === undefined ? '' : JSON.stringify(arg)})`);
+  },
+  async fill(sel, text) { ab('fill', sel, text); },
+  async click(sel) { ab('click', sel); },
+  async waitForSelector(sel) { ab('wait', sel); },
+  async waitForFunction(fn) { ab('wait', '--fn', `(${fn})()`); },
+  async waitForTimeout(ms) { await new Promise(r => setTimeout(r, ms)); },
+  keyboard: {
+    async press(key) { ab('press', key); },
+    async type(text) { ab('keyboard', 'type', text); },
+  },
+};
+
 async function openPalette(page) {
-  // Trigger via keyboard shortcut (Playwright sends to the page directly, bypassing Chrome UI)
   await page.keyboard.press('Control+Shift+K');
   // Give the palette time to appear
   await page.waitForSelector('#sfnav-overlay', { timeout: 2000 }).catch(() => null);
 }
 
 (async () => {
-  console.log(`\n${BOLD}Salesforce Setup Navigator — Playwright Tests${RESET}\n`);
+  console.log(`\n${BOLD}Salesforce Setup Navigator — palette tests${RESET}\n`);
 
-  const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage();
-
-  await page.goto('data:text/html,<html><body><h1>Mock Salesforce</h1></body></html>');
-  await injectExtension(page);
+  // A fresh browser per run, so no state leaks in from a previous one.
+  closeBrowser();
+  const res = spawnSync('agent-browser', ['--session', SESSION, 'open', PAGE_URL], { encoding: 'utf8' });
+  if (res.status !== 0) throw new Error(`agent-browser open: ${(res.stderr || res.stdout).trim()}`);
 
   // Override URL helpers so assertions have predictable values
   await page.evaluate(() => {
@@ -293,7 +265,7 @@ async function openPalette(page) {
   // ── Test 9: @load via REST API mock ─────────────────────────────────────
   console.log('\n@load via REST API');
 
-  // Playwright unwraps Promises returned from page.evaluate, so we can await loadObjectsFromPage directly
+  // eval awaits the Promise loadObjectsFromPage returns
   const loadCount = await page.evaluate(() => loadObjectsFromPage());
 
   await assert(
@@ -506,7 +478,7 @@ async function openPalette(page) {
   );
 
   // ── Summary ──────────────────────────────────────────────────────────────
-  await browser.close();
+  closeBrowser();
   console.log(`\n${BOLD}Results: ${GREEN}${passed} passed${RESET}${BOLD}, ${failed > 0 ? RED : ''}${failed} failed${RESET}\n`);
   process.exit(failed > 0 ? 1 : 0);
 })();

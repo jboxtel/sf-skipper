@@ -13,7 +13,7 @@ ANTHROPIC_API_KEY=sk-ant-... npm run eval:soql
 ANTHROPIC_API_KEY=sk-ant-... node test/soql-eval.js airline-claims-uat all-legal-cases
 ```
 
-The harness loads `soql.js` + its dependencies into a Playwright page, stubs the
+The harness loads `soql.js` + its dependencies into a `node:vm` context, stubs the
 Salesforce REST endpoints with fixture data, and routes `callClaude` through a
 real Anthropic call so the model has to actually ground against the fixture.
 
@@ -116,7 +116,7 @@ ANTHROPIC_API_KEY=sk-ant-... npm run eval:flow-debug
 ANTHROPIC_API_KEY=sk-ant-... node test/flow-debug-eval.js decision-equality-too-narrow
 ```
 
-The harness loads `flow-debug.js` + its dependencies into a Playwright page,
+The harness loads `flow-debug.js` + its dependencies into a `node:vm` context,
 stubs the Tooling API + describe endpoints with fixture data, and routes
 `callClaude` through a real Anthropic call so the model has to ground against
 the fixture's metadata and picklist values.
