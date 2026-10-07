@@ -6,14 +6,14 @@
 // the storage/observation/extraction loop that runs without an Anthropic key.
 //
 // Pattern mirrors flow-debug-validator-test.js: load the scripts into a
-// Playwright page, stub chrome.storage with in-memory state, call the
+// node:vm context, stub chrome.storage with in-memory state, call the
 // functions directly with hand-crafted inputs.
 //
 // Run:
 //   npm run test:org-glossary
 //   node test/org-glossary-test.js
 
-const { chromium } = require('playwright');
+const { newPage } = require('./vm-page');
 const path = require('path');
 
 const ROOT = path.resolve(__dirname, '..');
@@ -301,8 +301,8 @@ const CASES = [
         { fields: [{ name: 'StageName', label: 'Stage' }] },
         []
       );
-      // "stage" matches the field surface (StageName/Stage); we now record it
-      // as a weak observation rather than dropping. "opportunity" is a
+      // "stage" matches the field surface (StageName/Stage), so it's recorded
+      // as a weak observation rather than dropped. "opportunity" is a
       // generic noun and stays filtered. So exactly one weak candidate.
       const stage = candidates.find(c => c.term === 'stage');
       return {
@@ -411,9 +411,7 @@ const CASES = [
 ];
 
 (async () => {
-  const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage();
-  await page.goto('data:text/html,<html><body></body></html>');
+  const page = newPage();
 
   // Stub chrome.storage with in-memory state. Each test gets a fresh storage
   // by clearing the in-memory map and resetting the glossary cache.
@@ -483,7 +481,6 @@ const CASES = [
     }
   }
 
-  await browser.close();
   console.log(`\n${BOLD}${passed} passed, ${failed} failed${RESET} (out of ${CASES.length})\n`);
   process.exit(failed > 0 ? 1 : 0);
 })();

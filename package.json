@@ -4,17 +4,13 @@
   "description": "Command palette for instant Salesforce Setup navigation",
   "private": true,
   "scripts": {
-    "test": "node test/test.js",
+    "test": "npm run -s test:flow-debug-validator && npm run -s test:org-glossary && npm run -s test:soql-semantic && npm run -s test:soql-grounding",
     "e2e": "node test/e2e.js",
-    "debug": "node test/debug.js",
     "eval:soql": "node test/soql-eval.js",
     "eval:flow-debug": "node test/flow-debug-eval.js",
     "test:flow-debug-validator": "node test/flow-debug-validator-test.js",
     "test:org-glossary": "node test/org-glossary-test.js",
     "test:soql-semantic": "node test/soql-semantic-test.js",
     "test:soql-grounding": "node test/soql-grounding-test.js"
-  },
-  "devDependencies": {
-    "playwright": "^1.59.1"
   }
 }

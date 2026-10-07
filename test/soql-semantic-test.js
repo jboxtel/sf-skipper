@@ -11,7 +11,7 @@
 //   npm run test:soql-semantic
 //   node test/soql-semantic-test.js
 
-const { chromium } = require('playwright');
+const { newPage } = require('./vm-page');
 const path = require('path');
 
 const ROOT = path.resolve(__dirname, '..');
@@ -164,9 +164,7 @@ const CASES = [
 ];
 
 (async () => {
-  const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage();
-  await page.goto('data:text/html,<html><body></body></html>');
+  const page = newPage();
 
   // soql.js references chrome.storage / chrome.runtime at load time via the
   // glossary observer wiring; stub them so the file parses cleanly.
@@ -225,7 +223,6 @@ const CASES = [
     }
   }
 
-  await browser.close();
   console.log(`\n${BOLD}${passed} passed, ${failed} failed${RESET} (out of ${CASES.length})\n`);
   process.exit(failed > 0 ? 1 : 0);
 })();

@@ -45,7 +45,8 @@
 
 #sfnav-palette {
   width: 640px;
-  max-height: 540px;
+  /* Leave room under the overlay's 12vh top padding, so short windows keep the footer. */
+  max-height: min(540px, 88vh - 24px);
   background: var(--sf-surface);
   border: 1px solid var(--sf-rule);
   border-radius: var(--sf-radius-lg);

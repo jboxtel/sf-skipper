@@ -263,7 +263,7 @@ chrome.runtime.onMessage.addListener(function (req, sender, sendResponse) {
     const resolveTab = req.tabId
       ? new Promise((resolve) => chrome.tabs.get(req.tabId, (t) => resolve(chrome.runtime.lastError ? null : t)))
       : Promise.resolve(null);
-    resolveTab.then((tab) => openPaletteInTab(tab)).then(
+    resolveTab.then((tab) => openPaletteInTab(tab, { toggle: false })).then(
       (status) => sendResponse({ ok: true, status }),
       (err) => sendResponse({ ok: false, error: err && err.message })
     );
@@ -275,7 +275,8 @@ chrome.runtime.onMessage.addListener(function (req, sender, sendResponse) {
 
 const SF_HOST_RE = /^https:\/\/[^/]+\.(lightning\.force\.com|salesforce\.com|salesforce-setup\.com|force\.com)\//;
 
-async function openPaletteInTab(tab) {
+// The shortcut toggles the palette; the popup and Options only ever open it.
+async function openPaletteInTab(tab, { toggle = true } = {}) {
   if (!tab) {
     const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
     tab = tabs[0];
@@ -287,28 +288,26 @@ async function openPaletteInTab(tab) {
     const [{ result }] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       world: 'ISOLATED',
-      func: () => {
-        if (typeof window.__sfnavToggle === 'function') {
-          window.__sfnavToggle();
-          return 'ok';
-        }
-        return 'not_loaded';
+      func: (toggle) => {
+        const fn = toggle ? window.__sfnavToggle : window.__sfnavShow;
+        if (typeof fn !== 'function') return 'not_loaded';
+        fn();
+        return 'ok';
       },
+      args: [toggle],
     });
 
     if (result === 'ok') return 'toggled';
 
-    await chrome.scripting.insertCSS({ target: { tabId: tab.id }, files: ['content.css'] });
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      world: 'ISOLATED',
-      files: ['salesforce-urls.js', 'shared.js', 'cache-factory.js', 'objects.js', 'cmdt.js', 'flows.js', 'apps.js', 'labels.js', 'permsets.js', 'users.js', 'flow-debug.js', 'commands.js', 'org-glossary.js', 'org-glossary-extractors.js', 'soql.js', 'ask.js', 'feedback.js', 'markdown.js', 'onboarding.js', 'content.js'],
-    });
+    // Same files as a normal page load, read from the manifest so the lists can't drift.
+    const cs = chrome.runtime.getManifest().content_scripts[0];
+    await chrome.scripting.insertCSS({ target: { tabId: tab.id }, files: cs.css });
+    await chrome.scripting.executeScript({ target: { tabId: tab.id }, world: 'ISOLATED', files: cs.js });
     await new Promise(r => setTimeout(r, 80));
     await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       world: 'ISOLATED',
-      func: () => { if (typeof window.__sfnavToggle === 'function') window.__sfnavToggle(); },
+      func: () => { if (typeof window.__sfnavShow === 'function') window.__sfnavShow(); },
     });
     return 'injected';
   } catch (err) {

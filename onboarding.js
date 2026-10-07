@@ -6,19 +6,12 @@
   var STORAGE_KEY = 'sfnavOptions';
 
   var state = { walkthroughSeen: false };
-  var _loaded = false;
   var _tourActive = false;
   var _tourStep = 1;
   var _shownThisSession = false;
   var _helpOpen = false;
   var _resizeListener = null;
   var _keyListener = null;
-
-  chrome.storage.local.get(STORAGE_KEY, function (data) {
-    var opts = (data && data[STORAGE_KEY]) || {};
-    state.walkthroughSeen = !!(opts.walkthroughSeen || opts.onboardingDone);
-    _loaded = true;
-  });
 
   function persist(patch) {
     chrome.storage.local.get(STORAGE_KEY, function (data) {
@@ -521,11 +514,11 @@
         if (brand) brand.classList.add('sfnav-brand-clickable');
       }
     }
-    if (_loaded) { go(); return; }
+    // Read storage on every open: Options' "Show walkthrough" resets the flag
+    // after this tab loaded.
     chrome.storage.local.get(STORAGE_KEY, function (data) {
       var opts = (data && data[STORAGE_KEY]) || {};
       state.walkthroughSeen = !!(opts.walkthroughSeen || opts.onboardingDone);
-      _loaded = true;
       go();
     });
   }
@@ -535,7 +528,6 @@
     closeHelp();
     hideCard();
     _shownThisSession = false;
-    _loaded = false;
   }
 
   window.sfnavInitOnboarding = init;
