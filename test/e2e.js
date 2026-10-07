@@ -529,6 +529,36 @@ function signedOutTests() {
   });
   openUrl(process.env.SF_URL);
 
+  section('@ask screenshot');
+
+  const setAskShot = value => {
+    newTab('ext', extPage('options.html'));
+    ab('select', '#askShot', value);
+    backToLoginTab();
+  };
+  const shotToggle = "document.getElementById('sfnav-ask-shot-toggle')?.getAttribute('aria-pressed')";
+  const openAsk = () => { openPalette(); enter('@ask'); return waitFor(`${shotToggle} !== undefined`); };
+
+  step('by default @ask captures a screenshot', () => {
+    openAsk();
+    return evaluate(shotToggle) === 'true';
+  });
+  closePalette();
+
+  step('"Off by default" in Options turns the toggle off', () => {
+    setAskShot('off');
+    openAsk();
+    return waitFor(`${shotToggle} === 'false'`);
+  });
+  closePalette();
+
+  step('"On by default" turns it back on', () => {
+    setAskShot('on');
+    openAsk();
+    return waitFor(`${shotToggle} === 'true'`);
+  });
+  closePalette();
+
   section('Extension pages');
 
   step('Options shows the manifest version', () => {
@@ -593,7 +623,6 @@ function signedOutTests() {
 
   function showWalkthroughFromOptions() {
     newTab('ext', extPage('options.html'));
-    ab('click', '.ni[data-pane="walkthrough"]');
     ab('click', '#replayWalkthrough');
     ab('tab', loginTab);
     return waitFor(`${PALETTE_VISIBLE} && ${TOUR_VISIBLE}`);
