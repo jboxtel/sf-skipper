@@ -1,6 +1,6 @@
 node_modules/
-.playwright-profile/
-.sf-credentials
+.e2e-browser-profile/
+.env.local
 .DS_Store
 *.log
 .vscode/
@@ -8,6 +8,7 @@ node_modules/
 *.md
 !README.md
 !PRIVACY.md
+!AGENTS.md
 skipper.zip
 docs/
 scripts/

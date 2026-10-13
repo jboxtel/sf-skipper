@@ -3,14 +3,14 @@
 // The structural validator is hard to test against the real model without
 // burning API calls, and a misfiring validator (false positive) silently
 // burns retries in production. This harness loads flow-debug.js into a
-// Playwright page and calls validateFlowFix directly with hand-crafted
+// node:vm context and calls validateFlowFix directly with hand-crafted
 // fix payloads — fast and free.
 //
 // Run:
 //   npm run test:flow-debug-validator
 //   node test/flow-debug-validator-test.js
 
-const { chromium } = require('playwright');
+const { newPage } = require('./vm-page');
 const path = require('path');
 
 const ROOT = path.resolve(__dirname, '..');
@@ -151,9 +151,7 @@ const CASES = [
 ];
 
 (async () => {
-  const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage();
-  await page.goto('data:text/html,<html><body></body></html>');
+  const page = newPage();
 
   // Load just enough to expose validateFlowFix. flow-debug uses fetchDescribe
   // from soql.js — not needed for the validator itself, but the script parses
@@ -210,7 +208,6 @@ const CASES = [
     }
   }
 
-  await browser.close();
   console.log(`\n${BOLD}${passed} passed, ${failed} failed${RESET} (out of ${CASES.length})\n`);
   process.exit(failed > 0 ? 1 : 0);
 })();
