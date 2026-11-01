@@ -4,7 +4,8 @@
   "description": "Command palette for instant Salesforce Setup navigation",
   "private": true,
   "scripts": {
-    "test": "node test/test.js",
+    "test": "node test/test.js && node test/api-hosts-test.js",
+    "test:api-hosts": "node test/api-hosts-test.js",
     "e2e": "node test/e2e.js",
     "debug": "node test/debug.js",
     "eval:soql": "node test/soql-eval.js",

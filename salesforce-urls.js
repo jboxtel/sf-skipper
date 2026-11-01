@@ -10,6 +10,11 @@ function getApiBase() {
   if (/\.lightning\.force\.com$/.test(h)) {
     return 'https://' + h.replace(/\.lightning\.force\.com$/, '.my.salesforce.com');
   }
+  // The new Setup domain (<org>.my.salesforce-setup.com, sandboxes
+  // <org>--<sb>.sandbox.my.salesforce-setup.com) doesn't serve the REST API.
+  if (/\.salesforce-setup\.com$/.test(h)) {
+    return 'https://' + h.replace(/\.salesforce-setup\.com$/, '.salesforce.com');
+  }
   // Already on a my.salesforce.com (or sandbox variant) — use as-is
   return window.location.origin;
 }
