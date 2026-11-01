@@ -2650,6 +2650,10 @@
     if (!entry) return;
     var hintEl = document.getElementById('sfnav-hint');
     if (hintEl) hintEl.textContent = 'Refreshing ' + entry.label + '…';
+    // Clicking the refresh row blurs the input; the palette stays open, so
+    // hand focus back or the arrow keys and Enter stop working.
+    var input = document.getElementById('sfnav-input');
+    if (input) input.focus();
     entry.load().catch(function (err) {
       console.warn('sfnav: ' + entry.label + ' refresh failed —', err);
       if (hintEl) hintEl.textContent = 'Failed to refresh ' + entry.label + ': ' + (err && err.message ? err.message : 'unknown error');
