@@ -329,7 +329,7 @@ function resolveFlowPicker(filter) {
     hint: getFlowsState() === 'error'
       ? 'Failed to load flows: ' + getFlowsError()
       : allFlows.length === 0
-        ? 'Loading flows…'
+        ? (getFlowsState() === 'ready' ? 'No flows in this org' : 'Loading flows…')
         : filter
           ? (count === 0 ? 'No flows match — refresh to reload from the org' : `${count} matching flow${count === 1 ? '' : 's'}`)
           : `${allFlows.length} flow${allFlows.length === 1 ? '' : 's'} — type to filter`,
@@ -353,7 +353,7 @@ function resolveAppPicker(filter) {
     hint: getAppsState() === 'error'
       ? 'Failed to load apps: ' + getAppsError()
       : allApps.length === 0
-        ? 'Loading apps…'
+        ? (getAppsState() === 'ready' ? 'No apps in this org' : 'Loading apps…')
         : filter
           ? (count === 0 ? 'No apps match — refresh to reload from the org' : count + ' matching app' + (count === 1 ? '' : 's'))
           : allApps.length + ' app' + (allApps.length === 1 ? '' : 's') + ' — type to filter',
@@ -434,7 +434,7 @@ function resolveLabelPicker(filter) {
     hint: getLabelsState() === 'error'
       ? 'Failed to load custom labels: ' + getLabelsError()
       : all.length === 0
-        ? 'Loading custom labels…'
+        ? (getLabelsState() === 'ready' ? 'No custom labels in this org' : 'Loading custom labels…')
         : filter
           ? (count === 0 ? 'No custom labels match — refresh to reload from the org' : count + ' matching custom label' + (count === 1 ? '' : 's'))
           : all.length + ' custom label' + (all.length === 1 ? '' : 's') + ' — type to filter',
@@ -458,7 +458,7 @@ function resolvePermsetPicker(filter) {
     hint: getPermsetsState() === 'error'
       ? 'Failed to load permission sets: ' + getPermsetsError()
       : all.length === 0
-        ? 'Loading permission sets…'
+        ? (getPermsetsState() === 'ready' ? 'No permission sets in this org' : 'Loading permission sets…')
         : filter
           ? (count === 0 ? 'No permission sets match — refresh to reload from the org' : count + ' matching permission set' + (count === 1 ? '' : 's'))
           : all.length + ' permission set' + (all.length === 1 ? '' : 's') + ' — type to filter',
@@ -482,7 +482,7 @@ function resolveUserPicker(filter) {
     hint: getUsersState() === 'error'
       ? 'Failed to load users: ' + getUsersError()
       : all.length === 0
-        ? 'Loading users…'
+        ? (getUsersState() === 'ready' ? 'No users in this org' : 'Loading users…')
         : filter
           ? (count === 0 ? 'No users match — refresh to reload from the org' : count + ' matching user' + (count === 1 ? '' : 's'))
           : all.length + ' user' + (all.length === 1 ? '' : 's') + ' — type to filter',
