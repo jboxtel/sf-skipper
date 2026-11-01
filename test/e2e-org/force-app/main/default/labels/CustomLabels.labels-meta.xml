@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomLabels xmlns="http://soap.sforce.com/2006/04/metadata">
+    <labels>
+        <fullName>Skipper_E2E_Label</fullName>
+        <categories>skipper-e2e</categories>
+        <language>en_US</language>
+        <protected>false</protected>
+        <shortDescription>Skipper E2E Label</shortDescription>
+        <value>Fixture for Skipper's end-to-end tests. Safe to delete.</value>
+    </labels>
+</CustomLabels>

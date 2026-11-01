@@ -3,6 +3,7 @@
 // auto-login from .sf-credentials, and exposes small DOM helpers.
 
 const { chromium } = require('playwright');
+const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
@@ -18,6 +19,66 @@ function loadCreds() {
     if (m) out[m[1]] = m[2];
   }
   return out;
+}
+
+// No password needed when the Salesforce CLI is already logged in: ask it for
+// a one-time frontdoor link. Uses SF_ORG (alias or username) from
+// .sf-credentials / the environment, else the CLI's default org.
+// Returns { frontdoorUrl, setupUrl } or null if the CLI can't help.
+function cliLogin(path = '/lightning/setup/SetupOneHome/home') {
+  const org = process.env.SF_ORG || loadCreds().SF_ORG;
+  const args = ['org', 'open', '--url-only', '--json', '--path', path];
+  if (org) args.push('--target-org', org);
+  try {
+    const out = JSON.parse(execFileSync('sf', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }));
+    const frontdoorUrl = out.result && out.result.url;
+    if (!frontdoorUrl) return null;
+    const host = new URL(frontdoorUrl).hostname.replace(/\.my\.salesforce\.com$/, '.lightning.force.com');
+    return { frontdoorUrl, setupUrl: `https://${host}${path}`, org: out.result.username || org };
+  } catch {
+    return null;
+  }
+}
+
+// ─── Test org fixtures (test/e2e-org) ─────────────────────────────────────
+// A known flow and custom label, deployed with the CLI before the run, so the
+// tests check real data instead of whatever happens to be in the org.
+
+const FIXTURE_DIR = path.join(EXT, 'test', 'e2e-org');
+const FIXTURE_FLOW = 'Skipper_E2E_Flow';
+
+function sf(args, opts = {}) {
+  const out = execFileSync('sf', [...args, '--json'], {
+    encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], cwd: opts.cwd || FIXTURE_DIR,
+  });
+  return JSON.parse(out).result;
+}
+
+function deployFixtures(org, dir = FIXTURE_DIR) {
+  sf(['project', 'deploy', 'start', '--target-org', org, '--wait', '10'], { cwd: dir });
+}
+
+function activeFlowVersion(org) {
+  const r = sf(['data', 'query', '--target-org', org, '--query',
+    `SELECT ActiveVersionId FROM FlowDefinitionView WHERE ApiName = '${FIXTURE_FLOW}'`]);
+  return r.records[0] && r.records[0].ActiveVersionId;
+}
+
+// Deploy a changed copy of the fixture flow, which activates a new version.
+// Drops old inactive versions first (Salesforce caps a flow at 50).
+function bumpFixtureFlow(org) {
+  const old = sf(['data', 'query', '--use-tooling-api', '--target-org', org, '--query',
+    `SELECT Id FROM Flow WHERE Definition.DeveloperName = '${FIXTURE_FLOW}' AND Status != 'Active' ORDER BY VersionNumber`]);
+  for (const rec of old.records) {
+    try { sf(['data', 'delete', 'record', '--use-tooling-api', '--target-org', org, '--sobject', 'Flow', '--record-id', rec.Id]); } catch {}
+  }
+  const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'skipper-e2e-'));
+  fs.cpSync(FIXTURE_DIR, tmp, { recursive: true, filter: src => !/[\\/]\.sfd?x?$/.test(src) });
+  const file = path.join(tmp, 'force-app/main/default/flows', FIXTURE_FLOW + '.flow-meta.xml');
+  const xml = fs.readFileSync(file, 'utf8')
+    .replace('Safe to delete.</description>', `Safe to delete. Run ${Date.now()}.</description>`);
+  fs.writeFileSync(file, xml);
+  try { deployFixtures(org, tmp); } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 }
 
 // Stale Singleton* lockfiles in the persistent profile cause launch failures
@@ -95,12 +156,25 @@ async function openPalette(page) {
   const visible = await page.locator('#sfnav-overlay').isVisible().catch(() => false);
   if (visible) return true;
   await page.keyboard.press('Meta+Shift+KeyK');
-  const ok = await page.waitForSelector('#sfnav-overlay', { state: 'visible', timeout: 4_000 })
+  let ok = await page.waitForSelector('#sfnav-overlay', { state: 'visible', timeout: 4_000 })
     .then(() => true).catch(() => false);
-  if (ok) return true;
-  await page.keyboard.press('Control+Shift+KeyK');
-  return page.waitForSelector('#sfnav-overlay', { state: 'visible', timeout: 3_000 })
-    .then(() => true).catch(() => false);
+  if (!ok) {
+    await page.keyboard.press('Control+Shift+KeyK');
+    ok = await page.waitForSelector('#sfnav-overlay', { state: 'visible', timeout: 3_000 })
+      .then(() => true).catch(() => false);
+  }
+  if (ok) await skipWalkthrough(page);
+  return ok;
+}
+
+// A fresh profile gets the first-run walkthrough on first open, which makes
+// the input read-only. Esc skips it and leaves the palette open.
+async function skipWalkthrough(page) {
+  await page.waitForTimeout(300);
+  const touring = await page.locator('#sfnav-coachmark').isVisible().catch(() => false);
+  if (!touring) return;
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('#sfnav-coachmark', { state: 'hidden', timeout: 2_000 }).catch(() => {});
 }
 
 async function closePalette(page) {
@@ -151,6 +225,10 @@ module.exports = {
   EXT,
   PROFILE,
   loadCreds,
+  cliLogin,
+  deployFixtures,
+  activeFlowVersion,
+  bumpFixtureFlow,
   cleanProfileLocks,
   launchContext,
   attachLogging,

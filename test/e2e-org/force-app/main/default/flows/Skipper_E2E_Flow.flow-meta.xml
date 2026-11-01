@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Flow xmlns="http://soap.sforce.com/2006/04/metadata">
+    <apiVersion>62.0</apiVersion>
+    <assignments>
+        <name>Set_Greeting</name>
+        <label>Set Greeting</label>
+        <locationX>176</locationX>
+        <locationY>134</locationY>
+        <assignmentItems>
+            <assignToReference>greeting</assignToReference>
+            <operator>Assign</operator>
+            <value>
+                <stringValue>hello from Skipper e2e</stringValue>
+            </value>
+        </assignmentItems>
+    </assignments>
+    <description>Fixture for Skipper's end-to-end tests (test/e2e.js). Safe to delete.</description>
+    <interviewLabel>Skipper E2E Flow {!$Flow.CurrentDateTime}</interviewLabel>
+    <label>Skipper E2E Flow</label>
+    <processType>AutoLaunchedFlow</processType>
+    <start>
+        <locationX>50</locationX>
+        <locationY>0</locationY>
+        <connector>
+            <targetReference>Set_Greeting</targetReference>
+        </connector>
+    </start>
+    <status>Active</status>
+    <variables>
+        <name>greeting</name>
+        <dataType>String</dataType>
+        <isCollection>false</isCollection>
+        <isInput>false</isInput>
+        <isOutput>false</isOutput>
+    </variables>
+</Flow>

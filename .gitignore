@@ -14,3 +14,12 @@ scripts/
 presentation/
 evals/
 .env
+
+# Local Salesforce CLI config (default org)
+/.sf/
+/.sfdx/
+/sfdx-project.json
+
+# sf CLI state from deploying the e2e fixtures
+test/e2e-org/.sf/
+test/e2e-org/.sfdx/
