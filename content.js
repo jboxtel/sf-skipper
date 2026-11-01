@@ -13,6 +13,8 @@
 
   var paletteVisible = false;
   var selectedIndex = -1;
+  var flowOpenToken = 0;   // bumped on close so a pending flow open is dropped
+  var flowOpening = false;
   var currentResults = [];
   var searchMode = 'root'; // 'root' | 'object-picker' | 'object-scoped' | 'flow-picker' | 'app-picker' | 'soql' | 'flow-debug' | 'cmd-picker' | 'cmd-scoped' | 'permset-picker' | 'user-picker' | 'feedback'
   var scopedObject = null;
@@ -2421,6 +2423,7 @@
     if (typeof sfnavHideOnboarding === 'function') sfnavHideOnboarding();
     paletteVisible = false;
     selectedIndex = -1;
+    flowOpenToken++;
     searchMode = 'root';
     scopedObject = null;
     scopedCmdt = null;
@@ -2496,12 +2499,29 @@
         '<span class="sfnav-sublabel">'+ esc(result.sublabel || '')    + '</span>' +
         '<span class="sfnav-shortcut">' + shortcutLabel + '</span>';
       li.addEventListener('click', function () { navigateTo(result.url, result); });
+      if (result.type === 'flow' && result.flow) {
+        li.addEventListener('mouseenter', function () { scheduleFlowPrefetch(result); });
+      }
+      li._sfnavResult = result;
       listEl.appendChild(li);
       selectableIndex++;
     });
 
     var first = listEl.querySelector('.sfnav-item');
     if (first) first.scrollIntoView({ block: 'nearest' });
+    scheduleFlowPrefetch(currentResults[selectedIndex]);
+  }
+
+  // Start the flow version lookup for the highlighted row, so it's usually
+  // done before Enter. Debounced so typing or holding an arrow key doesn't
+  // fire a query per row.
+  var flowPrefetchTimer = null;
+  function scheduleFlowPrefetch(result) {
+    clearTimeout(flowPrefetchTimer);
+    if (!result || result.type !== 'flow' || !result.flow || typeof prefetchFlowVersion !== 'function') return;
+    flowPrefetchTimer = setTimeout(function () {
+      prefetchFlowVersion(result.flow).catch(function () {});
+    }, 150);
   }
 
   function setSelection(index) {
@@ -2510,6 +2530,7 @@
     selectedIndex = Math.max(0, Math.min(index, items.length - 1));
     items.forEach(function (el, i) { el.classList.toggle('selected', i === selectedIndex); });
     items[selectedIndex] && items[selectedIndex].scrollIntoView({ block: 'nearest' });
+    scheduleFlowPrefetch(items[selectedIndex] && items[selectedIndex]._sfnavResult);
   }
 
   function moveSelection(delta) {
@@ -2584,19 +2605,32 @@
   }
 
   // The cached flow version id can be stale (see resolveFlowVersionId), so we
-  // re-resolve the current active/latest version at open time. Falls back to
-  // the cached URL if resolution fails.
+  // re-resolve the current active/latest version at open time. While that runs
+  // the row itself shows it's working; closing the palette cancels the open.
   function openFlow(result) {
+    if (flowOpening) return;
+    flowOpening = true;
+    var token = ++flowOpenToken;
+
+    var row = null;
+    document.querySelectorAll('.sfnav-item').forEach(function (el) {
+      if (el._sfnavResult === result) row = el;
+    });
+    if (row) {
+      row.classList.add('sfnav-item-opening');
+      var sub = row.querySelector('.sfnav-sublabel');
+      if (sub) sub.textContent = 'Checking for the latest version';
+      var key = row.querySelector('.sfnav-shortcut');
+      if (key) key.innerHTML = '<span class="sfnav-spinner" aria-hidden="true"></span>';
+    }
     var hintEl = document.getElementById('sfnav-hint');
-    if (hintEl) hintEl.textContent = 'Opening latest version…';
-    resolveFlowVersionId(result.flow)
-      .then(function (versionId) {
-        openUrl(getOrgBase() + '/builder_platform_interaction/flowBuilder.app?flowId=' + (versionId || result.flow.id));
-      })
-      .catch(function (err) {
-        console.warn('sfnav: flow open failed —', err);
-        openUrl(result.url);
-      });
+    if (hintEl) hintEl.textContent = 'Opening ' + result.flow.label + ' in Flow Builder…';
+
+    resolveFlowVersionId(result.flow).then(function (versionId) {
+      flowOpening = false;
+      if (token !== flowOpenToken) return; // palette closed while waiting
+      openUrl(getOrgBase() + '/builder_platform_interaction/flowBuilder.app?flowId=' + (versionId || result.flow.id));
+    });
   }
 
   var PICKER_REFRESH = {

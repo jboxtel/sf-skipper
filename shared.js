@@ -78,7 +78,9 @@ function escapeSoqlLiteral(s) {
 }
 
 var _basePathCache = null; // { basePath, ts }
-var BASEPATH_TTL_MS = 60 * 60 * 1000; // 1 hour
+// Salesforce adds an API version only three times a year, so a day-old value is fine.
+var BASEPATH_TTL_MS = 24 * 60 * 60 * 1000;
+var VALID_BASEPATH_RE = /^\/services\/data\/v\d+\.\d+$/;
 
 function getSessionFromBackground(sfHost) {
   return new Promise(function (resolve) {
@@ -95,11 +97,30 @@ function getSessionFromBackground(sfHost) {
   });
 }
 
+// The basePath is also persisted per org, so a fresh page load doesn't pay for
+// the version probe before its first REST call.
+function readStoredBasePath(key) {
+  return new Promise(function (resolve) {
+    if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) { resolve(null); return; }
+    try {
+      chrome.storage.local.get(key, function (data) {
+        if (chrome.runtime.lastError) { resolve(null); return; }
+        resolve((data && data[key]) || null);
+      });
+    } catch (_) { resolve(null); }
+  });
+}
+
 // Resolve and cache the Salesforce REST API base path (e.g. "/services/data/v60.0").
-// Salesforce adds a new version every release, so the result is stable for the session.
 async function getApiBasePath(apiBase, headers) {
   if (_basePathCache && (Date.now() - _basePathCache.ts) < BASEPATH_TTL_MS) {
     return _basePathCache.basePath;
+  }
+  var storageKey = getOrgCacheKey('sfnavApiBasePath');
+  var stored = await readStoredBasePath(storageKey);
+  if (stored && VALID_BASEPATH_RE.test(stored.basePath || '') && (Date.now() - stored.ts) < BASEPATH_TTL_MS) {
+    _basePathCache = stored;
+    return stored.basePath;
   }
   var resp = await sfFetch(apiBase + '/services/data/', { headers: headers });
   if (!resp.ok) throw new Error('Version probe failed: ' + resp.status);
@@ -109,6 +130,11 @@ async function getApiBasePath(apiBase, headers) {
     ? latest.url.replace(/\/$/, '')
     : '/services/data/v' + (latest && latest.version);
   _basePathCache = { basePath: basePath, ts: Date.now() };
+  if (VALID_BASEPATH_RE.test(basePath) && typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+    var payload = {};
+    payload[storageKey] = _basePathCache;
+    try { chrome.storage.local.set(payload); } catch (_) {}
+  }
   return basePath;
 }
 

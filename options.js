@@ -925,7 +925,8 @@ var ORG_DATA_BASES = [
   'sfnavAskHistory', 'sfnavExportHistory',              // history
   'sfnavOrgGlossary',                                   // learned org terms
   'sfnavCustomObjects', 'sfnavApps', 'sfnavFlows',      // cached metadata (cache-factory
-  'sfnavLabels', 'sfnavPermsets', 'sfnavUsers'          // also writes <base>LoadedAt)
+  'sfnavLabels', 'sfnavPermsets', 'sfnavUsers',         // also writes <base>LoadedAt)
+  'sfnavApiBasePath'
 ];
 
 var dataSummaryEl = document.getElementById('dataSummary');

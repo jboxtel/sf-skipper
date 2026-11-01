@@ -218,6 +218,58 @@
   opacity: 1;
 }
 
+/* Flow row while its latest version is looked up before opening */
+.sfnav-item.sfnav-item-opening {
+  position: relative;
+  overflow: hidden;
+  background: var(--sf-selection);
+}
+
+.sfnav-item-opening .sfnav-sublabel {
+  color: var(--sf-ink-soft);
+}
+
+.sfnav-item-opening .sfnav-shortcut {
+  opacity: 1;
+  background: transparent;
+  display: inline-flex;
+  align-items: center;
+}
+
+.sfnav-item-opening::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  width: 30%;
+  background: var(--sf-link);
+  animation: sfnav-opening-bar 1s ease-in-out infinite;
+}
+
+@keyframes sfnav-opening-bar {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(340%); }
+}
+
+.sfnav-spinner {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid var(--sf-rule);
+  border-top-color: var(--sf-ink-soft);
+  animation: sfnav-spin 0.7s linear infinite;
+}
+
+@keyframes sfnav-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sfnav-item-opening::after,
+  .sfnav-spinner { animation-duration: 2.5s; }
+}
+
 /* ─── Section Header ───────────────────────────────── */
 
 .sfnav-section-header {
