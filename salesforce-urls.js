@@ -103,6 +103,7 @@ var SETUP_QUICK_LINKS = SETUP_QUICK_LINKS || [
   { label: "Scheduled Jobs",            url: () => `${getOrgBase()}/lightning/setup/ScheduledJobs/home` },
   { label: "Apex Test Execution",       url: () => `${getOrgBase()}/lightning/setup/ApexTestQueue/home` },
   { label: "Debug Logs",                url: () => `${getOrgBase()}/lightning/setup/ApexDebugLogs/home` },
+  { label: "Debug Mode",                url: () => `${getOrgBase()}/lightning/setup/UserDebugMode/home` },
   { label: "Deploy Status",             url: () => `${getOrgBase()}/lightning/setup/DeployStatus/home` },
   { label: "Email Logs",                url: () => `${getOrgBase()}/lightning/setup/EmailLogFiles/home` },
   { label: "Bulk Data Load Jobs",       url: () => `${getOrgBase()}/lightning/setup/AsyncApiJobStatus/home` },
