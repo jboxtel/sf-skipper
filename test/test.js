@@ -189,6 +189,15 @@ async function openPalette(page) {
     'hint text is empty',
   );
 
+  await assert(
+    'Profiles carries a classic-interface fallback URL',
+    async () => page.evaluate(() => {
+      const r = toQuickLinkResult(SETUP_QUICK_LINKS.find(l => l.label === 'Profiles'));
+      return /\/lightning\/setup\/EnhancedProfiles\/home$/.test(r.url) && /\/lightning\/setup\/Profiles\/home$/.test(r.fallback);
+    }),
+    'Profiles result has no fallback',
+  );
+
   // ── Test 4: @account → object-scoped ────────────────────────────────────
   console.log('\n@account → object-scoped mode');
   await page.fill('#sfnav-input', '@account');

@@ -87,6 +87,55 @@
     window.location.href = url;
   }
 
+  // ─── Setup page fallback ─────────────────────────────────────────────────
+  // Some Setup nodes depend on an org setting: Profiles is EnhancedProfiles or
+  // Profiles depending on the enhanced profile interface. A quick-link can
+  // carry a `fallback` URL. We remember the pair in extension storage before
+  // navigating (extension storage survives the hop from lightning.force.com
+  // to the my.salesforce-setup.com domain, where sessionStorage would not),
+  // and the content script on the landing page swaps to the fallback when
+  // Salesforce shows "Page not found".
+  var SETUP_FALLBACK_TTL = 60 * 1000;
+  var PAGE_NOT_FOUND_TITLE = /page not found|seite nicht gefunden|page introuvable|p[aá]gina n[aã]o encontrada|p[aá]gina no encontrada|pagina niet gevonden/i;
+  var PLACEHOLDER_TITLE = /^(home \| salesforce|lightning experience)$/i;
+
+  function armSetupFallback(url, fallbackUrl) {
+    try {
+      chrome.storage.local.set({ sfnavSetupFallback: { from: url, to: fallbackUrl, until: Date.now() + SETUP_FALLBACK_TTL } });
+    } catch (_) {}
+  }
+
+  // Setup hops between hosts, so a pending fallback is matched on the path.
+  function lightningPathOf(url) {
+    var m = String(url).match(/\/lightning\/[^?#]*/);
+    return m ? m[0].replace(/\/$/, '') : '';
+  }
+
+  function checkSetupFallback() {
+    try {
+      chrome.storage.local.get('sfnavSetupFallback', function (data) {
+        var pending = data && data.sfnavSetupFallback;
+        if (!pending || !pending.to) return;
+        var clear = function () { try { chrome.storage.local.remove('sfnavSetupFallback'); } catch (_) {} };
+        if (!pending.until || pending.until < Date.now()) { clear(); return; }
+        if (lightningPathOf(pending.from) !== lightningPathOf(window.location.href)) return; // some other tab
+        var deadline = Date.now() + 15000;
+        (function poll() {
+          var title = document.title || '';
+          if (PAGE_NOT_FOUND_TITLE.test(title)) {
+            clear();
+            window.location.replace(pending.to);
+            return;
+          }
+          if (title && !PLACEHOLDER_TITLE.test(title)) { clear(); return; } // the page loaded
+          if (Date.now() > deadline) { clear(); return; }
+          setTimeout(poll, 400);
+        }());
+      });
+    } catch (_) {}
+  }
+  checkSetupFallback();
+
   // ─── Mode dispatch tables ────────────────────────────────────────────────
   // The @keyword catalogue lives in commands.js (SHORTCUTS). Use
   // sfnavFindShortcut(input) for keyword → shortcut lookup; enterShortcutMode
@@ -2601,6 +2650,7 @@
       return;
     }
 
+    if (result && result.fallback) armSetupFallback(url, result.fallback);
     openUrl(url);
   }
 

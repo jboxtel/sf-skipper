@@ -11,7 +11,8 @@
 //                npm run test:links -- --all   (print every link, not just failures)
 //                npm run test:links -- --only 'Debug|Roles'   (labels matching a regex)
 //
-// A link FAILS when the page lands on Salesforce's "Page not found", an access
+// A link with a `fallback` URL (Profiles) passes when either URL loads, which
+// mirrors what the extension does. Otherwise a link FAILS when the page lands on Salesforce's "Page not found", an access
 // error, the login screen, or shows nothing at all. Several Agentforce nodes
 // render without ever setting a tab title; those pass only when the page body
 // holds more text than Salesforce's bare "Page not found" shell, which the run
@@ -44,7 +45,7 @@ function loadQuickLinks(origin) {
   const ctx = { window: { location: { origin, hostname: new URL(origin).hostname } } };
   vm.createContext(ctx);
   vm.runInContext(src + '\n;this.__links = SETUP_QUICK_LINKS;', ctx);
-  return ctx.__links.map(l => ({ label: l.label, url: l.url() }));
+  return ctx.__links.map(l => ({ label: l.label, url: l.url(), fallback: l.fallback ? l.fallback() : null }));
 }
 
 // Text length of the Setup shell (header, tree, footer) with no page inside
@@ -137,8 +138,15 @@ async function probe(page, link, shellLen) {
   async function worker(page) {
     while (next < links.length) {
       const i = next++;
-      results[i] = await probe(page, links[i], shellLen);
-      const r = results[i];
+      let r = await probe(page, links[i], shellLen);
+      if (r.status === 'FAIL' && links[i].fallback) {
+        // The extension itself tries this URL when the first one is "Page not found".
+        const alt = await probe(page, { ...links[i], url: links[i].fallback }, shellLen);
+        r = alt.status === 'FAIL'
+          ? { ...r, note: `${r.note}; fallback ${alt.url.replace(origin, '')}: ${alt.note}` }
+          : { ...alt, note: `${alt.note}, via fallback ${alt.url.replace(origin, '')}` };
+      }
+      results[i] = r;
       if (all || r.status === 'FAIL') console.log(`${r.status}  ${r.label}  →  ${r.url.replace(origin, '')}  (${r.note}, ${r.ms || 0}ms)`);
     }
   }

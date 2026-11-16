@@ -37,6 +37,7 @@ function toQuickLinkResult(link) {
     label: link.label,
     sublabel: 'Setup',
     url: link.url(),
+    fallback: link.fallback ? link.fallback() : undefined,
     type: 'setup',
   };
 }
