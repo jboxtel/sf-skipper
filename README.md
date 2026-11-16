@@ -25,6 +25,8 @@ To run skipper in devlopment, clone the repo and open `chrome://extensions`, ena
 
 Skipper knows its running _unpacked_ and will add a `DEV_MODE=true` and set `.sfnav-dev` class so you can style it.
 
+`npm run test:links` opens every Setup quick-link in the org the Salesforce CLI is logged into and reports the ones that no longer load. A GitHub Action runs it every Monday against a Developer Edition org, which is always on the latest release, so a renamed Setup page shows up before users hit it.
+
 ## Screenshots
 
 | | |
